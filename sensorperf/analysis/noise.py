@@ -20,7 +20,9 @@ stations, the tilt sub-series poses and any other A pose)
 over the poses
     Step 9    the noise model sigma_t(Z) = sqrt(sigma_0^2 + (sigma_d Z^2 / k)^2) and the free power law
     Step 10   the tilt sub-series curves (sigma_t, sigma_tot, fill rate against incidence angle)
-    Step 11   the sentinel drift and, if it matters, the time-interpolated bias correction
+    Step 11   the sentinel drift of every mounted target (sentinels are captured on the target mounted at that point
+              of the plan, grouped by target and mount, each relative to its first sentinel after the mount) and,
+              if it matters, the time-interpolated bias correction of A from the T2 sentinels of A's mount
     Step 12   the legacy metrics of testZRepeatabilityBrownBoard.py
     Step 13   the outputs: ``A_noise_summary.csv``, ``A_noise_details.json`` and the figures.
 
@@ -57,7 +59,7 @@ import math
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 import numpy as np
 from scipy import fft as sp_fft
@@ -71,10 +73,10 @@ from sensorperf.features.depth_features import temporal_statistics
 from sensorperf.features.planes import fit_plane_robust, plane_depth_image
 from sensorperf.io.capture_set import PoseStack, load_stack
 from sensorperf.io.manifest import (
-    FrameRecord, SUBSERIES_MAIN, SUBSERIES_TILT, TILT_AXIS_H, TILT_AXIS_V, group_by_pose, select,
+    FIELD_FRACTION_ACHIEVED_KEY, FrameRecord, SUBSERIES_MAIN, SUBSERIES_TILT, TILT_AXIS_H, TILT_AXIS_V, group_by_pose, select,
 )
 from sensorperf.io.session import Session
-from sensorperf.parameters import PROCEDURE_NOISE, PROCEDURE_SENTINEL
+from sensorperf.parameters import PROCEDURE_NOISE, PROCEDURE_SENTINEL, TARGET_NOISE_PLATE
 
 # ---------------------------------------------------------------------------
 # Output names
@@ -88,12 +90,14 @@ FIGURE_STEMS = {
 }
 """Stem (without extension) of each figure; PNG and SVG are written."""
 SUMMARY_COLUMNS = (
-    "station_z_mm", "field", "tilt_axis", "tilt_deg", "subseries", "frames", "sigma_t_median_mm", "sigma_t_p95_mm",
+    "station_z_mm", "field", "field_fraction_achieved", "tilt_axis", "tilt_deg", "subseries", "frames", "sigma_t_median_mm", "sigma_t_p95_mm",
     "sigma_fp_mm", "bias_mm", "bias_corrected_mm", "sigma_tot_mm", "closure_ok", "fill_rate", "corr_len_h_px",
     "corr_len_v_px", "corr_len_fp_h_px", "corr_len_fp_v_px", "depth_quantum_mm", "q_px", "plane_angle_deg",
     "legacy_minmax_mm", "legacy_std_mm", "legacy_std_median_mm", "closure_ratio", "quantum_code_spacing_mm", "note")
 """Columns of A_noise_summary.csv: the Step 13 list, then the extra columns (legacy median, closure ratio, the
-code-spacing cross-check of Step 8 and a free-text note)."""
+code-spacing cross-check of Step 8 and a free-text note). ``field_fraction_achieved`` is the achieved fraction of the
+requested field offset of the pose (1 when the plate fit at the requested position, smaller when the planner pulled
+it inward), taken from the manifest column of that name; NaN when the manifest does not provide it."""
 
 # ---------------------------------------------------------------------------
 # Okabe-Ito colors (colorblind-safe palette) for the figures
@@ -225,6 +229,8 @@ class StationNoise:
     tilt_deg: float
     subseries: str
     frames: int
+    field_fraction_achieved: float = float("nan")
+    """Achieved fraction of the requested field offset (manifest column ``field_fraction_achieved``); NaN if absent."""
     roi_pixels: int = 0
     sigma_t_median_mm: float = float("nan")
     sigma_t_p95_mm: float = float("nan")
@@ -303,6 +309,31 @@ class NoiseModelFit:
 
 
 @dataclass
+class TargetDrift:
+    """Step 11: the drift of one mounted target, from the sentinels captured on it during one mount, relative to the first
+    sentinel after the mount (the reference of that mount)."""
+
+    target_id: str
+    mount: int
+    """Mount number (0-based) in acquisition order; a target mounted again later has a new number."""
+    gap_mm: float | None
+    """Gap of the first sentinel of the mount (the front plane does not depend on it)."""
+    sentinel_poses: int
+    pose_hours: list[float]
+    """Time of each sentinel pose, hours since the first A or sentinel frame."""
+    pose_offset_mm: list[float]
+    """Mean of Z - Z_GT (or of Z, per ``NoiseOptions.sentinel_reference``) of each sentinel pose minus that of the first one."""
+    rate_mm_per_hour: float
+    """Slope of the sentinel line over the mount; NaN with a single sentinel pose."""
+    span_hours: float
+    """Time from the first to the last sentinel pose of the mount."""
+    drift_over_span_mm: float
+    """|rate| x span: the drift of the target between its first and last sentinel of the mount."""
+    used_for_a_correction: bool
+    """True for the T2 sentinels of the mount of series A (the ones the A drift correction uses)."""
+
+
+@dataclass
 class DriftResult:
     """Step 11: the sentinel mean against time (and sensor temperature), the drift rate and the correction."""
 
@@ -322,6 +353,8 @@ class DriftResult:
     correction_applied: bool
     pose_hours: list[float]
     pose_offset_mm: list[float]
+    targets: list[TargetDrift] = field(default_factory=list)
+    """The drift of every mounted target (T2 of A, T2 of B-Z, T3a, T3b, T4, T5 ...), each relative to its own first sentinel."""
     note: str = ""
 
 
@@ -556,13 +589,21 @@ def _parse_time(text: str) -> datetime | None:
         return None
 
 
+def _metadata_float(record: FrameRecord, key: str) -> float:
+    """The manifest metadata value ``key`` of the record as a float; NaN when absent or not a number."""
+    try:
+        return float(record.metadata[key])
+    except (KeyError, ValueError):
+        return float("nan")
+
+
 def analyze_pose(session: Session, stack: PoseStack, options: NoiseOptions) -> tuple[StationNoise, PoseDiagnostics | None]:
     """Steps 1 to 8 and 12 for one pose; returns its row and the diagnostics arrays (None if the ROI is empty)."""
     params = session.params
     record = stack.record()
     row = StationNoise(pose_key=record.pose_key(), station_z_mm=record.station_z_mm, field=record.field,
                        tilt_axis=record.tilt_axis, tilt_deg=record.tilt_deg, subseries=record.subseries,
-                       frames=stack.frame_count)
+                       frames=stack.frame_count, field_fraction_achieved=_metadata_float(record, FIELD_FRACTION_ACHIEVED_KEY))
     camera = stack.camera
     # Steps 1-2: registered geometry, region of interest and ground truth.
     geometry = pose_geometry(session, record, camera)
@@ -963,14 +1004,17 @@ def run_noise(session: Session, out_dir: str | Path, previous: dict | None = Non
                  if all_lsb else
                  "quantum from the phase-resultant method; the code-spacing histogram is the cross-check "
                  "(quantum_code_spacing_mm)")}
-    # Time origin and session span: all A and sentinel frames.
-    stamps = [s for s in (_parse_time(r.timestamp) for r in a_records
-                          + select(session.records, procedure=PROCEDURE_SENTINEL)) if s is not None]
+    # Time origin and span: all A frames and the T2 sentinels of the mount of A (those the A correction uses).
+    epochs = mount_epochs(session.records)
+    a_epochs = a_mount_epochs(session.records, epochs)
+    a_sentinels = [r for r in select(session.records, procedure=PROCEDURE_SENTINEL, target_id=TARGET_NOISE_PLATE)
+                   if epochs[r.pose_key()] in a_epochs]
+    stamps = [s for s in (_parse_time(r.timestamp) for r in a_records + a_sentinels) if s is not None]
     origin_s = min(s.timestamp() for s in stamps) if stamps else 0.0
     session_hours = (max(s.timestamp() for s in stamps) - origin_s) / SECONDS_PER_HOUR if stamps else 0.0
-    drift = analyze_sentinels(session, rows, model, session_hours, options, origin_s) if stamps else None
+    drift = analyze_sentinels(session, rows, model, session_hours, options, origin_s, epochs) if stamps else None
     if drift is None:
-        notes.append("no usable sentinel frames: no drift line, no bias correction")
+        notes.append("no usable T2 sentinel frames in the mount of series A: no drift line, no bias correction")
     curves = tilt_curves(rows)
     return NoiseResult(
         rows=rows, diagnostics=diagnostics, model=model, drift=drift, quantization=quantization, legacy=legacy,
@@ -1151,6 +1195,11 @@ def write_outputs(result: NoiseResult, out_dir: str | Path) -> list[Path]:
             "drift_over_session_mm": drift.drift_over_session_mm, "threshold_mm": drift.threshold_mm,
             "sentinel_station_mm": drift.sentinel_station_mm, "correction_applied": drift.correction_applied,
             "sentinel_pose_hours": drift.pose_hours, "sentinel_pose_offset_mm": drift.pose_offset_mm,
+            "targets": [{"target_id": t.target_id, "mount": t.mount, "gap_mm": t.gap_mm,
+                         "sentinel_poses": t.sentinel_poses, "pose_hours": t.pose_hours,
+                         "pose_offset_from_first_sentinel_mm": t.pose_offset_mm, "rate_mm_per_hour": t.rate_mm_per_hour,
+                         "span_hours": t.span_hours, "drift_over_span_mm": t.drift_over_span_mm,
+                         "used_for_a_correction": t.used_for_a_correction} for t in drift.targets],
             "correction_per_station_mm": {f"{r.station_z_mm:g}/{r.subseries}/{r.field}/{r.tilt_axis}{r.tilt_deg:g}":
                                           r.bias_correction_mm for r in result.rows}, "note": drift.note},
         "legacy": result.legacy,
