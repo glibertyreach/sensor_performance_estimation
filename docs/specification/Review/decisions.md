@@ -276,3 +276,12 @@ on them. The person hopes the data acquisition (technician) document is clearer.
 response pending: compare with the technician procedure's Sections 5 and 6 and propose how the specification should
 define its terms (station, field position, pose list) and point to the plan tool's pose list as the thing the
 technician executes.
+- C06-P1 reviewer response: the technician procedure (docs/procedures, Sections 5 and 6) is the executable form: run
+  the planner, follow poses.csv in `order`, the robot program outline, file names, pose log, mount check, sentinel
+  handling, and what to tell the engineer. The specification's Section 5 states what the series contains and assumes
+  the plan tool. Proposal C06-R6: add a lead paragraph to Part I defining the terms every series uses (station = a
+  commanded target-center Z on the ladder; field position = center or one of four corners at FIELD_OFFSET_FRACTION
+  of the half field; pose = one commanded target position and orientation, turned into a flange pose by the
+  registration; pose list = the plan tool's poses.csv, which the robot program executes in order) and stating the
+  division of labor: the specification says what each series captures and why, the technician procedure says how.
+  Then rephrase the Section 5 imperatives against those terms ("The pose list for A holds every ladder station ...").
