@@ -102,6 +102,8 @@ FORMULA_DPI = 300
 FORMULA_MAX_WIDTH_IN = 6.2
 """Widest picture that fits the page's text column; wider renders are scaled down."""
 FORMULA_DIR_NAME = "formulas"
+TEX_COMMAND_PATTERN = r"\\[A-Za-z]+"
+"""A backslash command marks a picture's alt text as TeX, so the picture is a formula, not a figure."""
 """Sub-directory of archive/ that holds the rendered formula pictures."""
 TEX_TO_MATHTEXT = [
     (r"\qquad", r"\quad\quad"), (r"\big(", "("), (r"\big)", ")"), (r"\Big(", "("), (r"\Big)", ")"),
@@ -222,9 +224,8 @@ def outline():
                     current["text"] += text + "\n"
                 drawings = child.findall(".//" + qn("w:drawing"))
                 # A typeset formula is a picture whose alt text is its TeX; it is not a figure.
-                is_formula = any((d.find(".//" + qn("wp:docPr")) is not None
-                                  and (d.find(".//" + qn("wp:docPr")).get("descr") or "").startswith("\\"))
-                                 for d in drawings)
+                is_formula = any(re.search(TEX_COMMAND_PATTERN, (d.find(".//" + qn("wp:docPr")).get("descr") or ""))
+                                 for d in drawings if d.find(".//" + qn("wp:docPr")) is not None)
                 if drawings and not is_formula:
                     figure_number += 1
                     elements.append({"id": f"Figure {figure_number}", "kind": "figure", "section": current["id"] if current else "",
