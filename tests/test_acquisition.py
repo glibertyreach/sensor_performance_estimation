@@ -15,6 +15,7 @@ from __future__ import annotations
 import csv
 import dataclasses
 import json
+import math
 from collections import Counter
 from pathlib import Path
 
@@ -60,7 +61,7 @@ MASTER_SEED = 1
 """Master seed of the plans of these tests."""
 SMALL_PARAMS = dataclasses.replace(
     PARAMS, phase_jitter_poses_edge=2, phase_jitter_poses_area=2, field_subseries_poses_area=2,
-    detection_trials_per_level=3, detection_zero_trials=5, z_step_repeats=2, z_step_ladder_mm=(0.1, 1.0),
+    detection_trials_per_level=3, detection_zero_trials=5, z_step_repeats=2, z_step_ladder_quanta=(0.5, 4.0),
     frames_per_zstep_pose=3, z_staircase_frames=2, frames_per_noise_station=4, frames_per_tilt_pose=2)
 """Reduced parameters for the tests that write files (few poses, few frames)."""
 
@@ -114,9 +115,10 @@ def test_full_plan_has_unique_pose_keys_and_file_names(full_plan):
     assert [c.order for c in plan] == list(range(len(plan)))
     labels = {(c.procedure, c.subseries) for c in plan}
     for expected in [("A", "main"), ("A", "tilt"), ("A", "remount"), ("B", "nominal"), ("B", "jitter"),
-                     ("Z", "ladder"), ("Z", "staircase"), ("C", "jitter"), ("C", "field"), ("D", "jitter"),
+                     ("Z", "ladder"), ("Z", "ramp"), ("C", "jitter"), ("C", "field"), ("D", "jitter"),
                      ("D", "extended"), ("S", "sentinel"), ("R", "main")]:
         assert expected in labels
+    assert ("Z", "staircase") not in labels                    # the staircase is the optional second pass
 
 
 def test_optional_variants_keep_keys_unique():
@@ -132,7 +134,7 @@ def test_optional_variants_keep_keys_unique():
     assert len(off) == sum(off_by_series.values())
     assert off_by_series["A"] == 47 + 16
     assert off_by_series["B"] == sum(1 for c in plan if c.procedure == "B" and c.subseries in ("nominal", "jitter"))
-    assert off_by_series["Z"] == sum(1 for c in plan if c.procedure == "Z" and c.subseries in ("ladder", "staircase"))
+    assert off_by_series["Z"] == sum(1 for c in plan if c.procedure == "Z" and c.subseries in ("ladder", "ramp"))
     assert off_by_series["B"] > 0 and off_by_series["Z"] > 0
     open_poses = [c for c in plan if c.subseries == "open"]
     assert len(open_poses) == PARAMS.phase_jitter_poses_area
@@ -441,15 +443,56 @@ def test_series_counts_follow_the_procedure(full_plan):
     assert {c.subseries for c in plan if c.procedure == PROCEDURE_DETECTION} == {"jitter", "extended"}
 
 
+RUNG_TOLERANCE = 0.01
+"""Section 6.2: the rungs at the indicative geometry agree with the specification's figures within this fraction."""
+EXPECTED_RUNGS_MM = {400.0: (0.1, 3.1), 800.0: (0.39, 12.4), 1600.0: (1.55, 50.0)}
+"""Section 6.2: smallest and largest rung (mm) at each reduced station at the indicative geometry."""
+
+
+def test_zstep_rungs_are_quanta_of_the_station_with_the_robot_floor():
+    """Section 6.2 Step 2: the rungs are Z_STEP_LADDER_QUANTA times the expected depth quantum at the station, each at least
+    ROBOT_MIN_RESOLVABLE_MOVE_MM; at the indicative geometry they run from 0.1 to 3.1 mm at 400 mm, 0.39 to 12.4 mm at 800
+    mm and 1.55 to 50 mm at 1600 mm (within 1 percent); the planner lists them per station in plan_summary.txt."""
+    from sensorperf.acquisition.plan import plan_summary_text, z_step_rungs_mm
+    assert PARAMS.z_step_ladder_quanta == (0.25, 0.5, 1.0, 2.0, 4.0, 8.0) and PARAMS.robot_min_resolvable_move_mm == 0.1
+    diagnostics = PlanDiagnostics()
+    plan = plan_zstep_series(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), diagnostics=diagnostics)
+    ladder = [c for c in plan if c.subseries == "ladder"]
+    for z0, (smallest, largest) in EXPECTED_RUNGS_MM.items():
+        rungs = sorted({c.step_mm for c in ladder if c.station_z_mm == z0})
+        quantum = GEOMETRY.depth_quantum_mm(TIER_A_DISPARITY_QUANTUM_PX, z0)
+        assert len(rungs) == len(PARAMS.z_step_ladder_quanta)
+        assert rungs[0] == pytest.approx(smallest, rel=RUNG_TOLERANCE) and rungs[-1] == pytest.approx(largest, rel=RUNG_TOLERANCE)
+        assert rungs == pytest.approx(z_step_rungs_mm(PARAMS, quantum))
+        # Every rung is a multiple of the quantum or, below the floor, the floor.
+        for rung, multiple in zip(rungs, PARAMS.z_step_ladder_quanta):
+            assert rung == pytest.approx(max(multiple * quantum, PARAMS.robot_min_resolvable_move_mm))
+    text = plan_summary_text(plan, PARAMS, GEOMETRY, diagnostics)
+    assert "B-Z step ladder rungs per station" in text and "rungs 0.1, 0.194, 0.388, 0.775, 1.55, 3.1" in text
+    assert "rungs 1.55, 3.1, 6.2, 12.4, 24.8, 49.6" in text
+
+
+def test_zstep_rung_floor_and_duplicates():
+    """Section 6.2: a rung below ROBOT_MIN_RESOLVABLE_MOVE_MM is raised to it (0.25 x 0.39 mm = 0.097 mm becomes 0.1 mm), and
+    two rungs that the floor makes equal are one rung. The floor is a parameter."""
+    from sensorperf.acquisition.plan import z_step_rungs_mm
+    assert z_step_rungs_mm(PARAMS, 0.3875)[0] == PARAMS.robot_min_resolvable_move_mm == 0.1
+    assert z_step_rungs_mm(PARAMS, 0.1) == pytest.approx([0.1, 0.2, 0.4, 0.8])            # 0.025 and 0.05 become 0.1
+    raised = dataclasses.replace(PARAMS, robot_min_resolvable_move_mm=0.5)
+    assert min(z_step_rungs_mm(raised, 0.3875)) == 0.5
+    assert min(c.step_mm for c in plan_zstep_series(raised, GEOMETRY, np.random.default_rng(MASTER_SEED))
+               if c.subseries == "ladder") == 0.5
+
+
 def test_zstep_ladder_alternates_with_the_right_displacement():
-    """Section 6.2 Step 2: for each delta, Z_STEP_REPEATS cycles of A (Z0), B (Z0 + delta), alternating; step_mm is the
-    delta for both visits; the displacement is 0 for A and delta for B. Step 3: the staircase from Z0 to Z0 + 3 dZ_q in
-    steps of dZ_q / Z_STAIRCASE_SUBDIVISION."""
+    """Section 6.2 Step 2: for each rung, Z_STEP_REPEATS cycles of A (Z0), B (Z0 + delta), alternating; step_mm is the
+    delta for both visits; the displacement is 0 for A and delta for B; the ladder is at the reduced stations only."""
     plan = plan_zstep_series(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED))
     ladder = [c for c in plan if c.subseries == "ladder"]
-    assert len(ladder) == len(PARAMS.z_reduced_stations_mm()) * len(PARAMS.z_step_ladder_mm) * PARAMS.z_step_repeats * 2
+    assert len(ladder) == len(PARAMS.z_reduced_stations_mm()) * len(PARAMS.z_step_ladder_quanta) * PARAMS.z_step_repeats * 2
+    assert {c.station_z_mm for c in ladder} == set(PARAMS.z_reduced_stations_mm())
     for z0 in PARAMS.z_reduced_stations_mm():
-        for delta in PARAMS.z_step_ladder_mm:
+        for delta in sorted({c.step_mm for c in ladder if c.station_z_mm == z0}):
             visits = [c for c in ladder if c.station_z_mm == z0 and c.step_mm == delta]
             assert [c.visit for c in visits] == [VISIT_A, VISIT_B] * PARAMS.z_step_repeats
             for c in visits:
@@ -457,20 +500,97 @@ def test_zstep_ladder_alternates_with_the_right_displacement():
                 assert c.notes["displacement_mm"] == expected
                 assert c.target_to_camera.translation[2] == pytest.approx(z0 + expected)
                 assert c.frames == PARAMS.frames_per_zstep_pose and c.field == 0
+    # A measured quantum replaces the Tier-A one: the rungs follow it.
+    fixed = plan_zstep_series(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), expected_quantum_mm=2.0)
+    assert sorted({c.step_mm for c in fixed if c.subseries == "ladder" and c.station_z_mm == PARAMS.z_min_mm}) == \
+        pytest.approx([0.5, 1.0, 2.0, 4.0, 8.0, 16.0])
+
+
+def test_zstep_ramp_tilt_per_station():
+    """Section 6.2, Ramp: one pose of T2 tilted about H at EVERY station of the ladder (nine), with FRAMES_PER_RAMP_POSE
+    frames, sub-series "ramp", whose tilt makes the true depth across the plate's visible height (the smaller of the plate
+    height and the field height at that Z) span RAMP_QUANTA expected quanta: 0.3 deg at 400 mm and 3.6 deg at 1600 mm (within 10
+    percent) at the indicative geometry. The tilt is printed per station in plan_summary.txt."""
+    from sensorperf.acquisition.plan import plan_summary_text
+    diagnostics = PlanDiagnostics()
+    plan = plan_zstep_series(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), diagnostics=diagnostics)
+    ramp = [c for c in plan if c.subseries == "ramp"]
+    assert len(ramp) == 9 and [c.station_z_mm for c in ramp] == list(PARAMS.z_stations_mm())
+    plate_height = 400.0
+    for c in ramp:
+        z0 = c.station_z_mm
+        assert c.tilt_axis == "H" and c.frames == PARAMS.frames_per_ramp_pose == 50 and c.field == 0
+        visible = min(plate_height, 2.0 * GEOMETRY.half_field_mm(z0)[1])
+        quantum = GEOMETRY.depth_quantum_mm(TIER_A_DISPARITY_QUANTUM_PX, z0)
+        assert math.sin(math.radians(c.tilt_deg)) * visible == pytest.approx(PARAMS.ramp_quanta * quantum, rel=1e-6)
+        # The pose is the plate tilted about its H axis through its center, which stays centered laterally.
+        assert np.allclose(c.target_to_camera.translation[:2], 0.0)
+        assert c.target_to_camera.rotation == pytest.approx(
+            Rotation.from_rotvec([math.radians(c.tilt_deg), 0.0, 0.0]).as_matrix())
+    by_station = {c.station_z_mm: c.tilt_deg for c in ramp}
+    assert by_station[400.0] == pytest.approx(0.3, rel=0.1) and by_station[1600.0] == pytest.approx(3.6, rel=0.1)
+    # The tilt-feasibility rule (near edge at or beyond Z_MIN): every ramp keeps it, at Z_MIN by moving the plate center a
+    # millimeter farther (the tilt itself is 0.3 deg, but the plate is 400 mm high).
+    for c in ramp:
+        assert c.notes["near_edge_mm"] >= PARAMS.z_min_mm - 1e-6
+    shifts = {c.station_z_mm: c.notes["ramp_center_shift_mm"] for c in ramp}
+    assert shifts[400.0] == pytest.approx(200.0 * math.sin(math.radians(by_station[400.0])), rel=1e-6)
+    assert all(shifts[z] == 0.0 for z in shifts if z != 400.0)
+    assert ramp[0].target_to_camera.translation[2] == pytest.approx(400.0 + shifts[400.0])
+    assert any("moved" in note and "Z_MIN" in note for note in diagnostics.notes)
+    text = plan_summary_text(plan, PARAMS, GEOMETRY, diagnostics)
+    assert "B-Z ramp per station" in text and "tilt 0.318 deg" in text and "tilt 3.555 deg" in text
+    assert not any("ramp" in message for message in diagnostics.skipped)
+
+
+def test_zstep_ramp_poses_are_in_the_default_plan_and_the_staircase_is_optional():
+    """Section 6.2: the default plan has the ramp (nine poses) and no staircase; ``staircase=True`` adds the optional second
+    pass at the reduced stations (step = max(dZ_q / Z_STAIRCASE_SUBDIVISION, ROBOT_MIN_RESOLVABLE_MOVE_MM), from Z0 to Z0 + 3
+    dZ_q), outside the main budget; the filters-off repeat includes the staircase only when it was asked for."""
+    from sensorperf.acquisition.plan import filters_off_budget, plan_summary_text, staircase_budget
+    default = plan_zstep_series(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED))
+    assert {c.subseries for c in default} == {"ladder", "ramp"}
+    assert sum(1 for c in default if c.subseries == "ramp") == 9
+    plan = plan_zstep_series(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), staircase=True)
+    assert [c.pose_key() for c in plan if c.subseries != "staircase"] == [c.pose_key() for c in default]
     staircase = [c for c in plan if c.subseries == "staircase"]
-    steps = int(round(PARAMS.z_staircase_quanta * PARAMS.z_staircase_subdivision))
-    assert len(staircase) == len(PARAMS.z_reduced_stations_mm()) * (steps + 1)
+    assert staircase and {c.station_z_mm for c in staircase} == set(PARAMS.z_reduced_stations_mm())
     for z0 in PARAMS.z_reduced_stations_mm():
         quantum = GEOMETRY.depth_quantum_mm(TIER_A_DISPARITY_QUANTUM_PX, z0)
+        step = max(quantum / PARAMS.z_staircase_subdivision, PARAMS.robot_min_resolvable_move_mm)
         sweep = [c for c in staircase if c.station_z_mm == z0]
         displacement = np.array([c.step_mm for c in sweep])
-        assert displacement[0] == 0.0 and displacement[-1] == pytest.approx(PARAMS.z_staircase_quanta * quantum)
-        assert np.allclose(np.diff(displacement), quantum / PARAMS.z_staircase_subdivision)
+        assert displacement[0] == 0.0 and np.allclose(np.diff(displacement), step)
+        assert displacement[-1] == pytest.approx(PARAMS.z_staircase_quanta * quantum, abs=step / 2.0 + 1e-9)
         assert all(c.frames == PARAMS.z_staircase_frames for c in sweep)
+    assert min(np.diff([c.step_mm for c in staircase if c.station_z_mm == 400.0])) == pytest.approx(0.1)   # the floor, at 400 mm
+    assert np.diff([c.step_mm for c in staircase if c.station_z_mm == 800.0])[0] == pytest.approx(0.155, rel=0.01)
     # A measured quantum replaces the Tier-A one.
-    fixed = plan_zstep_series(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), expected_quantum_mm=2.0)
+    fixed = plan_zstep_series(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), expected_quantum_mm=2.0, staircase=True)
     last = [c for c in fixed if c.subseries == "staircase" and c.station_z_mm == PARAMS.z_min_mm][-1]
     assert last.step_mm == pytest.approx(6.0)
+    # Outside the main budget, like the filters-off repeat.
+    args = (GEOMETRY.frame_rate_hz, PARAMS.move_and_settle_time_s)
+    assert capture_budget(plan, *args) == capture_budget(default, *args)
+    assert [r.poses for r in staircase_budget(plan, *args)] == [len(staircase)] and staircase_budget(default, *args) == []
+    assert "optional B-Z staircase" in plan_summary_text(plan, PARAMS, GEOMETRY)
+    off = plan_zstep_series(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), filters_off=True, staircase=True)
+    assert {c.subseries for c in off} == {"filters_off"} and len(off) == len(plan)
+    assert len(plan_zstep_series(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), filters_off=True)) == len(default)
+
+
+def test_staircase_flag_of_the_full_plan_and_the_command_line(tmp_path: Path):
+    """Section 6.2: ``plan_full_session(staircase=True)`` and ``plan_stations --staircase`` add the staircase poses (outside
+    the main budget, so the totals of the document's estimate do not change); without the flag there is none."""
+    default = plan_full_session(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), series=["Z"])
+    flagged = plan_full_session(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), series=["Z"], staircase=True)
+    assert not any(c.subseries == "staircase" for c in default) and any(c.subseries == "staircase" for c in flagged)
+    assert plan_cli.main(["--out", str(tmp_path / "plain"), "--series", "Z"]) == 0
+    assert plan_cli.main(["--out", str(tmp_path / "stairs"), "--series", "Z", "--staircase"]) == 0
+    plain = read_plan_csv(tmp_path / "plain" / PLAN_CSV_NAME)
+    stairs = read_plan_csv(tmp_path / "stairs" / PLAN_CSV_NAME)
+    assert not any(c.subseries == "staircase" for c in plain) and any(c.subseries == "staircase" for c in stairs)
+    assert sum(1 for c in plain if c.subseries == "ramp") == sum(1 for c in stairs if c.subseries == "ramp") == 9
 
 
 def test_zstep_visits_are_approached_from_below():

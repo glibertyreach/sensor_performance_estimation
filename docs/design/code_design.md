@@ -397,16 +397,39 @@ rotation about its normal are not and are not needed. The registration pose plan
 
 **Plan and budget** (`acquisition/plan.py`). A at the nine ladder stations x five field positions plus the two legacy depths
 at the center only (9 x 5 + 2 = 47 main poses, 100 frames), tilt at the reduced stations where feasible, then the re-mount
-check; B-HV at the shape stations; B-Z at the reduced stations; C for {T4, T5} x {G small, G large} at all nine stations, the
-field sub-series and the open-background variant at Z_REFERENCE; D at all nine stations (60 trials per (feature, station),
-300 at the three farthest). `plan_summary.txt` prints the station ladder and its subsets, the budget and the comparison with
-`DOCUMENT_ESTIMATE_*`, which are the totals of the default plan (`plan_stations --seed 1`): 7,278 poses, 43,000 frames,
-7.26 h (10 frames/s, 3 s per move plus settle). Per series (poses / frames / hours): registration 30 / 300 / 0.03, A 64 /
-5,600 / 0.21, B-HV 520 / 15,600 / 0.87, B-Z 453 / 4,530 / 0.50, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentinels
-11 / 330 / 0.02.
+check; B-HV at the shape stations; B-Z: the step ladder at the reduced stations and the ramp at all nine stations (below); C for
+{T4, T5} x {G small, G large} at all nine stations, the field sub-series and the open-background variant at Z_REFERENCE; D at
+all nine stations (60 trials per (feature, station), 300 at the three farthest). `plan_summary.txt` prints the station ladder
+and its subsets, the B-Z rungs and ramp tilts per station, the budget and the comparison with `DOCUMENT_ESTIMATE_*`, which are
+the totals of the default plan (`plan_stations --seed 1`): 7,194 poses, 42,520 frames, 7.18 h (10 frames/s, 3 s per move plus
+settle). Per series (poses / frames / hours): registration 30 / 300 / 0.03, A 64 / 5,600 / 0.21, B-HV 520 / 15,600 / 0.87,
+B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentinels 11 / 330 / 0.02.
+- *B-Z step ladder in quanta* (`z_step_rungs_mm`; parameters `z_step_ladder_quanta` = (0.25, 0.5, 1, 2, 4, 8) and
+  `robot_min_resolvable_move_mm` = 0.1, which replace `z_step_ladder_mm`). At a reduced station Z0 the commanded rungs are the
+  multiples of the expected depth quantum dZ_q(Z0) = q Z0^2 / k (Tier-A q, `TIER_A_DISPARITY_QUANTUM_PX`, or the
+  `expected_quantum_mm` the caller passes once A has measured one), each raised to at least 0.1 mm (the smallest Z move the
+  robot is trusted to execute) and merged if the floor makes two equal: 0.1 to 3.1 mm at 400 mm, 0.39 to 12.4 mm at 800 mm,
+  1.55 to 50 mm at 1600 mm (the 50 mm rung moves the plate to 1650 mm, beyond Z_MAX; a planner note says so). 6 rungs x 10
+  cycles x 2 visits x 3 stations = 360 poses, 3,600 frames. `plan_summary.txt` lists the millimeter rungs per station with the
+  ratio of `robot_repeatability_mm` to each rung. Every visit is still approached from below.
+- *B-Z ramp* (`ramp_tilt_deg`, `ramp_pose`, `ramp_visible_height_mm`; parameters `ramp_quanta` = 4, `frames_per_ramp_pose` = 50;
+  sub-series `ramp`, `SUBSERIES_RAMP`). At EVERY ladder station one pose of T2 tilted about H (parallel to the baseline, so each
+  image row lies at one true depth) by asin(ramp_quanta dZ_q / visible height), the visible height being the smaller of the
+  plate height (400 mm) and the field height at Z0: 0.318, 0.379, 0.450, 0.629, 0.888, 1.255, 1.775, 2.511 and 3.555 deg at the
+  nine stations (0.3 deg at 400 mm, 3.6 deg at 1600 mm), 9 poses x 50 frames. The tilt is stored in the pose row and printed per
+  station. The tilt-feasibility rule below applies: the ramp tilts are small, but the near edge of the 400 mm plate, 200 mm from
+  the center, is Z - 200 sin(tilt) = 398.9 mm at Z0 = 400 mm, closer than Z_MIN (every other station is well beyond it); rather than drop the 400 mm ramp, the plate center is moved 1.11 mm farther (exactly the shortfall, so the near edge is
+  at Z_MIN; `notes["ramp_center_shift_mm"]`, a planner note, a line of `plan_summary.txt`), and the station label stays 400. The far
+  edge of the ramp at 1600 mm is 12 mm beyond Z_MAX, as the 1650 mm of the ladder.
+- *Optional B-Z staircase* (`plan_zstep_series(staircase=True)`, `plan_full_session(staircase=True)`, `plan_stations --staircase`).
+  The fine staircase is no longer in the default plan. When asked for it is planned at the reduced stations, from Z0 to Z0 plus
+  `z_staircase_quanta` (3) quanta in steps of max(dZ_q / `z_staircase_subdivision`, `robot_min_resolvable_move_mm`) (10 steps per
+  quantum at 800 and 1600 mm, 0.1 mm = 3.9 steps per quantum at 400 mm), `z_staircase_frames` frames per step, outside the main
+  budget like the filters-off repeat (`staircase_budget`, `OPTIONAL_SUBSERIES`; 75 poses, 750 frames, 0.08 h with the default
+  seed); the filters-off repeat of B-Z then includes it. The three `z_staircase_*` parameters are the optional second pass.
 - *Tilt feasibility* (`tilt_is_feasible`, `tilt_near_edge_mm`). The A tilt sub-series runs at the reduced stations, and a tilt
   is planned only where the plate's near edge stays at or beyond `z_min_mm`: Z - h sin(tilt) >= Z_MIN, h the half extent of
-  the plate across the tilt axis (200 mm for the 400 x 400 mm plate). Infeasible tilts are skipped and listed with the reason
+  the plate across the tilt axis (200 mm for the 400 x 400 mm plate; the B-Z ramp uses the same rule, see above). Infeasible tilts are skipped and listed with the reason
   under "Skipped poses" in `plan_summary.txt` (`PlanDiagnostics.skipped`); a sweep left with no real tilt (only the zero angle)
   is skipped as a whole. With the 400 mm plate every tilt at 400 mm is skipped (15, 30 and 45 deg bring the edge to 348, 300
   and 259 mm), leaving 800 and 1600 mm: 2 axes x 4 angles x 2 stations = 16 tilt poses instead of 24.
@@ -451,6 +474,33 @@ field sub-series and the open-background variant at Z_REFERENCE; D at all nine s
   `D_pooled_summary.csv`, `D_overlap_test.csv`, the details JSON, pooled psychometric figures and `D_minimum_vs_z`. The
   pilot level selection and the continuous-angle variant are gone; the pilot keeps only the post check
   (`acquisition.check.pilot_post_check`).
+- B-Z (`analysis/resolution_depth.py`, Section 11.2). The step-ladder analysis works per station: the rungs differ from station
+  to station, and it uses the read-back displacement as the truth, so only the reporting changed: `truth_reliable` and
+  `delta_50_is_bound` are evaluated against each station's own rung set (a delta_50 below the station's smallest reliable rung is
+  a bound, which happens more often at the far stations whose smallest rung is 0.39 to 1.55 mm), and every rung carries the ratio
+  of `robot_repeatability_mm` to its true step (`rung_robot_ratio`, `robot_repeatability_ratio` in `Z_resolution_rungs.csv`; the
+  ratio of the smallest rung is in the summary). New Step 5, the ramp (`_analyze_ramp`, `RampResult`): per ramp pose, the
+  fixed-pattern map of A at the station is subtracted from the frame-mean depth (A now keeps the map, the frame-mean depth minus
+  its fitted plane, as `PoseDiagnostics.fixed_pattern_mm` for the center-field main poses; with no A result or a map that is NaN
+  over the region of interest nothing is subtracted and the note says so), the depth is averaged along each image row within the
+  region of interest (rows with at least half the pixels of the widest row), and the true depth of each row is the mean of
+  `PoseGeometry.z_front_gt` (the read-back pose through the registration) over the same pixels. Plateaus: a jump is a change over a
+  window of half a quantum in rows larger than half the expected quantum, `plateau_widths` (the detection the staircase also uses)
+  gives the widths, and the plateau estimate is accepted with at least `RAMP_MIN_COMPLETE_PLATEAUS` (1) plateau, at least
+  `PLATEAU_MIN_STEPS_PER_QUANTUM` rows per expected quantum and a median plateau of `RAMP_PLATEAU_MIN_WIDTH_ROWS` (= the
+  staircase's `PLATEAU_MIN_WIDTH_STEPS`, in rows) or more. The expected quantum is q Z^2 / k from A's q (the prediction, reported)
+  or the pooled depth levels. Dithering: a window change of a staircase is about 0 or about 1 quantum, of a smooth ramp about 0.5; a
+  curve with at least half of its changes in 0.25 to 0.75 quantum is smooth (`RAMP_INTERMEDIATE_BAND`,
+  `RAMP_MAX_INTERMEDIATE_FRACTION`), and a smooth row average over stepped single pixels (temporal medians of five columns) is
+  flagged `dithered`; the plateaus are then not used and the quantum is that of the pooled depth levels (when that is the output
+  LSB, no q is implied). Output: per station in `Z_resolution_summary.csv` the columns `ramp_tilt_deg`,
+  `ramp_fixed_pattern_subtracted`, `ramp_plateaus`, `ramp_quantum_mm`, `ramp_quantum_predicted_mm`, `ramp_q_px`,
+  `ramp_quantum_method`, `ramp_dithered`, and, beside them, `staircase_quantum_mm`, `staircase_quantum_predicted_mm` and
+  `staircase_quantum_method` (the former `quantum_*` columns, renamed) when the optional staircase was captured; a ramp at a
+  station without a ladder (the six stations outside the reduced set) is a row with an empty `patch_px`. Also `Z_ramp_rows.csv`,
+  the figures `Z_ramp` (row average and single pixels against true depth with the plateau edges) and `Z_quantum_vs_z` (ramp and
+  staircase quanta with q Z^2 / k) in PNG and SVG, and the ramp quantum in the forward-model terms (the staircase's where a station
+  has no ramp). The staircase analysis is unchanged and runs only when staircase poses exist.
 - E unchanged except that the feature-scale profiles are against D_px, pooled over the features and stations of a plate.
 
 **Simulator.** The synthetic scene generator renders the standard target set. The imitation matcher gets a named
@@ -458,10 +508,20 @@ parameter, `SyntheticSensorModel.min_feature_diameter_px` (indicative 10 px of t
 asked for; the real sensor is bracketed at 10-15 px by the note): a disk or cutout that subtends fewer pixels is not
 rendered (the disk reads as back plate, the cutout as front plate). `indicative_scaled(geometry, divisor)` divides the
 disparity noise, the quantum and this size by the pixel divisor of the `--quick` geometry. The demo plan covers the shape
-stations for C and D (T4 and T5), so the three features of a plate overlap in D_px.
+stations for C and D (T4 and T5), so the three features of a plate overlap in D_px. The renderer already renders tilted plates
+(the A tilt sub-series), so the B-Z ramp poses need nothing new: the demo plan has a ramp at each of its three A stations (400,
+800 and 1600 mm, the tilt of `ramp_pose`), a ladder of three rungs of the expected quantum at 800 mm (0.5, 2 and 8 quanta) and the
+optional staircase. The imitation matcher quantizes the disparity at q (`np.round(d / q) q`, then Z = k / d and the output LSB),
+so the pixels of a tilted plate sit on the levels k / (n q) and a noise-free column steps through them with plateaus of q Z^2 / k
+(tested). The time average over frames shows those plateaus only where the disparity noise stays below about a fifth of q
+(ripple (q/pi) exp(-2 pi^2 sigma^2 / q^2)); the indicative sigma_d = 0.08 px is 0.64 q, so the demo session is dithered: its 400 and
+800 mm ramps are flagged `dithered` (the 1600 mm ramp has 27 rows and 10-frame medians too noisy to call stepped, and its plateaus
+are not resolved either) and the quantum of every ramp comes from the pooled depth levels (within 1 % of q Z^2 / k at 800 and 1600
+mm; at 400 mm the 0.39 mm quantum is not resolved against the 0.1 mm output LSB and the note says so), while the ramp test of the suite renders a
+low-noise model (sigma_d = 0.1 q, fixed pattern 0.05 mm at 1 m) whose plateau widths recover the quantum within 3 %.
 
-**Status after the redesign.** 142 tests pass (`python3 -m pytest -q`, about 240 s on a loaded 4-core container). The
-standard demo plan renders 358 poses / 638 frames at 160 x 120 (`--quick`, 8 s) and 364 poses / 2,290 frames at 640 x 480
+**Status after the redesign.** 157 tests pass (`python3 -m pytest -q`, about 240 s on a loaded 4-core container). The
+standard demo plan renders 361 poses / 668 frames at 160 x 120 (`--quick`, 8 s) and 367 poses / 2,440 frames at 640 x 480
 (about 8 min; the 640 x 480 figures follow from the plan, the session was not re-rendered); the full-size session analyzes with a pooled cutout D_50 of about 9.6 px (inside the 8 to 12 px of the
 synthetic matcher) and writes `forward_model_parameters.json` with `d50_px` and `d10_px`. Not yet adapted: the build
 scripts of the technician procedure (`docs/procedures`) and the specification still quote the removed constants.

@@ -192,7 +192,8 @@ rotation vector in degrees (six values), the rotation matrix r00..r22 row-major,
 quaternion (w >= 0), as plan_poses.py of the calibration repository wrote them."""
 MIN_POSE_LOG_DECIMALS = 2
 """Fewest decimals (0.01 mm) the series-Z rows of a robot pose log must show in x_mm, y_mm, z_mm: the read-back pose is
-the step truth of series Z, and the smallest rungs are tens of micrometers (``pose_log.build_manifest`` warns)."""
+the step truth of series Z, and the smallest rung and staircase step are 0.1 mm, the robot's floor, so a log rounded to
+0.1 mm would hide them (``pose_log.build_manifest`` warns)."""
 APPROACH_FROM_BELOW = "from below"
 """``notes["approach"]`` of every series Z pose: the robot arrives at the pose moving toward larger Z (from the side of
 smaller Z, nearer the sensor), after backing off by ``z_step_approach_overshoot_mm``, so backlash cancels in A / B."""

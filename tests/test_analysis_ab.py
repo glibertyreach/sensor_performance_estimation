@@ -73,6 +73,16 @@ ROBOT_REPEATABILITY_MM = simulate_cli.DEMO_ROBOT_REPEATABILITY_MM
 """Per-axis scatter of the read-back pose in the quick session."""
 QUANTUM_FACTOR = 2.0
 """Test Z, Step 5: the staircase quantum is within this factor of q Z^2 / k."""
+DEMO_RUNGS_800_MM = (0.775, 3.1, 12.4)
+"""The three ladder rungs of the demonstration plan at its station, 800 mm: half, two and eight expected quanta (the
+quantum of the synthetic sensor at 800 mm is 1.55 mm)."""
+RAMP_QUANTUM_TOLERANCE = 0.2
+"""Test Z, Step 5 (ramp): the recovered quantum is within this fraction of the simulator's."""
+RAMP_LOW_NOISE_PX = 0.003
+"""Disparity noise (px of the quick sensor) of the synthetic ramp whose quantizer is not dithered: a tenth of the quantum
+(0.03125 px), well below the 0.19 of the quantum at which the average over frames still shows the plateaus."""
+RAMP_LOW_PATTERN_MM = 0.05
+"""Fixed-pattern amplitude (RMS at 1 m, mm) of that synthetic ramp: a fiftieth of the quantum at 1 m."""
 
 
 def _log_values(session_dir: Path) -> dict[str, float]:
@@ -476,7 +486,8 @@ def test_b_step13_outputs(result_b, analysis_dir):
 def test_z_step2_gain(result_z):
     """Section 11.2, Step 2: the gain of the sensed step against the true step (the read-back pose difference) is between
     0.8 and 1.2 for every patch size, with an intercept far below the smallest ladder step used. The demonstration
-    ladder (0.2, 1, 4 mm) is above the robot repeatability, so no rung is flagged."""
+    ladder (0.78, 3.1, 12.4 mm at 800 mm: half, two and eight expected quanta) is above the robot repeatability, so no rung
+    is flagged."""
     assert len(result_z.patches) == 3
     for patch in result_z.patches:
         assert GAIN_RANGE[0] < patch.gain < GAIN_RANGE[1], patch.patch_px
@@ -514,15 +525,15 @@ def test_z_truth_is_the_read_back_pose(session, tmp_path):
 
 
 def test_z_rungs_below_the_robot_repeatability_are_flagged(session, tmp_path):
-    """Section 11.2, Step 2: with the robot repeatability set above the smallest demonstration rung (0.2 mm < 0.3 mm) that
+    """Section 11.2, Step 2: with the robot repeatability set above the smallest demonstration rung (0.78 mm < 1 mm) that
     rung gets truth_reliable False, is excluded from the gain regression, stays in the detection curve, and the note
     and the CSV files say so; the larger rungs stay reliable."""
-    flagged_session = replace(session, params=replace(session.params, robot_repeatability_mm=0.3))
+    flagged_session = replace(session, params=replace(session.params, robot_repeatability_mm=1.0))
     result = resolution_depth.run_depth_resolution(flagged_session, tmp_path, {})
     resolution_depth.write_outputs(result, tmp_path)
     for patch in result.patches:
         assert patch.flagged_rungs == 1
-        assert patch.rung_labels_mm == pytest.approx([0.2, 1.0, 4.0])
+        assert patch.rung_labels_mm == pytest.approx(DEMO_RUNGS_800_MM, rel=1e-3)
         assert patch.rung_reliable == [False, True, True]
         assert len(patch.steps_mm) == 3 and len(patch.detections) == 3          # kept in the detection curve
         assert "1 of 3 ladder rungs flagged" in patch.note
@@ -530,12 +541,15 @@ def test_z_rungs_below_the_robot_repeatability_are_flagged(session, tmp_path):
         expected = np.polyfit(np.array(patch.pair_true_mm)[keep], np.array(patch.pair_delta_mm)[keep], 1)[0]
         assert patch.gain == pytest.approx(expected)
     assert any("flagged" in note for note in result.notes)
-    summary = _read_csv(tmp_path / resolution_depth.SUMMARY_CSV_NAME)
+    summary = [row for row in _read_csv(tmp_path / resolution_depth.SUMMARY_CSV_NAME) if row["patch_px"]]
     assert {row["truth_reliable"] for row in summary} == {"False"}
     assert {row["truth_source"] for row in summary} == {"read-back robot pose through the registration"}
-    rungs = _read_csv(tmp_path / resolution_depth.RUNGS_CSV_NAME)
-    assert [(float(r["step_mm"]), r["truth_reliable"]) for r in rungs if r["patch_px"] == "1"] == \
-        [(0.2, "False"), (1.0, "True"), (4.0, "True")]
+    rungs = [r for r in _read_csv(tmp_path / resolution_depth.RUNGS_CSV_NAME) if r["patch_px"] == "1"]
+    assert [r["truth_reliable"] for r in rungs] == ["False", "True", "True"]
+    assert [float(r["step_mm"]) for r in rungs] == pytest.approx(DEMO_RUNGS_800_MM, rel=1e-3)
+    # The truth uncertainty of each rung: the ratio of the robot repeatability to the true step.
+    assert [float(r["robot_repeatability_ratio"]) for r in rungs] == \
+        pytest.approx([1.0 / float(r["true_step_mm"]) for r in rungs])
 
 
 def test_z_robot_readback_scatter_is_reported(result_z, session, tmp_path):
@@ -557,10 +571,10 @@ def test_z_robot_readback_scatter_is_reported(result_z, session, tmp_path):
 def test_z_delta_50_below_the_smallest_reliable_rung_is_a_bound(session, tmp_path):
     """Section 11.2, Step 4: when the fitted delta_50 falls below the smallest rung with a reliable truth, the result is
     that rung, flagged as a bound, with the note, no interval, and it stays out of the forward-model terms."""
-    bound_session = replace(session, params=replace(session.params, robot_repeatability_mm=0.5))
+    bound_session = replace(session, params=replace(session.params, robot_repeatability_mm=1.0))
     result = resolution_depth.run_depth_resolution(bound_session, tmp_path, {})
     bounds = [p for p in result.patches if p.delta_50_is_bound]
-    assert bounds, "the 20 x 20 patch resolves steps below 1 mm, which are below the smallest reliable rung here"
+    assert bounds, "the 20 x 20 patch resolves steps below 3 mm, which are below the smallest reliable rung here"
     for patch in bounds:
         assert patch.delta_50_mm == pytest.approx(min(s for s, ok in zip(patch.steps_mm, patch.rung_reliable) if ok))
         assert patch.delta_50_fit_mm < patch.delta_50_mm
@@ -620,15 +634,190 @@ def test_z_without_a_result_says_unavailable(session, tmp_path):
 
 
 def test_z_outputs(result_z, analysis_dir):
-    """Section 11.2 outputs: the CSV (a row per station and patch size), the details JSON and the three figures."""
+    """Section 11.2 outputs: the CSV (a row per station and patch size, plus one row per station that has a ramp but no ladder,
+    with an empty patch size), the rung CSV, the ramp rows, the details JSON and the figures (the staircase figure only because
+    the demonstration captured the optional staircase)."""
     rows = _read_csv(analysis_dir / resolution_depth.SUMMARY_CSV_NAME)
-    assert [int(r["patch_px"]) for r in rows] == [1, 5, 20]
+    assert [int(r["patch_px"]) for r in rows if r["patch_px"]] == [1, 5, 20]
+    ramp_only = [r for r in rows if not r["patch_px"]]
+    assert [float(r["station_z_mm"]) for r in ramp_only] == [400.0, 1600.0] and all(r["ramp_tilt_deg"] for r in ramp_only)
     assert (analysis_dir / resolution_depth.DETAILS_JSON_NAME).exists()
+    assert (analysis_dir / resolution_depth.RAMP_CSV_NAME).exists()
     for stem in resolution_depth.FIGURE_STEMS.values():
         for extension in ("png", "svg"):
             assert (analysis_dir / f"{stem}.{extension}").stat().st_size > 0
     terms = result_z.forward_model_terms()
     assert "800" in terms["depth_quantum_mm"] and "800" in terms["delta_50_1px_mm"]
+
+
+def test_z_ladder_reports_the_robot_repeatability_ratio_per_rung(result_z, session):
+    """Section 11.2, Step 2: the truth uncertainty of each rung is the ratio of ROBOT_REPEATABILITY_MM to its true step; the
+    rungs are those of the station (0.78, 3.1 and 12.4 mm at 800 mm), none is flagged at the specified 0.05 mm, and the
+    summary carries the ratio of the smallest rung."""
+    patch = result_z.patch(800.0, 1)
+    assert patch.rung_labels_mm == pytest.approx(DEMO_RUNGS_800_MM, rel=1e-3)
+    assert patch.rung_robot_ratio == pytest.approx([session.params.robot_repeatability_mm / s for s in patch.steps_mm])
+    assert patch.smallest_rung_mm == pytest.approx(min(patch.steps_mm)) and max(patch.rung_robot_ratio) < 0.1
+    assert patch.flagged_rungs == 0 and not patch.delta_50_is_bound
+
+
+# ---------------------------------------------------------------------------
+# Analysis B-Z, Step 5: the ramp
+# ---------------------------------------------------------------------------
+def _write_ramp_session(root: Path, station: float, noise_px: float, pattern_mm: float, seed: int = 3):
+    """A two-pose synthetic session on the quick geometry: the A center pose at the station (the fixed-pattern map of the
+    ramp analysis) and the B-Z ramp pose of the planner at the same station, rendered with a model of the given disparity
+    noise and fixed-pattern amplitude. Returns (the model, the true depth quantum at the station, mm)."""
+    from sensorperf.acquisition.plan import PlannedCapture, ramp_pose, ramp_tilt_deg
+    from sensorperf.geometry.targets import fronto_parallel_pose, make_noise_plate, make_standard_target_set
+    from sensorperf.parameters import CharacterizationParameters, SensorGeometry
+    from sensorperf.simulate.demo_plan import demo_registration, scaled_geometry
+    from sensorperf.simulate.session import write_synthetic_session
+    from sensorperf.simulate.sensor_model import SyntheticSensorModel
+    params, full = CharacterizationParameters(), SensorGeometry.indicative()
+    geometry = scaled_geometry(full, simulate_cli.QUICK_PIXEL_DIVISOR)
+    model = replace(SyntheticSensorModel.indicative_scaled(geometry, simulate_cli.QUICK_PIXEL_DIVISOR),
+                    disparity_noise_px=noise_px, fixed_pattern_amplitude_mm=pattern_mm, fixed_pattern_seed=seed,
+                    drift_mm_per_hour=0.0)
+    quantum = geometry.depth_quantum_mm(model.disparity_quantum_px, station)
+    tilt = ramp_tilt_deg(params, geometry, make_noise_plate(params), station, quantum)
+    pose, notes = ramp_pose(params, geometry, make_noise_plate(params), station, quantum, tilt)
+    frames = params.frames_per_ramp_pose
+    plan = [PlannedCapture("A", "T2", None, station, 0, 0, frames, "main", fronto_parallel_pose(0.0, 0.0, station),
+                           order=0),
+            PlannedCapture("Z", "T2", None, station, 0, 0, frames, "ramp", pose, tilt_axis="H", tilt_deg=tilt, order=1,
+                           notes=notes)]
+    write_synthetic_session(root, params, geometry, model, demo_registration(), make_standard_target_set(params, full),
+                            plan, np.random.default_rng(seed))
+    return model, quantum
+
+
+@pytest.mark.parametrize("station", [800.0, 1600.0])
+def test_z_ramp_plateau_widths_recover_the_simulator_quantum(tmp_path, station):
+    """Section 11.2, Ramp: on a synthetic ramp whose quantizer is not dithered (disparity noise a tenth of the quantum, fixed
+    pattern a fiftieth) the plateau widths of the row average recover the simulator's depth quantum q Z^2 / k within 20 percent;
+    the fixed-pattern map of Analysis A was subtracted, the method is the plateau widths, the implied disparity quantum q is
+    the simulator's within 20 percent, and the curve is not flagged as dithered."""
+    root = tmp_path / "session"
+    model, quantum = _write_ramp_session(root, station, RAMP_LOW_NOISE_PX, RAMP_LOW_PATTERN_MM)
+    session = Session.load(root)
+    result_a = noise.run_noise(session, tmp_path, {})
+    result = resolution_depth.run_depth_resolution(session, tmp_path, {"A": result_a})
+    ramp = result.ramp(station)
+    print(f"station {station:g}: true quantum {quantum:.4f} mm, ramp quantum {ramp.quantum_mm:.4f} mm "
+          f"({ramp.quantum_method}, {ramp.plateaus} plateaus, {ramp.rows} rows, {ramp.span_quanta:.1f} quanta)")
+    assert ramp.fixed_pattern_subtracted and ramp.quantum_method == "plateau widths of the row average"
+    assert ramp.quantum_mm == pytest.approx(quantum, rel=RAMP_QUANTUM_TOLERANCE)
+    assert ramp.q_px == pytest.approx(model.disparity_quantum_px, rel=RAMP_QUANTUM_TOLERANCE)
+    assert ramp.plateaus >= resolution_depth.RAMP_MIN_COMPLETE_PLATEAUS and ramp.dithered is False
+    assert not ramp.row_is_smooth and ramp.pixels_stepped
+    assert ramp.tilt_deg == pytest.approx(math.degrees(math.asin(4.0 * quantum / 400.0)), rel=0.02)
+    # Each row lies at one true depth (the tilt axis is parallel to the baseline) and the rows span a few quanta.
+    assert ramp.row_true_spread_mm < 1e-6 and 2.0 < ramp.span_quanta < 4.5
+    assert result.forward_model_terms()["depth_quantum_mm"][f"{station:g}"] == pytest.approx(ramp.quantum_mm)
+
+
+def test_z_ramp_flags_a_dithered_quantizer(tmp_path):
+    """Section 11.2, Ramp: where the disparity noise is 0.64 of the quantum (the indicative synthetic sensor) the average over
+    frames and rows is smooth over single pixels that still step, so the ramp is flagged as dithered, its plateaus are not used,
+    and the quantum comes from the pooled depth levels (within 20 percent of the truth at 800 mm); the CSV carries the flag, the
+    method, the implied q and the prediction from Analysis A."""
+    root = tmp_path / "session"
+    model, quantum = _write_ramp_session(root, 800.0, _indicative_noise_px(), 0.5)
+    session = Session.load(root)
+    result_a = noise.run_noise(session, tmp_path, {})
+    result = resolution_depth.run_depth_resolution(session, tmp_path, {"A": result_a})
+    ramp = result.ramp(800.0)
+    assert ramp.dithered and ramp.row_is_smooth and ramp.pixels_stepped and "dithered" in ramp.note
+    assert ramp.quantum_method.startswith("depth levels") and math.isnan(ramp.quantum_plateau_mm)
+    assert ramp.quantum_mm == pytest.approx(quantum, rel=RAMP_QUANTUM_TOLERANCE)
+    resolution_depth.write_outputs(result, tmp_path)
+    row = _read_csv(tmp_path / resolution_depth.SUMMARY_CSV_NAME)[0]
+    assert row["ramp_dithered"] == "True" and row["ramp_quantum_method"].startswith("depth levels")
+    assert float(row["ramp_q_px"]) == pytest.approx(model.disparity_quantum_px, rel=RAMP_QUANTUM_TOLERANCE)
+    assert float(row["ramp_quantum_mm"]) == pytest.approx(ramp.quantum_mm)
+    assert float(row["ramp_quantum_predicted_mm"]) == pytest.approx(quantum, rel=0.15)
+
+
+def _indicative_noise_px() -> float:
+    """The disparity noise of the indicative quick model, px (0.64 of the quantum)."""
+    from sensorperf.parameters import SensorGeometry
+    from sensorperf.simulate.demo_plan import scaled_geometry
+    from sensorperf.simulate.sensor_model import SyntheticSensorModel
+    geometry = scaled_geometry(SensorGeometry.indicative(), simulate_cli.QUICK_PIXEL_DIVISOR)
+    return SyntheticSensorModel.indicative_scaled(geometry, simulate_cli.QUICK_PIXEL_DIVISOR).disparity_noise_px
+
+
+def test_z_ramp_without_the_fixed_pattern_map_is_noted(tmp_path):
+    """Section 11.2, Ramp (NaN-safe fallback): without Analysis A, or with a fixed-pattern map that is NaN over the ramp's
+    region, nothing is subtracted, the note says so, and the quantum is still found."""
+    root = tmp_path / "session"
+    _, quantum = _write_ramp_session(root, 800.0, RAMP_LOW_NOISE_PX, RAMP_LOW_PATTERN_MM)
+    session = Session.load(root)
+    plain = resolution_depth.run_depth_resolution(session, tmp_path, {}).ramp(800.0)
+    assert not plain.fixed_pattern_subtracted and "fixed-pattern map of Analysis A at this station is unavailable" in plain.note
+    assert plain.quantum_mm == pytest.approx(quantum, rel=RAMP_QUANTUM_TOLERANCE)
+    result_a = noise.run_noise(session, tmp_path, {})
+    for diagnostics in result_a.diagnostics.values():
+        if diagnostics.fixed_pattern_mm is not None:
+            diagnostics.fixed_pattern_mm[:] = np.nan
+    blind = resolution_depth.run_depth_resolution(session, tmp_path, {"A": result_a}).ramp(800.0)
+    assert not blind.fixed_pattern_subtracted and "NaN over most of the ramp" in blind.note
+    assert blind.quantum_mm == pytest.approx(quantum, rel=RAMP_QUANTUM_TOLERANCE)
+
+
+def test_a_keeps_the_fixed_pattern_map_of_the_center_main_poses(result_a, session):
+    """Section 11.2 (Ramp subtracts the fixed-pattern map of A): Analysis A keeps the frame-mean depth minus its fitted plane
+    (float32, NaN outside the region of interest) for the fronto-parallel center-field main poses only."""
+    kept = [r for r in result_a.rows if result_a.diagnostics[r.pose_key].fixed_pattern_mm is not None]
+    assert {r.station_z_mm for r in kept} == {r.station_z_mm for r in result_a.main_rows()} and len(kept) == 3
+    for row in kept:
+        diagnostics = result_a.diagnostics[row.pose_key]
+        assert row.subseries == SUBSERIES_MAIN and row.field == 0 and row.tilt_deg == 0.0
+        assert diagnostics.fixed_pattern_mm.dtype == np.float32 and np.isnan(diagnostics.fixed_pattern_mm[~diagnostics.roi]).all()
+        assert np.nanstd(diagnostics.fixed_pattern_mm) == pytest.approx(row.sigma_fp_mm, rel=0.01)
+
+
+def test_z_ramp_of_the_demonstration_session(result_z, result_a, session, truth, analysis_dir):
+    """Section 11.2, Ramp, on the quick session: a ramp at each of the three demonstration stations (400, 800 and 1600 mm) with
+    the planner's tilt, A's fixed-pattern map subtracted, the implied q within 20 percent of the log's at 800 and 1600 mm
+    (the 400 mm ramp cannot resolve a quantum of 0.39 mm against the 0.1 mm output LSB and says so), the 800 mm ramp flagged as
+    dithered (the indicative noise is 0.64 of the quantum), and both quanta of the optional staircase and the ramp reported
+    side by side at 800 mm."""
+    assert [r.station_z_mm for r in result_z.ramps] == [400.0, 800.0, 1600.0]
+    for ramp in result_z.ramps:
+        assert ramp.fixed_pattern_subtracted and ramp.frames == 10 and ramp.row_true_spread_mm < 1e-6
+    for station in (800.0, 1600.0):
+        ramp = result_z.ramp(station)
+        assert ramp.q_px == pytest.approx(truth["disparity_quantum_px"], rel=RAMP_QUANTUM_TOLERANCE), station
+    low = result_z.ramp(400.0)
+    assert math.isnan(low.q_px) and "output LSB" in low.quantum_method and "not resolved" in low.note
+    assert result_z.ramp(800.0).dithered
+    rows = {(r["station_z_mm"], r["patch_px"]): r for r in _read_csv(analysis_dir / resolution_depth.SUMMARY_CSV_NAME)}
+    both = rows[("800.0", "1")]
+    assert float(both["ramp_quantum_mm"]) == pytest.approx(float(both["staircase_quantum_mm"]), rel=0.1)
+    assert float(both["ramp_tilt_deg"]) == pytest.approx(0.888, rel=0.01)
+    ramp_rows = _read_csv(analysis_dir / resolution_depth.RAMP_CSV_NAME)
+    assert {float(r["station_z_mm"]) for r in ramp_rows} == {400.0, 800.0, 1600.0}
+
+
+def test_z_plateau_widths_and_windowed_jumps():
+    """Section 11.2, Ramp: the plateau detection of the staircase (``plateau_widths``) and its windowed form for a ramp: a
+    staircase of period 10 rows has jumps every 10 rows even when each transition is smeared over several rows; a smooth ramp
+    has none of the window changes near 0 or 1 quantum, and a transition at the end of the curve is dropped."""
+    x = np.arange(60, dtype=float)
+    sharp = 5.0 * np.floor((x + 3.0) / 10.0)
+    mask, centers, heights = resolution_depth._windowed_jumps(sharp, x, 5, 2.5)
+    assert resolution_depth.plateau_widths(mask, centers) == pytest.approx([10.0] * 4)
+    assert heights == pytest.approx([5.0] * 5)
+    smeared = np.convolve(np.pad(sharp, 2, mode="edge"), np.ones(5) / 5.0, mode="valid")        # each step spread over 5 rows
+    mask, centers, _ = resolution_depth._windowed_jumps(smeared, x, 5, 2.5)
+    assert resolution_depth.plateau_widths(mask, centers) == pytest.approx([10.0] * 4, abs=1.0)
+    assert resolution_depth._intermediate_fraction(sharp, 5, 5.0) < 0.2
+    assert resolution_depth._intermediate_fraction(x * 0.5, 5, 5.0) == pytest.approx(1.0)            # a smooth ramp
+    # The staircase's call: one column per pixel.
+    jumps = np.array([[True, False], [False, True], [True, True], [False, False], [True, False]])
+    assert resolution_depth.plateau_widths(jumps, np.arange(5, dtype=float)) == pytest.approx([2.0, 2.0, 1.0])
 
 
 # ---------------------------------------------------------------------------

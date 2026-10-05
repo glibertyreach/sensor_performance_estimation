@@ -487,3 +487,56 @@ def test_minimum_feature_diameter_is_a_named_parameter_of_the_matcher(params):
     assert scaled.disparity_quantum_px == pytest.approx(indicative.disparity_quantum_px / QUICK_DIVISOR)
     with pytest.raises(ValueError):
         replace(model, min_feature_diameter_px=-1.0)
+
+
+def test_demo_plan_has_the_ramp_and_the_ladder_in_quanta(params, geometry):
+    """Section 6.2: the demonstration plan has a ramp (T2 tilted about H by the tilt of ``plan.ramp_tilt_deg``) at each of the
+    stations of its A series, a ladder whose rungs are multiples of the expected quantum at its station (half, two and eight
+    quanta) and the optional staircase, whose step is one tenth of the quantum."""
+    from sensorperf.acquisition.plan import ramp_tilt_deg
+    from sensorperf.io.manifest import SUBSERIES_RAMP
+    quantum_model = SyntheticSensorModel.indicative_scaled(geometry, QUICK_DIVISOR).disparity_quantum_px
+    plan = demo_plan(params, geometry, np.random.default_rng(TEST_SEED), quick=True, series=["A", "Z"],
+                     disparity_quantum_px=quantum_model)
+    ramp = [c for c in plan if c.procedure == "Z" and c.subseries == SUBSERIES_RAMP]
+    assert [c.station_z_mm for c in ramp] == [params.z_min_mm, params.z_reference_mm, params.z_max_mm]
+    plate = make_noise_plate(params)
+    for c in ramp:
+        quantum = geometry.depth_quantum_mm(quantum_model, c.station_z_mm)
+        assert c.tilt_axis == "H" and c.frames == params.frames_per_ramp_pose
+        assert c.tilt_deg == pytest.approx(ramp_tilt_deg(params, geometry, plate, c.station_z_mm, quantum))
+    quantum = geometry.depth_quantum_mm(quantum_model, params.z_reference_mm)
+    steps = sorted({c.step_mm for c in plan if c.subseries == "ladder"})
+    assert steps == pytest.approx([0.5 * quantum, 2.0 * quantum, 8.0 * quantum])
+    stairs = [c.step_mm for c in plan if c.subseries == "staircase"]
+    assert np.diff(stairs) == pytest.approx(quantum / params.z_staircase_subdivision)
+
+
+def test_quantizer_steps_the_rows_of_a_ramp_at_the_depth_quantum(params, geometry):
+    """Renderer steps 4 and 5 on the ramp pose: with the noise, the fixed pattern and the output LSB off, the disparity of
+    every pixel of a tilted T2 is a whole multiple of the disparity quantum q (the matcher quantizes in disparity, so its
+    depth is k / (n q)), and a column of the image steps through the levels with plateaus of about the depth quantum
+    q Z^2 / k (in rows: the quantum over the true depth change per row). This is why the ramp analysis finds plateaus, and why
+    they are visible only where the noise stays below about a fifth of the quantum (with the indicative noise of 0.64 of the
+    quantum the average over frames is smooth)."""
+    from sensorperf.acquisition.plan import ramp_pose, ramp_tilt_deg
+    model = replace(SyntheticSensorModel.indicative_scaled(geometry, QUICK_DIVISOR), disparity_noise_px=0.0,
+                    output_lsb_mm=0.0, fixed_pattern_amplitude_mm=0.0)
+    plate = make_noise_plate(params)
+    quantum = geometry.depth_quantum_mm(model.disparity_quantum_px, STATION_MM)
+    tilt = ramp_tilt_deg(params, geometry, plate, STATION_MM, quantum)
+    pose, _ = ramp_pose(params, geometry, plate, STATION_MM, quantum, tilt)
+    frame = render_frame(model, make_noise_plate(params), pose, np.random.default_rng(TEST_SEED))
+    k = geometry.disparity_constant_mm_px()
+    read = np.isfinite(frame.depth)
+    levels = k / frame.depth[read] / model.disparity_quantum_px
+    assert np.allclose(levels, np.round(levels), atol=1e-3)                       # disparity = n q (float32 xyz)
+    column = int(geometry.sensor_cx_px)
+    rows = np.flatnonzero(read[:, column])
+    values = frame.depth[rows, column]
+    jumps = np.flatnonzero(np.abs(np.diff(values)) > 0.5 * quantum)
+    assert len(jumps) >= 3                                                       # about four quanta over the plate
+    ideal = frame.true_depth[rows, column]
+    row_step = float(np.median(np.diff(ideal)))
+    assert float(np.median(np.diff(jumps))) * row_step == pytest.approx(quantum, rel=0.1)
+    assert np.allclose(frame.true_depth[rows[0]:rows[-1], column], frame.true_depth[rows[0]:rows[-1], column - 5], atol=1e-3)
