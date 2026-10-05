@@ -158,10 +158,24 @@ def group_list_items(items):
             top = stack.pop()
             html += ("</li>" if top[2] else "") + f"</{top[0]}>"
         if not stack or stack[-1][1] < level:
-            html += f"<{kind}>"; stack.append([kind, level, False])
+            # An ordered list that resumes after a formula or figure in the same section continues
+            # the numbering of the list that ended there, as the source document does.
+            # (list_numbering may already have seeded this list's count from a start value of 1,
+            # which carries no information, so a count of zero is treated as unseeded.)
+            if kind == "ol" and LIST_COUNTS.get((num_id, level), 0) == 0 and level in CONTINUED_COUNTS:
+                LIST_COUNTS[(num_id, level)] = CONTINUED_COUNTS[level]
+            # The PDF engine (WeasyPrint) ignores both the <ol start> attribute and a per-item
+            # value attribute, but honors a CSS counter reset, so the resumed count is carried as
+            # an inline counter-reset on the <ol> (the value attribute is kept for readers of the
+            # intermediate HTML).
+            resumed = LIST_COUNTS.get((num_id, level), 0)
+            start = f' style="counter-reset: list-item {resumed}"' if kind == "ol" and resumed else ""
+            html += f"<{kind}{start}>"; stack.append([kind, level, False])
         elif stack[-1][2]:
             html += "</li>"; stack[-1][2] = False
         LIST_COUNTS[(num_id, level)] = LIST_COUNTS.get((num_id, level), 0) + 1
+        if kind == "ol":
+            CONTINUED_COUNTS[level] = LIST_COUNTS[(num_id, level)]
         value = f' value="{LIST_COUNTS[(num_id, level)]}"' if kind == "ol" else ""
         html += f"<li{value}>{text}"; stack[-1][2] = True
     while stack:
@@ -171,6 +185,9 @@ def group_list_items(items):
 
 LIST_COUNTS = {}
 """Items emitted so far per (Word list id, level), so a resumed ordered list keeps counting."""
+CONTINUED_COUNTS = {}
+"""Last ordered-item number emitted per level since the last heading; a new ordered list in the
+same section continues from it (a formula or figure between two parts of one list)."""
 
 def para_html(p):
     imgs = para_images(p)
@@ -227,6 +244,7 @@ for h in parts:
     if h.startswith("<li "): buf.append(h)
     else:
         if buf: body += group_list_items(buf); buf = []
+        if h.startswith("<h"): CONTINUED_COUNTS.clear()
         body += h
 if buf: body += group_list_items(buf)
 
@@ -251,5 +269,7 @@ doc = f'''<!doctype html><html><head><meta charset="utf-8"><style>{CSS}</style><
 <div class="hdr"><span>{esc(L.strip())}</span><span>{esc(R.strip())}</span></div>
 {body}
 </body></html>'''
+import os as _os
+if _os.environ.get("RENDER_DEBUG_HTML"): open(_os.environ["RENDER_DEBUG_HTML"], "w").write(doc)
 HTML(string=doc).write_pdf(A.out)
 print("wrote", A.out, "| figures:", sum(1 for h in parts if h.startswith("<figure")))
