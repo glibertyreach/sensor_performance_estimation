@@ -28,3 +28,36 @@ Step 4.5 checks direction and side; the Step 4.5 side check itself is deferred t
 π_near in the mapping sentence), C01-R5 ("polarity, and gap"; "A–E").
 Gate: ALL CHECKS PASSED against baseline 20261005_124738; scope diff = Section 1 only.
 Deferred follow-up: C05 — add the baseline-side check to Step 4.5 (from C01-R3).
+
+## C02 — Section 2, Parameters (opened 2026-10-05)
+
+Reviewer findings (proposals; nothing executed until the person closes the chunk):
+- C02-R1 (serious): the opening claim "every arbitrary constant ... is a named parameter listed here" is
+  false; literals remain in Sections 4–13 (750 mm reference Z; warm-up 1 min / 10 frames; settle check
+  100 frames / 10 %; sentinel 30 frames; tilt 50 frames; C field sub-series 10 poses; staircase 3 quanta /
+  10 frames; pose-log 0.01 mm; continuous-angle 10 mm / 20 poses; fine ladder 2^(1/4); lapse bound 0.05;
+  quantization patch 20 × 20 px; autocorrelation 1/e; ESF 10–90 %; flatness fraction 0.25; budget 10 fps /
+  3 s). Proposal: add rows now with the code's names; replace each literal in its own chunk.
+- C02-R2 (serious): FRAMES_PER_NOISE_STATION says it covers tilt poses (100) but Section 5 Step 5 and the
+  code use 50 frames per tilt pose. Proposal: new row FRAMES_PER_TILT_POSE = 50; Meaning of the 100 row
+  reads "Frames per Z and field pose".
+- C02-R3: DETECTION_FALSE_ALARM_TARGET Meaning names the blank-site distribution; in B-Z the null is the
+  A→A visit-difference distribution (Section 11 Step 3). Proposal: "from the null distribution: blank sites
+  in D, A→A visit differences in B-Z".
+- C02-R4: PHASE_JITTER_SPAN_PX asserts it exceeds the dot pitch and the correlation length, both unknown
+  before A is analyzed (Section 10 Step 7 checks it after B, C, D are already captured). Proposal: mark †,
+  word it as a requirement, and add a quick-look autocorrelation check between A and B capture (Section 5,
+  to be executed in C06).
+- C02-R5: POST_DIAMETER_FRACTION_OF_D0 depends on a pilot D_0 that exists only after the posts are built.
+  Proposal: Meaning states the provisional source (Tier-A model estimate before fabrication; the D pilot
+  and post-only sites confirm).
+- C02-R6: ROBOT_REPEATABILITY_MM Meaning: "a rung smaller than this is ... flagged" is vacuous now that the
+  smallest rung is 0.1 mm; and repeatability is not the read-back accuracy. Proposal: reword to the truth
+  ratio reported with δ_50.
+- C02-R7: PLATE_FLATNESS_MM presumes σ_tot ≥ 0.2 mm at Z_MIN (unverified). Proposal: mark †; name the 0.25.
+- C02-R8 (style): first person "I do not have" → "not available at the time of writing".
+- C02-R9 (low): DEPTH_LSB_MM Used-in "A" → "A, B-Z"; "Used in" column mixes letters and section numbers;
+  TILT_ANGLES_DEG includes 0°, which repeats the main-series pose (state it as a deliberate repeat or drop it).
+- C02-N1 (note, no action): the relations block exports as raw LaTeX in the docx; verify the live rendering.
+
+Person's comments: (pending)
