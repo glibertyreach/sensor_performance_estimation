@@ -285,3 +285,7 @@ technician executes.
   registration; pose list = the plan tool's poses.csv, which the robot program executes in order) and stating the
   division of labor: the specification says what each series captures and why, the technician procedure says how.
   Then rephrase the Section 5 imperatives against those terms ("The pose list for A holds every ladder station ...").
+- C06-P2 (person, 2026-10-05): the specification skirts the line between a human-readable document and a computer
+  specification, with many shibboleths (the code-style parameter names and constructs in the prose); the plan
+  documents (technician procedure Sections 5 and 6) are good. Style decision pending: how the prose should refer to
+  parameters (plain words with the value, the code name only in the Section 2 table and at first mention).
