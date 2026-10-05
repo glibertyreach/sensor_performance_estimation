@@ -233,7 +233,7 @@ REGISTRATION_RESIDUAL_ACCEPT_MM, tilt within the new MOUNT_TILT_TOLERANCE_DEG (0
 H and V within FRAME_CHECK_PX; R3 registration poses with tilts about both axes and both signs, plate kept in the
 field, and the standard error of the camera Z offset reported and saved beside the residual; R4 σ_t of the warm-up
 gate defined from the warm-up frames; R5 "Step 4.8" in Sections 3.2 and 4; R6 filters-off repeat noted as outside
-the budget, SDK and firmware versions recorded. Code: mount_tilt_tolerance_deg added to the parameters.
+the budget, SDK and firmware versions recorded. Code: mount_tilt_tolerance_deg added to the parameters; check_captures still applies only its gross-error warnings (3 mm, 2°), so a dedicated mount-check mode with the Step 4.8 tolerances is a code follow-up.
 
 Forward note for C14 (Analysis D), found while making the zero-detection test honest (2026-10-05): with the
 false-alarm target γ = 0.01 per window and 300 extended trials, a feature that is truly never detected still
