@@ -283,6 +283,14 @@ class CharacterizationParameters:
     staircase is planned only when ``plan_stations --staircase`` asks for it and is outside the Section 9 budget."""
     z_staircase_frames: int = 10
     """OPTIONAL second pass (staircase): frames per step."""
+    lateral_sweep_step_px: float = 0.1
+    """OPTIONAL second pass of B-HV (lateral sweep, Section 6.1): lateral step of the edge sweep in pixels at the
+    reference station (0.12 mm there). The sweep is planned only when ``plan_stations --lateral-sweep`` asks for it and
+    is outside the Section 9 budget."""
+    lateral_sweep_span_px: float = 2.0
+    """OPTIONAL second pass of B-HV (lateral sweep): span of the sweep in H and in V, pixels at the reference station.
+    The sweep covers the span centered on the nominal position, both ends included, so it has
+    ``lateral_sweep_span_px / lateral_sweep_step_px + 1`` positions per axis (21 with the defaults)."""
     zstep_patch_sizes_px: tuple[int, ...] = (1, 5, 20)
     """Side lengths of the square patches of the B-Z analysis (1 px, 5 x 5, 20 x 20)."""
 
@@ -400,9 +408,15 @@ class CharacterizationParameters:
     band BOUNDARY_BAND_HALF_WIDTH_PX, so that the analysis band of an outer cutout edge lies on front material at the
     far station). The plate (sites plus margin) must fit the field of view at Z_MIN with the phase-jitter span and
     the boundary band on every side; make_standard_target_set raises an error when it does not."""
+    expected_d0_px: float = 7.0
+    """Expected minimum detectable size D_0 in pixels, from the detectability model of Section 3.2 (about 40 pixels of
+    area, a diameter of 7 px), used before fabrication to size the disk support posts. Not a measured value: Analysis D
+    replaces it with the predicted D_0."""
     post_diameter_fraction_of_d0: float = 0.5
-    """Disk support posts must be thinner than this fraction of the expected D_0 (the post check of Section 8, Step 1
-    confirms that a bare post is not detected)."""
+    """Rule for the disk support posts: a post must be thinner than this fraction of the expected D_0 (the post check
+    of Section 8, Step 1 confirms that a bare post is not detected). The planned post diameter is
+    post_diameter_fraction_of_d0 x expected_d0_px x p(Z_MIN) (:meth:`post_diameter_mm`: about 2 mm at the indicative
+    geometry)."""
     frame_check_px: float = 0.5
     """IR-edge to depth-discontinuity agreement required in Step 4.5."""
 
@@ -478,6 +492,19 @@ class CharacterizationParameters:
         """The DETECTION_LOW_STATION_COUNT farthest stations (1131, 1345, 1600 mm), which carry
         DETECTION_LOW_TRIALS trials per feature (the extended trials that measure the low point, D_5)."""
         return self.z_stations_mm()[-self.detection_low_station_count:]
+
+    def post_diameter_mm(self, geometry: SensorGeometry) -> float:
+        """The planned disk support post diameter, derived from the rule of Section 3.2: POST_DIAMETER_FRACTION_OF_D0
+        times the expected D_0 (EXPECTED_D0_PX) at the nearest station, where a pixel is smallest and the post
+        therefore subtends the most pixels, D = fraction x D_0,px x p(Z_MIN) (about 2 mm at the indicative geometry)."""
+        return self.post_diameter_fraction_of_d0 * self.expected_d0_px * geometry.pixel_footprint_mm(self.z_min_mm)
+
+    def lateral_sweep_positions_px(self) -> tuple[float, ...]:
+        """The positions of the optional lateral sweep along one axis, in pixels from the nominal position: from
+        -LATERAL_SWEEP_SPAN_PX / 2 to +LATERAL_SWEEP_SPAN_PX / 2 in steps of LATERAL_SWEEP_STEP_PX, both ends included
+        (21 positions with the defaults)."""
+        steps = int(round(self.lateral_sweep_span_px / self.lateral_sweep_step_px))
+        return tuple(-self.lateral_sweep_span_px / 2.0 + k * self.lateral_sweep_step_px for k in range(steps + 1))
 
     def feature_diameters_mm(self, geometry: SensorGeometry) -> tuple[float, ...]:
         """The disk and cutout diameters D_k = FEATURE_MIN_PX_AT_Z_MAX x p(Z_MAX) x FEATURE_LADDER_RATIO^k,

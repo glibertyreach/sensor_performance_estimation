@@ -82,7 +82,7 @@ def test_station_ladder_is_geometric_from_z_min_to_z_max():
     assert PARAMS.z_reference_mm in PARAMS.z_stations_mm()
     assert PARAMS.noise_stations_mm() == (400.0, 476.0, 566.0, 673.0, 700.0, 800.0, 951.0, 1000.0, 1131.0, 1345.0,
                                           1600.0)
-    assert PARAMS.detection_zero_stations_mm() == (1131.0, 1345.0, 1600.0)
+    assert PARAMS.detection_low_stations_mm() == (1131.0, 1345.0, 1600.0)
     # Consecutive stations differ by the ratio 2^(1/4) up to the 1 mm rounding.
     ratios = np.array(PARAMS.z_stations_mm()[1:]) / np.array(PARAMS.z_stations_mm()[:-1])
     assert np.allclose(ratios, PARAMS.z_station_ratio, rtol=2.0e-3)

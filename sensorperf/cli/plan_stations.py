@@ -15,9 +15,13 @@ of Section 6.1 (B), the Z-step series of Section 6.2 (Z: step ladder with rungs 
 stations, and one tilted ramp pose at every station; ``--staircase`` adds the optional fine staircase), the area series of
 Section 7 (C: jittered poses, field sub-series, optional open-background
 variant) and the detection series of Section 8 (D: main trials at every station and
-extended zero-detection trials at the farthest stations),
+extended trials of the low point, D_5, at the farthest stations),
 with drift sentinels inserted on the budget clock. ``--filters-off`` appends the filters-off repeat of A, B-HV and
-B-Z (Section 4, Step 4.2) after each filters-on series; the summary lists it outside the main budget. Every random draw uses
+B-Z (Section 4, Step 4.2) after each filters-on series; the summary lists it outside the main budget. Two further
+options, both off by default: ``--lateral-sweep`` adds the optional second pass of B-HV (Section 6.1, Step 6: T3a swept
+in H and then in V in steps of LATERAL_SWEEP_STEP_PX over LATERAL_SWEEP_SPAN_PX at Z_REFERENCE_MM, outside the main
+budget), and ``--reuse-c-first-frames`` lets the first frame of each C pose count as a D trial (Section 8, Reuse), so the
+D main series plans only the remaining poses (the Section 9 budget is still computed without the reuse). Every random draw uses
 ``np.random.default_rng(seed)`` with a seed derived from ``--seed`` and logged in
 poses.csv. A target that would not fit the field of view at its station is pulled
 inward along its field direction and the summary says so (Section 5, Step 1).
@@ -98,7 +102,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED, metavar="N",
                         help="master random seed; every shuffle and offset draws from it and is logged (default %(default)s)")
     parser.add_argument("--no-extended", action="store_true",
-                        help="skip the extended 0 percent trials of the D series at the farthest stations (Section 8)")
+                        help="skip the extended trials of the low point (D_5) of the D series at the farthest stations "
+                             "(Section 8)")
     parser.add_argument("--filters-off", action="store_true",
                         help="append the filters-off repeat of the A and B series (A, B-HV and B-Z; Section 4, Step 4.2) "
                              "after each filters-on series; its poses are labeled filters_off and are listed outside "
@@ -107,6 +112,16 @@ def build_parser() -> argparse.ArgumentParser:
                         help="add the optional second pass of the B-Z series, the fine staircase (Section 6.2), at the "
                              "reduced stations; its poses are labeled staircase and are listed outside the main budget "
                              "in plan_summary.txt (the ramp and the step ladder are always planned)")
+    parser.add_argument("--reuse-c-first-frames", action="store_true",
+                        help="let the first frame of each C pose of the same target, gap and station count as a D trial "
+                             "(Section 8, Reuse: 30 of the 60 per configuration and station), so that the D main series "
+                             "plans only the remaining poses; the Section 9 budget is still computed without the reuse "
+                             "and plan_summary.txt says how many D poses were taken from C")
+    parser.add_argument("--lateral-sweep", action="store_true",
+                        help="add the optional second pass of the B-HV series (Section 6.1, Step 6): the edge target T3a "
+                             "swept in H and then in V at Z_REFERENCE_MM in steps of LATERAL_SWEEP_STEP_PX over "
+                             "LATERAL_SWEEP_SPAN_PX (both ends included); its poses are labeled lateral_sweep and are "
+                             "listed outside the main budget in plan_summary.txt")
     parser.add_argument("--open-background", action="store_true",
                         help="add the open-background variant of the C series for the cutout arrays (Section 7, Step 4)")
     return parser
@@ -129,7 +144,8 @@ def main(argv: list[str] | None = None) -> int:
         plan = plan_full_session(params, geometry, np.random.default_rng(args.seed), registration=registration,
                                  filters_off=args.filters_off,
                                  open_background=args.open_background, extended=not args.no_extended, targets=targets,
-                                 series=args.series, diagnostics=diagnostics, staircase=args.staircase)
+                                 series=args.series, diagnostics=diagnostics, staircase=args.staircase,
+                                 reuse_c_first_frames=args.reuse_c_first_frames, lateral_sweep=args.lateral_sweep)
     except (OSError, ValueError, MissingSensorValue, PlanInputError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return EXIT_INPUT_ERROR

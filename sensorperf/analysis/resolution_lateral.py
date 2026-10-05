@@ -53,7 +53,7 @@ from sensorperf.geometry.targets import (
     SQUARE_EDGE_TOP, SQUARE_EDGES, SURFACE_NONE, Feature,
 )
 from sensorperf.io.capture_set import load_stack
-from sensorperf.io.manifest import SUBSERIES_NOMINAL, group_by_pose, select
+from sensorperf.io.manifest import SUBSERIES_LATERAL_SWEEP, SUBSERIES_NOMINAL, group_by_pose, select
 from sensorperf.io.session import Session
 from sensorperf.parameters import PROCEDURE_EDGES, CharacterizationParameters
 from sensorperf.stats.intervals import bootstrap_statistic
@@ -600,7 +600,9 @@ def run_lateral_resolution(session: Session, out_dir: str | Path, previous: dict
     """Analysis B-HV, Section 11.1 Steps 1 to 9 (module docstring). Returns None when the manifest has no procedure
     B frames. ``out_dir`` is where write_outputs will write (nothing is written here); ``previous`` is not used."""
     options = LateralOptions() if options is None else options
-    records = select(session.records, procedure=PROCEDURE_EDGES)
+    # The optional lateral sweep (Section 6.1, Step 6) covers only +/- 1 px and would bias the pooled edge spread
+    # function of the reference station; Section 11.1 reads it separately.
+    records = [r for r in select(session.records, procedure=PROCEDURE_EDGES) if r.subseries != SUBSERIES_LATERAL_SWEEP]
     if not records:
         return None
     params = session.params

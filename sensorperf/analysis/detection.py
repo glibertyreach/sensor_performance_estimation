@@ -1,6 +1,14 @@
 """
-Analysis D: minimum detectable size at 50, 10 and 0 percent (procedure document, Section 13), Steps 1 to 11, in the
-Z-sweep design (redesign note, Sections 2 and 5).
+Analysis D: minimum detectable size at 50, 10 and 5 percent, with a PREDICTED 0 percent point (procedure document,
+Section 13), Steps 1 to 11, in the Z-sweep design (redesign note, Sections 2 and 5).
+
+D_50, D_10 and D_5 are measured points; the lowest measured point is D_5 (DETECTION_LOW_PROBABILITY = 5 percent, which
+the 300 extended trials resolve to about +/- 2.5 percent). The 0 percent level D_0 is NOT measured: a smooth curve never
+reaches zero and no finite number of trials proves a probability is zero. D_0 is the fitted psychometric curve
+extrapolated below D_5 to the level DETECTION_ZERO_PREDICTION_LEVEL (1 percent), reported as ``d0_predicted`` with the
+boolean column ``d0_is_prediction`` (always True) and a note column that says so; it is NaN, with the note saying why,
+where there is no fit or the fit did not converge. Every figure draws the predicted point with a hollow marker and a
+dashed extrapolated segment and labels it "predicted".
 
 What it computes
     For every configuration (target kind disk or cutout, gap, station, field position) the detection probability
@@ -12,7 +20,8 @@ What it computes
     stations = 27 values of D_px = D f_x / Z, spaced by the station ratio with the overlaps between neighbors.
     From the trials: false-alarm-calibrated thresholds and the false-alarm rate gamma of every station (from the
     blank sites), and, POOLED over the (feature, station) pairs of a (kind, gap, field, rule) group, the
-    psychometric fit on ln D_px, D_50, D_10 and D_0 in D_px and converted to mm at each station, the overlap
+    psychometric fit on ln D_px, D_50 and D_10 (fitted), D_5 (measured) and the predicted D_0 in D_px and converted to
+    mm at each station, the overlap
     (scaling) test between neighboring features, and a logistic regression with the depth noise as a covariate.
 
 Conventions (docs/design/code_design.md, Section 4)
@@ -58,12 +67,20 @@ How the steps are implemented
        it and start below it); otherwise it is NaN and the status column says why.
     5  Model range of D_10 over the logistic, normal and Weibull fits; model-free isotonic crossings (0.1, 0.5) of
        the corrected proportions.
-    6  D_0 empirical, as a D_px BRACKET: per merged level the one-sided Clopper-Pearson upper bound psi_U at
-       CONFIDENCE_LEVEL, corrected P*_U = (psi_U - gamma) / (1 - gamma); D_0,emp is the largest D_px such that P*_U <=
-       DETECTION_ZERO_PROBABILITY_BOUND at that level and at every smaller one; NaN when even the smallest level
-       fails (not demonstrated). The bracket is [D_0,emp, next level up], converted to mm at each station.
-    7  D_0 threshold model (stats.psychometric.fit_threshold_model) on the pooled levels with its profile-likelihood
-       interval; "not estimable" when every level detects nothing (its ValueError is caught and recorded).
+    6  D_5 measured, as a D_px BRACKET: per merged level the one-sided Clopper-Pearson upper bound psi_U at
+       CONFIDENCE_LEVEL, corrected P*_U = (psi_U - gamma) / (1 - gamma); D_5 is the largest D_px such that P*_U <=
+       DETECTION_LOW_PROBABILITY at that level and at every smaller one (the smallest level whose corrected
+       probability is demonstrably at or below 5 percent, and the lowest measured point); NaN when even the smallest
+       level fails (not demonstrated). The bracket is [D_5, next level up], converted to mm at each station
+       (columns d5 and d5_next).
+    7  D_0 PREDICTED (a prediction, never a measurement): the best fitted curve (by deviance) inverted at the corrected
+       probability DETECTION_ZERO_PREDICTION_LEVEL, i.e. the fit extrapolated below the lowest measured point D_5
+       (:func:`predict_d0`); the range of the same inversion over the three fitted shapes is the model range
+       (d0_predicted_model_min / _max). ``d0_is_prediction`` is always True and ``d0_predicted_note`` explains the
+       extrapolation; with no fit, or when the best fit did not converge, D_0 is NaN and the note says so. The threshold
+       model (stats.psychometric.fit_threshold_model, a Weibull with a hard floor) on the pooled levels gives a second
+       prediction, ``d0_model``, with its profile-likelihood interval; "not estimable" when every level detects nothing
+       (its ValueError is caught and recorded).
     8  Geometric limit (cutouts): the diameter at which A_geo of Analysis C, Step 7 reaches zero, by bisection on a
        probe cutout at the plate center (area.geometric_limit_diameter_mm), cameras only and with the projector, per
        station (mm, and px at that station).
@@ -71,14 +88,15 @@ How the steps are implemented
        station, recomputes the per-feature tau from the resampled blank statistics, the pooled gamma and the pooled
        counts, and re-fits ONE curve family (the best family of the original fit; refitting all three in every
        resample would triple the run time) to give D_50 and D_10 in D_px. The model D_0 interval is the
-       profile-likelihood interval of Step 7, not a bootstrap. The number of resamples is BOOTSTRAP_RESAMPLES, reduced
+       profile-likelihood interval of Step 7, not a bootstrap; the predicted D_0 has no bootstrap interval yet. The number of resamples is BOOTSTRAP_RESAMPLES, reduced
        to DetectionOptions.reduced_bootstrap_resamples when the stations of the group have fewer than
        DetectionOptions.full_bootstrap_min_poses poses each on average (stated in the details).
     10 Every minimum in mm, px and mrad (D_px and theta are constant over stations for a pooled minimum, D_mm scales
        with Z); the minimum diameter in mm against Z in a figure.
     11 D_detect_summary.csv (per configuration), D_pooled_summary.csv (per group), D_overlap_test.csv,
-       D_detect_details.json, figures (pooled psychometric curves with binomial error bars and the minimums marked;
-       the minimum diameter against Z).
+       D_detect_details.json, figures (pooled psychometric curves with binomial error bars and the minimums marked,
+       the predicted D_0 as a hollow marker on a dashed extrapolation; the minimum diameter against Z, the predicted D_0
+       with a hollow marker and a dashed line).
     12 Overlap (scaling) test (analysis.overlap): per group and pair of neighboring features, the mean difference of
        their corrected detection curves over the D_px range they share and whether zero lies inside its bootstrap
        interval; disagreement is attributed to sigma_tot(Z).
@@ -176,7 +194,21 @@ PSYCHOMETRIC_CURVE_POINTS = 200
 """Points of the fitted curves drawn in the figures."""
 P_STAR_D50 = 0.5
 P_STAR_D10 = 0.1
-"""The corrected detection probabilities that define D_50 and D_10 (Section 13, Steps 4 and 5)."""
+"""The corrected detection probabilities that define D_50 and D_10 (Section 13, Steps 4 and 5). D_5 uses
+DETECTION_LOW_PROBABILITY and the predicted D_0 DETECTION_ZERO_PREDICTION_LEVEL, both procedure parameters."""
+D0_NOTE_PREDICTION = (
+    "PREDICTION, not a measurement: extrapolation of the best fitted psychometric curve ({curve}) below the lowest "
+    "measured point (D_5, corrected probability {low:g}) to the corrected probability {level:g}")
+"""Note of a predicted D_0 (``d0_predicted_note``); formatted with the curve name, DETECTION_LOW_PROBABILITY and
+DETECTION_ZERO_PREDICTION_LEVEL."""
+D0_NOTE_NO_FIT = ("predicted D_0 not available: no psychometric fit (too few trials); D_0 is a prediction from a fitted "
+                  "curve below the lowest measured point and there is no curve")
+"""Note of a predicted D_0 where the group has too few trials for a fit."""
+D0_NOTE_NOT_CONVERGED = ("predicted D_0 not available: the best psychometric fit ({curve}) did not converge, so its "
+                         "extrapolation below the lowest measured point would not be a prediction worth reporting")
+"""Note of a predicted D_0 where the best fit did not converge."""
+D0_NOTE_NOT_FINITE = "predicted D_0 not available: the fitted curve ({curve}) does not reach the prediction level"
+"""Note of a predicted D_0 whose curve inversion is not a finite size."""
 RULE_PLOT_SHIFT = 1.03
 """Figures: the no-read-inclusive points are drawn at this multiple of D_px so that coincident points stay visible."""
 HIGHER = "higher"
@@ -555,32 +587,66 @@ def _fit_thresholds(levels, successes, trials, gamma, params, curve: str,
             fit.threshold(P_STAR_D10) if reaches_tenth else NO_THRESHOLD)
 
 
-def empirical_d0(levels: np.ndarray, successes: np.ndarray, trials: np.ndarray, gamma: float, confidence: float,
+def empirical_d5(levels: np.ndarray, successes: np.ndarray, trials: np.ndarray, gamma: float, confidence: float,
                  bound: float) -> dict[str, Any]:
-    """Step 6: the empirical zero-detection size. Returns the per-level one-sided upper bounds psi_U and corrected
-    P*_U and D_0,emp (NaN when even the smallest level fails), the next level up, and the 'passing' flags."""
+    """Step 6: the measured low point D_5. Per level (ascending), the one-sided Clopper-Pearson upper bound psi_U of the
+    raw detection rate at ``confidence``, corrected for false alarms to P*_U = (psi_U - gamma) / (1 - gamma), and
+    whether P*_U is within ``bound`` (DETECTION_LOW_PROBABILITY, 5 percent). D_5 is the largest level such that it and
+    every smaller level are within the bound (the smallest levels whose corrected probability is demonstrably at or
+    below 5 percent), NaN when even the smallest level is not. Returns ``levels`` (the per-level table), ``d5`` and
+    ``d5_next`` (the next level up, so that D_5 is a bracket; NaN when every level passes). The levels keep the units
+    of ``levels`` (D_px in the pooled analysis)."""
     order = np.argsort(levels, kind="stable")
     rows = []
     passing = True
-    d0 = NO_THRESHOLD
+    d5 = NO_THRESHOLD
     next_level = NO_THRESHOLD
-    for position, index in enumerate(order):
+    for index in order:
         n, s = int(trials[index]), int(successes[index])
         if n < 1:
             continue
         upper = clopper_pearson_upper(s, n, confidence)
         corrected_upper = float(corrected_rate(upper, gamma))
         ok = corrected_upper <= bound
-        rows.append({"d_mm": float(levels[index]), "trials": n, "detections": s, "psi_upper": upper,
+        rows.append({"d_px": float(levels[index]), "trials": n, "detections": s, "psi_upper": upper,
                      "p_star_upper": corrected_upper, "within_bound": bool(ok)})
         if passing and ok:
-            d0 = float(levels[index])
+            d5 = float(levels[index])
         elif passing:
             passing = False
             next_level = float(levels[index])
-    if passing and rows:                                 # every level passes: the 0 percent point is above the range
+    if passing and rows:                                 # every level passes: the 5 percent point is above the range
         next_level = NO_THRESHOLD
-    return {"levels": rows, "d0_emp_mm": d0, "d0_emp_next_mm": next_level}
+    return {"levels": rows, "d5": d5, "d5_next": next_level}
+
+
+def predict_d0(fits: Mapping[str, PsychometricFit] | None, best: PsychometricFit | None, level: float,
+               lowest_measured_probability: float) -> dict[str, Any]:
+    """Step 7: the PREDICTED D_0, the best fitted curve inverted at the corrected probability ``level``
+    (DETECTION_ZERO_PREDICTION_LEVEL). It lies below the lowest measured point (D_5, at
+    ``lowest_measured_probability``), so it is an extrapolation of the fitted curve, never a measurement.
+
+    Returns ``d0`` (D_px; NaN where ``best`` is None, did not converge, or its inversion is not a positive finite size),
+    ``model_min`` / ``model_max`` (the range of the same inversion over the converged fitted shapes, NaN without
+    one), ``is_prediction`` (always True) and ``note`` (the extrapolation, or why there is no value)."""
+    result: dict[str, Any] = {"d0": NO_THRESHOLD, "model_min": NO_THRESHOLD, "model_max": NO_THRESHOLD,
+                              "is_prediction": True, "level": level, "note": D0_NOTE_NO_FIT}
+    if best is None:
+        return result
+    if not best.converged:
+        result["note"] = D0_NOTE_NOT_CONVERGED.format(curve=best.curve)
+        return result
+    with _quiet():
+        value = best.threshold(level)
+        shapes = [f.threshold(level) for f in (fits or {}).values() if f.converged]
+    if not (math.isfinite(value) and value > 0.0):
+        result["note"] = D0_NOTE_NOT_FINITE.format(curve=best.curve)
+        return result
+    finite = [v for v in shapes if math.isfinite(v) and v > 0.0]
+    result.update(d0=float(value), model_min=float(min(finite)) if finite else NO_THRESHOLD,
+                  model_max=float(max(finite)) if finite else NO_THRESHOLD,
+                  note=D0_NOTE_PREDICTION.format(curve=best.curve, low=lowest_measured_probability, level=level))
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -687,8 +753,9 @@ class DetectionResult:
 def _minimum_columns() -> list[str]:
     """Names of the threshold columns that are reported in mm, px and mrad."""
     return ["d50", "d50_lower", "d50_upper", "d10", "d10_lower", "d10_upper", "d10_model_min", "d10_model_max",
-            "d50_isotonic", "d10_isotonic", "d0_emp", "d0_emp_next", "d0_model", "d0_model_lower", "d0_model_upper",
-            "d0_geometric", "d0_geometric_cameras"]
+            "d50_isotonic", "d10_isotonic", "d5", "d5_next", "d0_predicted", "d0_predicted_model_min",
+            "d0_predicted_model_max", "d0_model", "d0_model_lower", "d0_model_upper", "d0_geometric",
+            "d0_geometric_cameras"]
 
 
 POOLED_MINIMUMS = tuple(name for name in _minimum_columns() if not name.startswith("d0_geometric"))
@@ -698,7 +765,8 @@ POOLED_MINIMUMS = tuple(name for name in _minimum_columns() if not name.startswi
 def _summary_columns() -> list[str]:
     columns = ["target_id", "kind", "gap_mm", "station_z_mm", "field", "rule", "trials_per_level",
                "trials_per_level_max", "trials_new", "trials_reused", "gamma", "gamma_lower", "gamma_upper",
-               "gamma_blank_trials", "tau_mm", "best_curve", "d50_status", "d10_status", "d0_model_status"]
+               "gamma_blank_trials", "tau_mm", "best_curve", "d50_status", "d10_status", "d0_model_status",
+               "d0_is_prediction", "d0_predicted_note"]
     for name in _minimum_columns():
         columns += [f"{name}_mm", f"{name}_px", f"{name}_mrad"]
     columns += ["independence_ok", "bootstrap_resamples", "bootstrap_failures", "fit_note"]
@@ -708,20 +776,22 @@ def _summary_columns() -> list[str]:
 SUMMARY_COLUMNS = tuple(_summary_columns())
 """Columns of D_detect_summary.csv, one row per configuration: the specification's list (target, gap, Z, gamma of the
 station and its interval, tau, best curve, D_50, D_10 with their intervals, the D_10 model range, the isotonic values,
-the D_0,emp bracket, model D_0 with its interval, the geometric D_0, independence flag), each minimum in mm, px and
-mrad, plus status and bookkeeping columns. The minimums are those of the pooled group (D_px, constant over the
+the measured D_5 bracket [d5, d5_next], the PREDICTED D_0 (``d0_predicted``, its model range, ``d0_is_prediction`` always
+True and ``d0_predicted_note``), the floor-model D_0 with its interval (also a prediction), the geometric D_0,
+independence flag), each minimum in mm, px and mrad, plus status and bookkeeping columns. The minimums are those of the pooled group (D_px, constant over the
 stations) converted to mm at the configuration's station."""
 
 POOLED_COLUMNS = (
     ("kind", "gap_mm", "field", "rule", "stations", "pairs", "trials", "gamma", "gamma_lower", "gamma_upper",
      "gamma_blank_trials", "best_curve", "alpha_ln_px", "beta", "lapse_rate", "deviance", "d50_status", "d10_status",
-     "d0_model_status")
+     "d0_model_status", "d0_is_prediction", "d0_predicted_note")
     + tuple(f"{name}_px" for name in POOLED_MINIMUMS)
     + ("bootstrap_resamples", "bootstrap_failures", "regression_status", "regression_observations",
        "regression_b0", "regression_b_ln_dpx", "regression_se_ln_dpx", "regression_b_ln_sigma",
        "regression_se_ln_sigma", "regression_p_noise", "regression_separated", "fit_note"))
 """Columns of D_pooled_summary.csv, one row per (kind, gap, field, rule) group pooled over its stations: the pooled
-psychometric fit on ln D_px (D_50, D_10, D_0 in D_px, with the D_0 bracket [d0_emp, d0_emp_next]), the group's
+psychometric fit on ln D_px (D_50, D_10 and the measured D_5 in D_px, with the D_5 bracket [d5, d5_next], and the
+predicted D_0 flagged by ``d0_is_prediction`` and ``d0_predicted_note``), the group's
 false-alarm rate, and the noise-covariate regression (logit p = b0 + b_ln_dpx ln D_px + b_ln_sigma ln sigma_tot(Z))."""
 
 
@@ -961,7 +1031,8 @@ def _analyze_group(session: Session, members: list[_ConfigRule], options: Detect
         "trials": sum(p["trials"] for p in pairs), "gamma": gamma, "gamma_lower": gamma_lower,
         "gamma_upper": gamma_upper, "gamma_blank_trials": blank_trials, "best_curve": "", "alpha_ln_px": math.nan,
         "beta": math.nan, "lapse_rate": math.nan, "deviance": math.nan, "d50_status": "too few trials",
-        "d10_status": "too few trials", "d0_model_status": "too few trials", "bootstrap_resamples": 0,
+        "d10_status": "too few trials", "d0_model_status": "too few trials", "d0_is_prediction": True,
+        "d0_predicted_note": D0_NOTE_NO_FIT, "bootstrap_resamples": 0,
         "bootstrap_failures": 0, "regression_status": "not attempted", "fit_note": ""}
     for name in POOLED_MINIMUMS:
         row[f"{name}_px"] = math.nan
@@ -986,7 +1057,7 @@ def _analyze_group(session: Session, members: list[_ConfigRule], options: Detect
 
     model = None
     best_name = ""
-    d0 = {"d0_emp_mm": math.nan, "d0_emp_next_mm": math.nan, "levels": []}
+    d5 = {"d5": math.nan, "d5_next": math.nan, "levels": []}
     if enough:
         raw = merged_successes / merged_trials
         corrected = np.asarray(corrected_rate(raw, gamma))
@@ -1013,11 +1084,16 @@ def _analyze_group(session: Session, members: list[_ConfigRule], options: Detect
         detail["levels_px"] = [{"d_px": float(x), "trials": int(n), "detections": int(k), "proportion": float(p),
                                 "corrected": float(c)}
                                for x, n, k, p, c in zip(level_px, merged_trials, merged_successes, raw, corrected)]
-        # Step 6: the D_0 bracket in D_px.
-        d0 = empirical_d0(level_px, merged_successes, merged_trials, gamma, params.confidence_level,
-                          params.detection_zero_probability_bound)
-        row["d0_emp_px"], row["d0_emp_next_px"] = d0["d0_emp_mm"], d0["d0_emp_next_mm"]
-        # Step 7: the threshold model.
+        # Step 6: the measured low point, D_5, as a D_px bracket.
+        d5 = empirical_d5(level_px, merged_successes, merged_trials, gamma, params.confidence_level,
+                          params.detection_low_probability)
+        row["d5_px"], row["d5_next_px"] = d5["d5"], d5["d5_next"]
+        # Step 7: the predicted D_0 (the best curve extrapolated below D_5) and the floor model.
+        prediction = predict_d0(fits, best, params.detection_zero_prediction_level, params.detection_low_probability)
+        row.update(d0_predicted_px=prediction["d0"], d0_predicted_model_min_px=prediction["model_min"],
+                   d0_predicted_model_max_px=prediction["model_max"], d0_is_prediction=True,
+                   d0_predicted_note=prediction["note"])
+        detail["d0_predicted"] = _prediction_detail(prediction, best, level_px)
         try:
             with _quiet():
                 model = fit_threshold_model(level_px, corrected, merged_trials, params.confidence_level)
@@ -1038,7 +1114,9 @@ def _analyze_group(session: Session, members: list[_ConfigRule], options: Detect
                            f"{options.min_trials_per_level} trials over {n_levels} distinct D_px "
                            f"(need {options.min_pairs_for_fit} and {MIN_DISTINCT_LEVELS_FOR_FIT}); "
                            "curve fits not attempted")
-    detail["d0_empirical"] = d0
+    detail["d5_measured"] = d5
+    if not enough:
+        detail["d0_predicted"] = {"d_px": math.nan, "is_prediction": True, "note": D0_NOTE_NO_FIT}
 
     # Step 13: the noise covariate.
     if pairs and enough:
@@ -1073,6 +1151,23 @@ def _analyze_group(session: Session, members: list[_ConfigRule], options: Detect
         overlaps.append({"kind": kind, "gap_mm": gap, "field": field_code, "rule": rule, **result.as_row()})
     detail["overlap_tests"] = overlaps
     return row, detail, overlaps
+
+
+def _prediction_detail(prediction: dict[str, Any], best: PsychometricFit, level_px: np.ndarray) -> dict[str, Any]:
+    """The record of the predicted D_0 for the details file and the figures: the prediction, its corrected-probability
+    level, the raw probability the best curve has there, and the dashed extrapolated segment of the curve from the
+    predicted D_0 up to the smallest measured level (empty when the prediction is not below it)."""
+    detail: dict[str, Any] = {"d_px": prediction["d0"], "model_min_px": prediction["model_min"],
+                              "model_max_px": prediction["model_max"], "is_prediction": True,
+                              "corrected_probability_level": prediction["level"], "note": prediction["note"],
+                              "psi": math.nan, "extrapolation_px": [], "extrapolation_psi": []}
+    lowest = float(level_px.min())
+    if math.isfinite(prediction["d0"]):
+        detail["psi"] = float(best.probability(np.array([prediction["d0"]]))[0])
+        if prediction["d0"] < lowest:
+            grid = np.geomspace(prediction["d0"], lowest, PSYCHOMETRIC_CURVE_POINTS)
+            detail["extrapolation_px"], detail["extrapolation_psi"] = grid, best.probability(grid)
+    return detail
 
 
 def _bootstrap_group(row: dict[str, Any], detail: dict[str, Any], members: list[_ConfigRule], level_px: np.ndarray,
@@ -1115,6 +1210,7 @@ def _fill_config_minimums(session: Session, member: _ConfigRule, pooled_row: dic
     fx = float(session.geometry.require("sensor_fx_px"))
     row.update(best_curve=pooled_row["best_curve"], d50_status=pooled_row["d50_status"],
                d10_status=pooled_row["d10_status"], d0_model_status=pooled_row["d0_model_status"],
+               d0_is_prediction=True, d0_predicted_note=pooled_row["d0_predicted_note"],
                bootstrap_resamples=pooled_row["bootstrap_resamples"],
                bootstrap_failures=pooled_row["bootstrap_failures"], fit_note=pooled_row["fit_note"])
     values_mm = {name: (pooled_row[f"{name}_px"] * station / fx if math.isfinite(pooled_row[f"{name}_px"])
@@ -1206,7 +1302,9 @@ def _figures_psychometric(result: DetectionResult, out_dir: Path) -> list[Path]:
     """Step 11: per (kind, gap, field) the pooled detection fractions of all (feature, station) pairs with
     Clopper-Pearson error bars against D_px (one color per feature, one marker per station is too many: the stations
     are the points of a feature's curve), the fitted curve of each rule, and the minimums marked (D_50 solid, D_10
-    dashed, D_0,emp dotted, D_0 model dash-dot)."""
+    dashed, the measured D_5 dotted, the floor-model D_0 dash-dot). The predicted D_0 is drawn as a prediction, not as a
+    measurement: a hollow marker at the fitted curve's value there, on a dashed extrapolation of the curve below the
+    smallest measured level, labeled "predicted"."""
     written: list[Path] = []
     keys = sorted({(d["kind"], d["gap_mm"], d["field"]) for d in result.pooled_details},
                   key=lambda k: (k[0], k[1] or 0.0, k[2]))
@@ -1235,31 +1333,48 @@ def _figures_psychometric(result: DetectionResult, out_dir: Path) -> list[Path]:
             curve = detail.get("curve_px")
             if curve is not None:
                 axis.plot(curve["d_px"], curve["psi"], color=color, linewidth=1.2)
-            for name, style in (("d50", "-"), ("d10", "--"), ("d0_emp", ":"), ("d0_model", "-.")):
+            for name, style in (("d50", "-"), ("d10", "--"), ("d5", ":"), ("d0_model", "-.")):
                 value = row[f"{name}_px"]
                 if math.isfinite(value) and value > 0.0:
                     axis.axvline(value, color=color, linestyle=style, linewidth=0.9)
+            # The predicted D_0: dashed extrapolation of the fitted curve and a hollow marker, never a solid point.
+            predicted = detail.get("d0_predicted", {})
+            if len(predicted.get("extrapolation_px", [])):
+                axis.plot(predicted["extrapolation_px"], predicted["extrapolation_psi"], color=color,
+                          linestyle=PREDICTION_LINE_STYLE, linewidth=1.2)
+            if math.isfinite(predicted.get("d_px", math.nan)) and math.isfinite(predicted.get("psi", math.nan)):
+                axis.plot([predicted["d_px"] * shift], [predicted["psi"]], marker=PREDICTION_MARKER, markerfacecolor="none",
+                          markeredgecolor=color, markersize=PREDICTION_MARKER_SIZE, linestyle="none",
+                          label=f"{rule.replace('_', ' ')} rule, D_0 predicted (extrapolation)")
         axis.axhline(0.0, color=OKABE_ITO_BLACK, linewidth=0.4)
         log_axis(axis)
         axis.set_ylim(-0.05, 1.05)
         axis.set_xlabel("feature diameter D_px = D f_x / Z (px), all stations pooled")
         axis.set_ylabel("detection fraction (error bars: 95% Clopper-Pearson)")
         axis.set_title(f"{kind}s, G = {gap:g} mm" + (f", field {field_code}" if field_code else "")
-                       + "\nsolid D_50, dashed D_10, dotted D_0 empirical, dash-dot D_0 model", fontsize=8)
+                       + "\nsolid D_50, dashed D_10, dotted D_5 (measured), dash-dot D_0 floor model; hollow marker "
+                       "and dashed curve: D_0 predicted (extrapolation)", fontsize=8)
         axis.legend(fontsize=6, ncol=2)
         axis.grid(True, linewidth=0.3, which="both")
         written += save_figure(figure, out_dir / f"D_psychometric_{kind}_G{gap:g}_F{field_code}")
     return written
 
 
+PREDICTION_MARKER = "o"
+"""Marker of a predicted D_0 in the figures: always drawn hollow, so that it cannot be read as a measured point."""
+PREDICTION_MARKER_SIZE = 8.0
+"""Size (points) of the hollow marker of a predicted D_0."""
+PREDICTION_LINE_STYLE = "--"
+"""Line style of the extrapolated segment of the fitted curve (below the lowest measured point) and of the predicted D_0
+line in the minimum-versus-Z figure."""
 FEATURE_MARKERS = ("o", "s", "^", "D", "v")
 """Markers cycled over the features of a plate in the pooled psychometric figure."""
 
 
 def _figure_minimum_vs_z(result: DetectionResult, out_dir: Path) -> list[Path]:
-    """Step 10: the minimum diameter in mm (D_50, D_10 and the empirical D_0) against Z, one panel per kind and rule,
-    one line style per gap, with the feature diameters of the plate as faint horizontal lines and, for cutouts, the
-    geometric limit. A pooled minimum is constant in D_px, so in mm it rises in proportion to Z."""
+    """Step 10: the minimum diameter in mm (D_50, D_10, the measured D_5 and the PREDICTED D_0) against Z, one panel per
+    kind and rule, one line style per gap, with the feature diameters of the plate as faint horizontal lines and, for
+    cutouts, the geometric limit. The predicted D_0 has a hollow marker and a dashed line and is labeled "predicted". A pooled minimum is constant in D_px, so in mm it rises in proportion to Z."""
     panels = sorted({(r["kind"], r["rule"]) for r in result.rows})
     if not panels:
         return []
@@ -1267,7 +1382,8 @@ def _figure_minimum_vs_z(result: DetectionResult, out_dir: Path) -> list[Path]:
     figure.clf()
     axes = figure.subplots(1, len(panels), squeeze=False, sharey=True)[0]
     styles = (("d50", "o", OKABE_ITO_BLUE, "50%"), ("d10", "s", OKABE_ITO_ORANGE, "10%"),
-              ("d0_emp", "^", OKABE_ITO_VERMILLION, "0% (empirical)"))
+              ("d5", "^", OKABE_ITO_VERMILLION, "5% (measured)"),
+              ("d0_predicted", "v", OKABE_ITO_BLACK, "0% (predicted)"))
     for axis, (kind, rule) in zip(axes, panels):
         rows = [r for r in result.rows if r["kind"] == kind and r["rule"] == rule and r["field"] == 0]
         gaps = sorted({r["gap_mm"] for r in rows})
@@ -1276,7 +1392,11 @@ def _figure_minimum_vs_z(result: DetectionResult, out_dir: Path) -> list[Path]:
             linestyle = "-" if gap == gaps[0] else ":"
             for name, marker, color, label in styles:
                 points = [(r["station_z_mm"], r[f"{name}_mm"]) for r in gap_rows if math.isfinite(r[f"{name}_mm"])]
-                if points:
+                if points and name == "d0_predicted":
+                    # A prediction: hollow marker, dashed line.
+                    axis.plot(*zip(*points), marker=marker, color=color, linestyle=PREDICTION_LINE_STYLE,
+                              markerfacecolor="none", label=f"{label}, G = {gap:g} mm")
+                elif points:
                     axis.plot(*zip(*points), marker=marker, color=color, linestyle=linestyle,
                               label=f"{label}, G = {gap:g} mm")
         geometric = [(r["station_z_mm"], r["d0_geometric_mm"]) for r in sorted(

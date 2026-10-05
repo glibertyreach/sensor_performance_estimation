@@ -12,8 +12,8 @@ Conventions: probabilities and proportions are dimensionless numbers in
 
 The Clopper-Pearson ("exact") interval inverts the binomial test through the
 beta distribution. It is conservative: the actual coverage is at least the
-nominal one for every true probability, which is the property wanted for a
-"practically zero detection" claim.
+nominal one for every true probability, which is the property wanted for a claim that a
+detection probability is at most a stated low level (the measured D_5 of Analysis D).
 """
 from __future__ import annotations
 

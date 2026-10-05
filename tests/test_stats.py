@@ -46,8 +46,8 @@ def simulate_logistic_counts(rng: np.random.Generator):
 
 def test_clopper_pearson_bounds():
     """Section 13, Step 6 and Section 8, Step 4: exact bounds; 0 of 300 gives the rule-of-three bound."""
-    upper = clopper_pearson_upper(0, PARAMS.detection_zero_trials, PARAMS.confidence_level)
-    expected = 1.0 - (1.0 - PARAMS.confidence_level) ** (1.0 / PARAMS.detection_zero_trials)
+    upper = clopper_pearson_upper(0, PARAMS.detection_low_trials, PARAMS.confidence_level)
+    expected = 1.0 - (1.0 - PARAMS.confidence_level) ** (1.0 / PARAMS.detection_low_trials)
     assert abs(upper - expected) < EXACT_TOLERANCE
     assert upper < RULE_OF_THREE_CEILING
     assert clopper_pearson_upper(20, 20, PARAMS.confidence_level) == 1.0

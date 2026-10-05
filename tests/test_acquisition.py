@@ -61,7 +61,7 @@ MASTER_SEED = 1
 """Master seed of the plans of these tests."""
 SMALL_PARAMS = dataclasses.replace(
     PARAMS, phase_jitter_poses_edge=2, phase_jitter_poses_area=2, field_subseries_poses_area=2,
-    detection_trials_per_level=3, detection_zero_trials=5, z_step_repeats=2, z_step_ladder_quanta=(0.5, 4.0),
+    detection_trials_per_level=3, detection_low_trials=5, z_step_repeats=2, z_step_ladder_quanta=(0.5, 4.0),
     frames_per_zstep_pose=3, z_staircase_frames=2, frames_per_noise_station=4, frames_per_tilt_pose=2)
 """Reduced parameters for the tests that write files (few poses, few frames)."""
 
@@ -430,11 +430,11 @@ def test_series_counts_follow_the_procedure(full_plan):
     assert {c.station_z_mm for c in plan if c.procedure == PROCEDURE_AREA and c.subseries == SUBSERIES_FIELD} \
         == {PARAMS.z_reference_mm}
     assert count(PROCEDURE_DETECTION, subseries="jitter") == 2 * 2 * n_all * PARAMS.detection_trials_per_level
-    # The extended trials: DETECTION_ZERO_TRIALS in all at the three farthest stations, DETECTION_TRIALS_PER_LEVEL elsewhere.
-    zero = PARAMS.detection_zero_stations_mm()
-    assert zero == (1131.0, 1345.0, 1600.0)
+    # The extended trials: DETECTION_LOW_TRIALS in all at the three farthest stations, DETECTION_TRIALS_PER_LEVEL elsewhere.
+    low = PARAMS.detection_low_stations_mm()
+    assert low == (1131.0, 1345.0, 1600.0)
     for z in PARAMS.z_stations_mm():
-        expected = PARAMS.detection_zero_trials if z in zero else PARAMS.detection_trials_per_level
+        expected = PARAMS.detection_low_trials if z in low else PARAMS.detection_trials_per_level
         assert count(PROCEDURE_DETECTION, target_id="T5", gap_mm=60.0, station_z_mm=z) == expected
     assert all(c.frames == PARAMS.frames_per_detection_trial and c.level_index is None
                for c in plan if c.procedure == PROCEDURE_DETECTION)
@@ -649,8 +649,8 @@ def test_budget_totals_are_the_stored_estimate(full_plan, capsys):
     assert (by_series["R"].poses, by_series["R"].frames) == (PARAMS.registration_poses,
                                                              PARAMS.registration_poses * PARAMS.frames_per_registration_pose)
     n_all = len(PARAMS.z_stations_mm())
-    n_zero = PARAMS.detection_zero_station_count
-    d_poses = 2 * 2 * ((n_all - n_zero) * PARAMS.detection_trials_per_level + n_zero * PARAMS.detection_zero_trials)
+    n_low = PARAMS.detection_low_station_count
+    d_poses = 2 * 2 * ((n_all - n_low) * PARAMS.detection_trials_per_level + n_low * PARAMS.detection_low_trials)
     assert by_series["D"].poses == d_poses
     c_poses = 2 * 2 * n_all * PARAMS.phase_jitter_poses_area + 2 * 4 * PARAMS.field_subseries_poses_area
     assert by_series["C"].poses == c_poses
@@ -1169,12 +1169,122 @@ def test_detection_plan_has_no_pilot_level_selection():
                                  diagnostics=diagnostics)
     assert len(base) == 2 * 2 * 9 * SMALL_PARAMS.detection_trials_per_level
     assert {c.subseries for c in base} == {"jitter"} and not any("pilot" in n for n in diagnostics.notes)
-    with_zero = plan_detection_series(SMALL_PARAMS, GEOMETRY, np.random.default_rng(2))
-    assert len(with_zero) == len(base) + 2 * 2 * SMALL_PARAMS.detection_zero_station_count * (
-        SMALL_PARAMS.detection_zero_trials - SMALL_PARAMS.detection_trials_per_level)
+    with_low = plan_detection_series(SMALL_PARAMS, GEOMETRY, np.random.default_rng(2))
+    assert len(with_low) == len(base) + 2 * 2 * SMALL_PARAMS.detection_low_station_count * (
+        SMALL_PARAMS.detection_low_trials - SMALL_PARAMS.detection_trials_per_level)
     import inspect
     assert "pilot_d50_mm" not in inspect.signature(plan_detection_series).parameters
     assert "pilot_d50_mm" not in inspect.signature(plan_full_session).parameters
+
+
+def test_reuse_c_first_frames_reduces_the_planned_d_poses_not_the_budget(tmp_path: Path):
+    """Section 8, Reuse: with ``reuse_c_first_frames`` the D main series plans PHASE_JITTER_POSES_AREA fewer poses per
+    (target, gap, station) (the first frame of each matching C pose counts as the D trial), the extended poses of the
+    far stations are not reduced, ``capture_budget`` (given the plan's ``c_reuse``) is the same as without reuse, the
+    summary says how many poses were taken from C, and the default plans every D pose."""
+    from sensorperf.acquisition.plan import plan_summary_text
+    params = SMALL_PARAMS
+    area = plan_area_series_for_test(params)
+    base_diagnostics, reuse_diagnostics = PlanDiagnostics(), PlanDiagnostics()
+    base = plan_detection_series(params, GEOMETRY, np.random.default_rng(2), diagnostics=base_diagnostics)
+    reuse = plan_detection_series(params, GEOMETRY, np.random.default_rng(2), diagnostics=reuse_diagnostics,
+                                  reuse_c_first_frames=True, c_plan=area)
+    # The matching C poses: centered "jitter" poses of the same target, gap and station.
+    matching = Counter((c.target_id, c.gap_mm, c.station_z_mm) for c in area
+                       if c.subseries == "jitter" and c.field == 0)
+    assert matching and set(matching.values()) == {params.phase_jitter_poses_area}
+    taken = sum(matching.values())
+    assert len(reuse) == len(base) - taken and reuse_diagnostics.c_reuse.poses == taken
+    assert base_diagnostics.c_reuse is None
+    for key, n_matching in matching.items():
+        planned = lambda plan: sum(1 for c in plan if (c.target_id, c.gap_mm, c.station_z_mm) == key)
+        assert planned(reuse) == planned(base) - n_matching
+    # The extended poses are untouched: only the main (jitter) poses are reduced.
+    assert sum(1 for c in reuse if c.subseries == "extended") == sum(1 for c in base if c.subseries == "extended")
+    # The budget is computed without the reuse.
+    args = (GEOMETRY.frame_rate_hz, params.move_and_settle_time_s)
+    assert capture_budget(reuse, *args, reuse_diagnostics.c_reuse) == capture_budget(base, *args)
+    assert capture_budget(reuse, *args) != capture_budget(base, *args)             # without the adjustment it is lower
+    text = plan_summary_text(reuse, params, GEOMETRY, reuse_diagnostics)
+    assert f"{taken:,} D poses were taken from C" in text and "computed without the reuse" in text
+    assert "taken from C" not in plan_summary_text(base, params, GEOMETRY, base_diagnostics)
+    # Whole plan and command line: the Section 9 totals (and the sentinels) do not change; the flag is off by default.
+    full = plan_full_session(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), series=["C", "D"])
+    full_diagnostics = PlanDiagnostics()
+    full_reuse = plan_full_session(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), series=["C", "D"],
+                                   diagnostics=full_diagnostics, reuse_c_first_frames=True)
+    assert sum(1 for c in full if c.procedure == PROCEDURE_DETECTION) - sum(
+        1 for c in full_reuse if c.procedure == PROCEDURE_DETECTION) == 36 * PARAMS.phase_jitter_poses_area
+    assert budget_total(capture_budget(full_reuse, *args, full_diagnostics.c_reuse)) == budget_total(
+        capture_budget(full, *args))
+    assert plan_cli.main(["--out", str(tmp_path / "reuse"), "--series", "C", "D", "--reuse-c-first-frames"]) == 0
+    assert plan_cli.main(["--out", str(tmp_path / "plain"), "--series", "C", "D"]) == 0
+    assert "taken from C" in (tmp_path / "reuse" / PLAN_SUMMARY_NAME).read_text()
+    assert "taken from C" not in (tmp_path / "plain" / PLAN_SUMMARY_NAME).read_text()
+    assert len(read_plan_csv(tmp_path / "reuse" / PLAN_CSV_NAME)) < len(read_plan_csv(tmp_path / "plain" / PLAN_CSV_NAME))
+
+
+def plan_area_series_for_test(params: CharacterizationParameters) -> list[PlannedCapture]:
+    """The C plan of a test (the poses whose first frames the D reuse counts)."""
+    from sensorperf.acquisition.plan import plan_area_series
+    return plan_area_series(params, GEOMETRY, np.random.default_rng(MASTER_SEED))
+
+
+def test_lateral_sweep_adds_42_poses_at_the_reference_station_and_is_off_by_default(tmp_path: Path):
+    """Section 6.1, Step 6: ``lateral_sweep=True`` adds the optional second pass of B-HV, 21 positions in H then 21 in V
+    (LATERAL_SWEEP_SPAN_PX / LATERAL_SWEEP_STEP_PX + 1, both ends included) of T3a at Z_REFERENCE_MM with
+    FRAMES_PER_EDGE_POSE frames, sub-series "lateral_sweep"; each step is LATERAL_SWEEP_STEP_PX p(Z) millimeters with
+    p(Z) = Z / f_x; the sweep is outside the main budget and absent by default."""
+    from sensorperf.acquisition.plan import lateral_sweep_budget, plan_summary_text
+    default = plan_edge_series(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED))
+    plan = plan_edge_series(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), lateral_sweep=True)
+    assert not any(c.subseries == "lateral_sweep" for c in default)
+    sweep = [c for c in plan if c.subseries == "lateral_sweep"]
+    assert len(sweep) == 42 == 2 * (round(PARAMS.lateral_sweep_span_px / PARAMS.lateral_sweep_step_px) + 1)
+    assert len(plan) == len(default) + 42
+    assert {(c.procedure, c.target_id, c.gap_mm, c.station_z_mm, c.field) for c in sweep} \
+        == {(PROCEDURE_EDGES, "T3a", PARAMS.gap_small_mm, PARAMS.z_reference_mm, 0)}
+    assert all(c.frames == PARAMS.frames_per_edge_pose for c in sweep)
+    pitch = PARAMS.z_reference_mm / GEOMETRY.sensor_fx_px                            # p(Z) = Z / f_x
+    step_mm = PARAMS.lateral_sweep_step_px * pitch
+    assert step_mm == pytest.approx(0.1163, abs=1e-4)
+    for axis, members in (("H", sweep[:21]), ("V", sweep[21:])):
+        assert all(c.notes["lateral_sweep_axis"] == axis for c in members)
+        offsets = np.array([c.offset_h_mm if axis == "H" else c.offset_v_mm for c in members])
+        other = np.array([c.offset_v_mm if axis == "H" else c.offset_h_mm for c in members])
+        assert np.allclose(np.diff(offsets), step_mm) and np.all(other == 0.0)
+        span_mm = PARAMS.lateral_sweep_span_px * pitch
+        assert offsets[0] == pytest.approx(-span_mm / 2.0) and offsets[-1] == pytest.approx(span_mm / 2.0)
+        translation = np.array([c.target_to_camera.translation for c in members])
+        assert np.allclose(translation[:, 2], PARAMS.z_reference_mm)
+        assert np.allclose(translation[:, 0 if axis == "H" else 1], offsets)
+    # Pose indices stay unique within the configuration (the sweep continues after the main poses).
+    keys = [c.pose_key() for c in plan]
+    assert len(set(keys)) == len(keys)
+    # Outside the main budget.
+    args = (GEOMETRY.frame_rate_hz, PARAMS.move_and_settle_time_s)
+    assert capture_budget(plan, *args) == capture_budget(default, *args)
+    assert [r.poses for r in lateral_sweep_budget(plan, *args)] == [42] and lateral_sweep_budget(default, *args) == []
+    assert "optional B-HV lateral sweep" in plan_summary_text(plan, PARAMS, GEOMETRY)
+    # The full plan and the command line.
+    full = plan_full_session(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), series=["B"], lateral_sweep=True)
+    assert sum(1 for c in full if c.subseries == "lateral_sweep") == 42
+    assert plan_cli.main(["--out", str(tmp_path / "plain"), "--series", "B"]) == 0
+    assert plan_cli.main(["--out", str(tmp_path / "sweep"), "--series", "B", "--lateral-sweep"]) == 0
+    assert not any(c.subseries == "lateral_sweep" for c in read_plan_csv(tmp_path / "plain" / PLAN_CSV_NAME))
+    assert sum(1 for c in read_plan_csv(tmp_path / "sweep" / PLAN_CSV_NAME) if c.subseries == "lateral_sweep") == 42
+
+
+def test_post_diameter_is_derived_from_the_detection_rule():
+    """Section 3.2 (C04-R3): the disk post diameter is POST_DIAMETER_FRACTION_OF_D0 x EXPECTED_D0_PX x p(Z_MIN), about
+    2 mm at the indicative geometry, not a fixed number; the target set carries it and follows a change of the rule."""
+    expected = PARAMS.post_diameter_fraction_of_d0 * PARAMS.expected_d0_px * PARAMS.z_min_mm / GEOMETRY.sensor_fx_px
+    assert PARAMS.post_diameter_mm(GEOMETRY) == pytest.approx(expected) and 1.5 < expected <= 2.1
+    for fraction in (PARAMS.post_diameter_fraction_of_d0, 0.25):
+        params = dataclasses.replace(PARAMS, post_diameter_fraction_of_d0=fraction)
+        posts = [f for f in make_standard_target_set(params, GEOMETRY).get("T4").features if f.kind == "post"]
+        assert len(posts) == params.post_sites_per_plate
+        assert all(f.diameter_mm == pytest.approx(params.post_diameter_mm(GEOMETRY)) for f in posts)
 
 
 def test_registration_cli_defaults_to_the_plane_only_solve(tmp_path: Path):

@@ -53,14 +53,14 @@ OPEN_POSES = 4
 DETECTION_POSES = 60
 """Single-frame poses per plate and station."""
 DETECTION_POSES_FAR = 300
-"""Single-frame poses per plate at the farthest station (Z_MAX): the zero-detection trials of the redesign, enough
-(300) for the rule-of-three bound of 0 detections to meet the 1 percent bound of D_0."""
+"""Single-frame poses per plate at the farthest station (Z_MAX): the extended trials of the low point (D_5) of the
+redesign, DETECTION_LOW_TRIALS = 300, which resolve a 5 percent detection probability to about +/- 2.5 percent."""
 EDGE_STATIONS_MM = (566.0, 800.0)
 """The B stations: the square must stay wide enough on the test sensor for the one-edge-near rule (49 and 35 px)."""
 ROBOT_REPEATABILITY_MM = 0.05
 SESSION_SEED = 7
-"""Seed of the synthetic session. No test may depend on a lucky draw: the zero-detection test checks the rule
-that ties the D_0 bracket to the per-level counts, not the counts themselves."""
+"""Seed of the synthetic session. No test may depend on a lucky draw: the low-point test checks the rule
+that ties the D_5 bracket to the per-level counts, not the counts themselves."""
 
 
 def test_geometry() -> SensorGeometry:

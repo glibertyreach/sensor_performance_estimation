@@ -24,6 +24,7 @@ geometrically invisible to the right camera or projector whenever their window h
 from __future__ import annotations
 
 import csv
+import dataclasses
 import json
 import math
 import subprocess
@@ -40,10 +41,14 @@ from sensorperf.analysis.detection import (
 from sensorperf.geometry.targets import FEATURE_CUTOUT, FEATURE_DISK
 from sensorperf.io.manifest import SUBSERIES_FIELD, SUBSERIES_JITTER, SUBSERIES_OPEN
 from sensorperf.io.session import FORWARD_MODEL_FILE_NAME, Session
+from sensorperf.parameters import CharacterizationParameters
 from sensorperf.stats.intervals import clopper_pearson
+from sensorperf.stats.psychometric import PsychometricFitParameters, best_fit, fit_all_curves
 
 import cde_fixture
 
+PARAMS = CharacterizationParameters()
+"""The default procedure parameters (the thresholds the synthetic-count tests apply)."""
 REPO_ROOT = Path(__file__).resolve().parents[1]
 """The repository root (working directory of the command-line test)."""
 STATION_NEAR_MM = 400.0
@@ -415,42 +420,94 @@ def _pooled_detail(result, kind, rule):
     return result.pooled_details[index]
 
 
-def test_empirical_d0_rule_on_synthetic_counts():
-    """Step 6 on fixed counts: with gamma = 0.01 and 300 trials, 0 detections pass the 1 percent corrected bound and
-    3 detections (the expected false-alarm count) do not; the bracket is [largest passing level, next level]."""
+def test_d5_measured_on_synthetic_counts():
+    """Step 6 on fixed counts: D_5 is the largest level such that it and every smaller level have a corrected
+    one-sided 95 percent upper bound at or below DETECTION_LOW_PROBABILITY (0.05). With gamma = 0.01 and 300 trials,
+    0 detections pass (bound about 0.01) and 30 detections (10 percent) do not; the bracket is [D_5, next level]."""
     levels = np.array([1.0, 2.0, 4.0]); trials = np.array([300, 300, 300])
-    result = detection.empirical_d0(levels, np.array([0, 0, 3]), trials, gamma=0.01, confidence=0.95, bound=0.01)
-    assert result["d0_emp_mm"] == pytest.approx(2.0) and result["d0_emp_next_mm"] == pytest.approx(4.0)
-    result = detection.empirical_d0(levels, np.array([3, 0, 0]), trials, gamma=0.01, confidence=0.95, bound=0.01)
-    assert math.isnan(result["d0_emp_mm"]) and result["d0_emp_next_mm"] == pytest.approx(1.0)
-    result = detection.empirical_d0(levels, np.array([0, 0, 0]), trials, gamma=0.01, confidence=0.95, bound=0.01)
-    assert result["d0_emp_mm"] == pytest.approx(4.0) and math.isnan(result["d0_emp_next_mm"])
+    bound = PARAMS.detection_low_probability
+    assert bound == pytest.approx(0.05)
+    result = detection.empirical_d5(levels, np.array([0, 0, 30]), trials, gamma=0.01, confidence=0.95, bound=bound)
+    assert result["d5"] == pytest.approx(2.0) and result["d5_next"] == pytest.approx(4.0)
+    # Each passing level has its corrected bound within 0.05, the failing one above it.
+    assert [r["within_bound"] for r in result["levels"]] == [True, True, False]
+    assert all(r["p_star_upper"] <= bound for r in result["levels"] if r["within_bound"])
+    assert result["levels"][2]["p_star_upper"] > bound
+    # A raw detection rate of 3 of 300 (the false-alarm rate, 1 percent) is within the 5 percent bound; 3 in 300
+    # at the smallest level does not make the smaller levels fail.
+    result = detection.empirical_d5(levels, np.array([3, 0, 30]), trials, gamma=0.01, confidence=0.95, bound=bound)
+    assert result["d5"] == pytest.approx(2.0)
+    # The smallest level already above the bound: D_5 is not demonstrated (NaN) and the bracket starts at that level.
+    result = detection.empirical_d5(levels, np.array([30, 0, 0]), trials, gamma=0.01, confidence=0.95, bound=bound)
+    assert math.isnan(result["d5"]) and result["d5_next"] == pytest.approx(1.0)
+    # Every level within the bound: D_5 is the largest level, with no level above it.
+    result = detection.empirical_d5(levels, np.array([0, 0, 0]), trials, gamma=0.01, confidence=0.95, bound=bound)
+    assert result["d5"] == pytest.approx(4.0) and math.isnan(result["d5_next"])
+    # The smallest level whose corrected probability is at or below 5 percent is reported, whatever the input order.
+    shuffled = detection.empirical_d5(levels[::-1], np.array([30, 0, 0]), trials, gamma=0.01, confidence=0.95,
+                                      bound=bound)
+    assert shuffled["d5"] == pytest.approx(2.0)
+
+
+def test_d0_is_predicted_from_the_fitted_curve():
+    """Step 7: the predicted D_0 is the best fitted curve inverted at DETECTION_ZERO_PREDICTION_LEVEL (0.01), flagged
+    as a prediction with a note; with no fit it is NaN and the note says so; a fit that did not converge gives NaN."""
+    levels = np.geomspace(5.0, 80.0, 9)
+    gamma, lapse, alpha, beta = 0.01, 0.0, math.log(20.0), 0.6
+    corrected = 1.0 / (1.0 + np.exp(-(np.log(levels) - alpha) / beta))
+    trials = np.full(levels.shape, 400)
+    successes = np.rint(trials * (gamma + (1.0 - gamma - lapse) * corrected))
+    with np.errstate(over="ignore"):                      # the Weibull shape overflows in far tails; still valid
+        fits = fit_all_curves(levels, successes, trials, gamma, PsychometricFitParameters(lapse_rate_max=0.05))
+    best = best_fit(fits)
+    level = PARAMS.detection_zero_prediction_level
+    assert level == pytest.approx(0.01)
+    result = detection.predict_d0(fits, best, level, PARAMS.detection_low_probability)
+    assert result["is_prediction"] is True
+    assert result["d0"] == pytest.approx(best.threshold(level))             # the inverse of the fitted curve at 0.01
+    assert result["d0"] < best.threshold(PARAMS.detection_low_probability) < best.threshold(0.5)
+    assert result["model_min"] <= result["d0"] <= result["model_max"]
+    assert "PREDICTION" in result["note"] and "not a measurement" in result["note"] and "extrapolation" in result["note"]
+    # The curve really sits at the prediction level there (corrected probability 0.01).
+    assert best.corrected_probability(result["d0"]) == pytest.approx(level, abs=1e-9)
+    # No fit: NaN with the note saying so.
+    missing = detection.predict_d0(None, None, level, PARAMS.detection_low_probability)
+    assert math.isnan(missing["d0"]) and missing["is_prediction"] is True and "no psychometric fit" in missing["note"]
+    # A fit that did not converge is not extrapolated.
+    unconverged = dataclasses.replace(best, converged=False)
+    failed = detection.predict_d0(fits, unconverged, level, PARAMS.detection_low_probability)
+    assert math.isnan(failed["d0"]) and "did not converge" in failed["note"]
 
 
 def test_d_step5_to_7_minimums_are_ordered(detection_result):
-    """Steps 5 to 7: D_10 <= D_50; D_0,emp <= D_10 (the 300 trials at the farthest station demonstrate zero detection
-    of the smallest feature there), reported as a D_px bracket [D_0,emp, next level] and converted to mm per station; the
-    model range of D_10 contains the best-fit D_10; the isotonic D_50 is within a factor 1.5 of the fitted one; the floor
+    """Steps 5 to 7: D_10 <= D_50; the measured D_5 (the 300 trials at the farthest station demonstrate at most 5 percent
+    detection of the smallest feature there) is a D_px bracket [D_5, next level] converted to mm per station and follows
+    the rule of Step 6; the predicted D_0 is the fitted curve at 0.01, flagged as a prediction, below D_10; the model
+    range of D_10 contains the best-fit D_10; the isotonic D_50 is within a factor 1.5 of the fitted one; the floor
     model gives a D_0 below D_10."""
     for rule in (RULE_PRIMARY, RULE_INCLUSIVE):
         pooled = _pooled_row(detection_result, FEATURE_CUTOUT, rule)
         assert pooled["d10_px"] <= pooled["d50_px"]
-        # The empirical 0 percent point follows the rule of Step 6, not a lucky draw: D_0,emp is the largest level
-        # such that it and every smaller level have a corrected upper bound within DETECTION_ZERO_PROBABILITY_BOUND.
-        levels = _pooled_detail(detection_result, FEATURE_CUTOUT, rule)["d0_empirical"]["levels"]
+        # The measured 5 percent point follows the rule of Step 6, not a lucky draw: D_5 is the largest level such that
+        # it and every smaller level have a corrected upper bound within DETECTION_LOW_PROBABILITY.
+        levels = _pooled_detail(detection_result, FEATURE_CUTOUT, rule)["d5_measured"]["levels"]
         assert levels, "the far-station trials must give at least one level with trials"
         passing = []
-        for level in sorted(levels, key=lambda r: r["d_mm"]):
+        for level in sorted(levels, key=lambda r: r["d_px"]):
             if not level["within_bound"]:
                 break
-            passing.append(level["d_mm"])
+            passing.append(level["d_px"])
         if passing:
-            assert pooled["d0_emp_px"] == pytest.approx(max(passing))
-            assert pooled["d0_emp_px"] <= pooled["d10_px"]
-            assert pooled["d0_emp_px"] < pooled["d0_emp_next_px"]                   # the bracket
+            assert pooled["d5_px"] == pytest.approx(max(passing))
+            assert pooled["d5_px"] <= pooled["d10_px"]
+            assert pooled["d5_px"] < pooled["d5_next_px"]                           # the bracket
         else:
-            assert math.isnan(pooled["d0_emp_px"])
-            assert pooled["d0_emp_next_px"] == pytest.approx(min(r["d_mm"] for r in levels))
+            assert math.isnan(pooled["d5_px"])
+            assert pooled["d5_next_px"] == pytest.approx(min(r["d_px"] for r in levels))
+        # The predicted 0 percent point: the best fitted curve at DETECTION_ZERO_PREDICTION_LEVEL, flagged.
+        assert pooled["d0_is_prediction"] is True and "PREDICTION" in pooled["d0_predicted_note"]
+        assert math.isfinite(pooled["d0_predicted_px"]) and pooled["d0_predicted_px"] < pooled["d10_px"]
+        assert pooled["d0_predicted_model_min_px"] <= pooled["d0_predicted_px"] <= pooled["d0_predicted_model_max_px"]
         assert pooled["d10_model_min_px"] <= pooled["d10_px"] + 1e-9 <= pooled["d10_model_max_px"] + 2e-9
         ratio = pooled["d50_isotonic_px"] / pooled["d50_px"]
         assert 1.0 / ISOTONIC_FACTOR < ratio < ISOTONIC_FACTOR
@@ -460,12 +517,15 @@ def test_d_step5_to_7_minimums_are_ordered(detection_result):
         for station in cde_fixture.STATIONS_MM:
             row = _d_row(detection_result, FEATURE_CUTOUT, station, rule)
             assert row["d10_mm"] <= row["d50_mm"]
+            assert row["d0_is_prediction"] is True and row["d0_predicted_note"] == pooled["d0_predicted_note"]
+            assert row["d0_predicted_px"] == pytest.approx(pooled["d0_predicted_px"])
+            assert row["d0_predicted_mm"] == pytest.approx(pooled["d0_predicted_px"] * station / cde_fixture_fx())
             if passing:
-                assert row["d0_emp_px"] == pytest.approx(pooled["d0_emp_px"])
-                assert row["d0_emp_mm"] == pytest.approx(pooled["d0_emp_px"] * station / cde_fixture_fx())
-                assert row["d0_emp_mm"] < row["d0_emp_next_mm"]
+                assert row["d5_px"] == pytest.approx(pooled["d5_px"])
+                assert row["d5_mm"] == pytest.approx(pooled["d5_px"] * station / cde_fixture_fx())
+                assert row["d5_mm"] < row["d5_next_mm"]
             else:
-                assert math.isnan(row["d0_emp_px"])
+                assert math.isnan(row["d5_px"])
 
 
 def cde_fixture_fx() -> float:
@@ -522,11 +582,14 @@ def test_d_step11_csv_and_figures(detection_result):
     rows = _read_csv(detection_result.out_dir / detection.SUMMARY_FILE_NAME)
     assert len(rows) == 3 * len(cde_fixture.STATIONS_MM)
     assert list(rows[0].keys()) == list(detection.SUMMARY_COLUMNS)
-    for name in ("d50_mm", "d50_px", "d50_mrad", "d10_px", "d0_emp_mm", "d0_emp_next_px", "d0_model_mrad",
+    for name in ("d50_mm", "d50_px", "d50_mrad", "d10_px", "d5_mm", "d5_next_px", "d0_predicted_mm", "d0_predicted_px", "d0_is_prediction",
+                 "d0_predicted_note", "d0_model_mrad",
                  "d0_geometric_px", "gamma_lower", "tau_mm", "independence_ok"):
         assert name in rows[0]
     pooled = _read_csv(detection_result.out_dir / detection.POOLED_FILE_NAME)
     assert len(pooled) == 3 and list(pooled[0].keys()) == list(detection.POOLED_COLUMNS)
+    assert all(r["d0_is_prediction"] == "True" and "PREDICTION" in r["d0_predicted_note"] for r in pooled)
+    assert all(r["d0_is_prediction"] == "True" for r in rows)
     document = json.loads((detection_result.out_dir / detection.DETAILS_FILE_NAME).read_text())
     assert len(document["configurations"]) == 3 * len(cde_fixture.STATIONS_MM) and len(document["pooled"]) == 3
     assert "levels" in document["configurations"][0] and "bootstrap" in document["pooled"][0]

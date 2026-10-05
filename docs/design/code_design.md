@@ -261,12 +261,12 @@ class PlannedCapture:
 
 def plan_registration(params, geometry, rng) -> list[PlannedCapture]        # Section 4, Step 6: T2, poses span Z_MIN..Z_MAX
 def plan_noise_series(params, geometry, rng, filters_off=False) -> list     # Section 5: 9 ladder stations x 5 field positions + the 2 legacy depths at the center (47, shuffled), feasible tilts at the reduced stations, remount; sentinels by the budget clock
-def plan_edge_series(params, geometry, rng) -> list                          # Section 6.1: T3a, T3b x gaps x stations: nominal + jitter poses
+def plan_edge_series(params, geometry, rng, lateral_sweep=False) -> list    # Section 6.1: T3a, T3b x gaps x stations: nominal + jitter poses; optional lateral sweep (42 poses)
 def plan_zstep_series(params, geometry, rng, expected_quantum_mm: Callable[[float], float]) -> list   # Section 6.2: ladder ABAB + staircase
 def plan_area_series(params, geometry, rng, open_background=False) -> list   # Section 7: arrays x gaps x stations, field sub-series, open variant
-def plan_detection_series(params, geometry, rng, extended=True) -> list     # Section 8: T4, T5 x gaps x all 9 stations; zero trials at the 3 farthest
+def plan_detection_series(params, geometry, rng, extended=True, reuse_c_first_frames=False, c_plan=None) -> list   # Section 8: T4, T5 x gaps x all 9 stations; extended (low point, D_5) trials at the 3 farthest; optional reuse of the C first frames
 def insert_sentinels(plan, params, geometry, seconds_per_frame, move_settle_s) -> list   # sentinels on the MOUNTED target: at the series boundaries and every DRIFT_SENTINEL_INTERVAL_MIN of estimated clock
-def capture_budget(plan, frame_rate_hz, move_settle_s) -> BudgetRow list     # Section 9 table: poses, frames, robot hours per series
+def capture_budget(plan, frame_rate_hz, move_settle_s, c_reuse=None) -> BudgetRow list     # Section 9 table: poses, frames, robot hours per series; always WITHOUT the C reuse (c_reuse adds the reused D poses back)
 def write_plan(path_dir, plan, registration | None) -> poses.csv (+ robot flange poses when a registration is given), plan_summary.txt, plan.png
 ```
 Pose indices are unique within (procedure, target, gap, station, field).
@@ -357,8 +357,12 @@ stride: `z_shape_stations_mm()` (`z_shape_station_stride` = 2) = 400, 566, 800, 
 `z_reduced_stations_mm()` (`z_reduced_station_stride` = 4) = 400, 800, 1600 for B-Z and the A tilt sub-series.
 `noise_stations_mm()` = the ladder plus `legacy_metric_depths_mm` (700, 1000) for A; the ladder stations are captured at the
 five field positions, the two legacy extra stations (`legacy_extra_stations_mm()`) at the center only. C and D use all nine stations;
-`detection_zero_stations_mm()` = the `detection_zero_station_count` = 3 farthest stations (1131, 1345, 1600), where
-D takes `detection_zero_trials` = 300 trials per (feature, station) instead of `detection_trials_per_level` = 60.
+`detection_low_stations_mm()` = the `detection_low_station_count` = 3 farthest stations (1131, 1345, 1600), where
+D takes `detection_low_trials` = 300 trials per (feature, station) instead of `detection_trials_per_level` = 60; these
+extended trials measure the lowest point, D_5 (`detection_low_probability` = 0.05, resolved to about +/- 2.5 %).
+`detection_zero_prediction_level` = 0.01 is the level to which the fitted curve is extrapolated for the PREDICTED D_0.
+`post_diameter_mm(geometry)` = `post_diameter_fraction_of_d0` (0.5) x `expected_d0_px` (7) x p(Z_MIN) (about 2 mm) is the
+disk post diameter: the target set derives it from this rule (there is no fixed nominal post diameter).
 `z_reference_mm` = 800 (a station) serves the warm-up check, sentinels, re-mount check, the C field sub-series, the
 open-background variant and the D post check. `adapter_remount_repeatability_mm` = 0.02 and
 `temperature_log_interval_min` = 1 are the new equipment constants; the ambient-IR manifest column is gone.
@@ -427,6 +431,21 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
   quantum at 800 and 1600 mm, 0.1 mm = 3.9 steps per quantum at 400 mm), `z_staircase_frames` frames per step, outside the main
   budget like the filters-off repeat (`staircase_budget`, `OPTIONAL_SUBSERIES`; 75 poses, 750 frames, 0.08 h with the default
   seed); the filters-off repeat of B-Z then includes it. The three `z_staircase_*` parameters are the optional second pass.
+- *Optional B-HV lateral sweep* (`plan_edge_series(lateral_sweep=True)`, `plan_full_session(lateral_sweep=True)`,
+  `plan_stations --lateral-sweep`; parameters `lateral_sweep_step_px` = 0.1 and `lateral_sweep_span_px` = 2, positions from
+  `lateral_sweep_positions_px()`). Off by default. For T3a (small gap) already mounted, placed right after its stations, at
+  `z_reference_mm`: a sweep in H and then in V over the span centered on the nominal position, both ends included (21 positions
+  per axis, 42 poses), each step converted to millimeters with p(Z) = Z / f_x (0.1163 mm at 800 mm), `frames_per_edge_pose`
+  frames each, sub-series `lateral_sweep` (`SUBSERIES_LATERAL_SWEEP`), axis and offset in the notes. Outside the main budget like
+  the staircase (`lateral_sweep_budget`, `OPTIONAL_SUBSERIES`; 42 poses, 1,260 frames); the lateral-resolution analysis leaves
+  these poses out of its pooled edge spread function.
+- *Optional reuse of the C first frames* (`plan_detection_series(reuse_c_first_frames=True)`, `plan_stations --reuse-c-first-frames`).
+  Off by default. The first frame of each centered C "jitter" pose of the same target, gap and station counts as a D trial
+  (`c_first_frame_counts`; 30 of the 60 per configuration and station), so the D main series plans that many fewer poses
+  (3,960 instead of 5,040 D poses with the defaults); the extended poses of the far stations are not reduced. The Section 9
+  budget stays WITHOUT reuse: `PlanDiagnostics.c_reuse` (`CReuse`) records what was left out, `capture_budget(..., c_reuse)` adds
+  it back to the D row, each planned D pose notes `budget_clock_reused_share` so that the drift sentinels follow the same clock
+  (the totals stay 7,194 poses, 42,520 frames, 7.18 h), and `plan_summary.txt` says how many D poses were taken from C.
 - *Tilt feasibility* (`tilt_is_feasible`, `tilt_near_edge_mm`). The A tilt sub-series runs at the reduced stations, and a tilt
   is planned only where the plate's near edge stays at or beyond `z_min_mm`: Z - h sin(tilt) >= Z_MIN, h the half extent of
   the plate across the tilt axis (200 mm for the 400 x 400 mm plate; the B-Z ramp uses the same rule, see above). Infeasible tilts are skipped and listed with the reason
@@ -466,12 +485,19 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
   disagreement is attributed to sigma_tot(Z) (A's per-station values are reported with the pair). `C_overlap_test.csv`.
 - D: per configuration (station) tau per feature from the blank sites, gamma per station, the outcomes, independence and
   the geometric limit; pooled per (kind, gap, field, rule) over the (feature, station) pairs: the psychometric fit on
-  ln D_px with gamma fixed from the pooled blank sites (pairs whose D_px coincide are merged), D_50 / D_10 / D_0 in D_px
-  (D_0 as the bracket [D_0,emp, next level]) converted to mm at each station (D_mm = D_px Z / f_x), a stratified bootstrap
+  ln D_px with gamma fixed from the pooled blank sites (pairs whose D_px coincide are merged), D_50 / D_10 from the best
+  curve and the MEASURED low point D_5 (`empirical_d5`: the largest level such that it and every smaller level have a
+  corrected one-sided Clopper-Pearson bound at or below `detection_low_probability`, as the bracket [`d5`, `d5_next`]), and
+  the PREDICTED D_0 (`predict_d0`: the best fitted curve inverted at `detection_zero_prediction_level`, an extrapolation
+  below the lowest measured point; `d0_predicted`, its range over the three shapes, always `d0_is_prediction` = True and a
+  `d0_predicted_note`; NaN with the note saying why where there is no fit or it did not converge; the floor model `d0_model`
+  with its profile-likelihood interval is a second prediction), in D_px converted to mm at each station
+  (D_mm = D_px Z / f_x), a stratified bootstrap
   over poses (strata = stations), the overlap test between neighboring features on the corrected detection curves, and a
   logistic regression of the counts on ln D_px and ln sigma_tot(Z) (sigma_tot per station from `previous["A"]`, log-log
   interpolated) with the likelihood-ratio test of the noise term. Outputs `D_detect_summary.csv` (per configuration),
-  `D_pooled_summary.csv`, `D_overlap_test.csv`, the details JSON, pooled psychometric figures and `D_minimum_vs_z`. The
+  `D_pooled_summary.csv`, `D_overlap_test.csv`, the details JSON, pooled psychometric figures and `D_minimum_vs_z`; the
+  figures draw the predicted D_0 with a hollow marker and a dashed extrapolation and label it "predicted". The
   pilot level selection and the continuous-angle variant are gone; the pilot keeps only the post check
   (`acquisition.check.pilot_post_check`).
 - B-Z (`analysis/resolution_depth.py`, Section 11.2). The step-ladder analysis works per station: the rungs differ from station

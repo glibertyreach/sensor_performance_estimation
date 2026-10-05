@@ -109,8 +109,6 @@ ARRAY_ROW_PACKING_FRACTION = 0.9
 (a roughly square plate)."""
 ARRAY_MIN_PLATE_SIZE_MM = 100.0
 """An array plate is never smaller than this (width and height), whatever the ladder."""
-POST_NOMINAL_DIAMETER_MM = 0.5
-"""Nominal post diameter used when laying out an array (replaced by the as-built value)."""
 ASBUILT_COLUMNS = ("target_id", "site_id", "kind", "x_mm", "y_mm", "diameter_mm", "diameter_uncertainty_mm",
                    "land_mm", "bevel_deg", "rotation_deg", "level_index")
 """Columns of targets_asbuilt.csv (Section 3.3)."""
@@ -580,11 +578,13 @@ def _layout_rows(diameters_mm: list[float], isolation_mm: float, max_row_width_m
 
 def make_feature_array(target_id: str, kind: str, diameters_mm: list[float], isolation_mm: float, gap_mm: float,
                        blank_diameters_mm: Sequence[float] = (), post_sites: int = 0,
-                       post_diameter_mm: float = POST_NOMINAL_DIAMETER_MM, min_plate_mm: float = ARRAY_MIN_PLATE_SIZE_MM,
+                       post_diameter_mm: float | None = None, min_plate_mm: float = ARRAY_MIN_PLATE_SIZE_MM,
                        max_row_width_mm: float | None = None, plate_margin_mm: float | None = None) -> TwoPlaneTarget:
     """A disk (TARGET_KIND_DISK_ARRAY) or cutout (TARGET_KIND_CUTOUT_ARRAY) plate carrying the given diameters
     (feature levels 0, 1, ... in the order given), one blank site per entry of ``blank_diameters_mm`` and
-    ``post_sites`` post-only control sites (Section 3.2).
+    ``post_sites`` post-only control sites (Section 3.2) of diameter ``post_diameter_mm``, which the caller derives
+    from the rule of Section 3.2 (:meth:`CharacterizationParameters.post_diameter_mm`); it is required when
+    ``post_sites`` is positive, since there is no fixed nominal post diameter.
 
     Blank site i has level index i and serves feature i of the detection analysis: its diameter is the search window of
     that feature at the far station (see :func:`blank_site_diameters_mm`), so the window of feature i fits on blank
@@ -601,6 +601,9 @@ def make_feature_array(target_id: str, kind: str, diameters_mm: list[float], iso
     if len(blank_diameters_mm) > len(diameters_mm):
         raise ValueError(f"{len(blank_diameters_mm)} blank sites for {len(diameters_mm)} features: blank site i serves "
                          "feature i, so there cannot be more blank sites than features")
+    if post_sites > 0 and post_diameter_mm is None:
+        raise ValueError("post_diameter_mm is required when post_sites > 0 (derive it from POST_DIAMETER_FRACTION_OF_D0 "
+                         "x the expected D_0, CharacterizationParameters.post_diameter_mm)")
     feature_kind = FEATURE_DISK if kind == TARGET_KIND_DISK_ARRAY else FEATURE_CUTOUT
     margin_mm = isolation_mm if plate_margin_mm is None else plate_margin_mm
     entries: list[tuple[str, str, float, int | None]] = []
@@ -683,7 +686,8 @@ def make_standard_target_set(params: CharacterizationParameters, geometry: Senso
 
     T4 (disks) and T5 (cutouts) each carry FEATURE_COUNT features of diameters
     ``params.feature_diameters_mm(geometry)``, BLANK_SITES_PER_PLATE blank sites (site i sized to the search window of
-    feature i at Z_MAX, :func:`blank_site_diameters_mm`) and, for the disk plate, POST_SITES_PER_PLATE post-only sites.
+    feature i at Z_MAX, :func:`blank_site_diameters_mm`) and, for the disk plate, POST_SITES_PER_PLATE post-only sites (diameter from the rule
+    POST_DIAMETER_FRACTION_OF_D0 x EXPECTED_D0_PX x p(Z_MIN), :meth:`CharacterizationParameters.post_diameter_mm`).
     The isolation between neighboring sites is FEATURE_ISOLATION_PX at Z_MAX (edge to edge, in both directions), so
     neighbors stay separated at the far station. The sites are packed into as few rows as fit the usable width at
     Z_MIN (the field width minus the phase-jitter span and twice the boundary band), and the plate carries
@@ -707,8 +711,8 @@ def make_standard_target_set(params: CharacterizationParameters, geometry: Senso
     targets.add(make_edge_target(params, TARGET_KIND_RAISED_SQUARE, gap))
     targets.add(make_edge_target(params, TARGET_KIND_SQUARE_WINDOW, gap))
     targets.add(make_feature_array(TARGET_DISKS, TARGET_KIND_DISK_ARRAY, diameters, isolation_mm, gap, blanks,
-                                   params.post_sites_per_plate, max_row_width_mm=max_row_mm,
-                                   plate_margin_mm=plate_margin_mm))
+                                   params.post_sites_per_plate, post_diameter_mm=params.post_diameter_mm(geometry),
+                                   max_row_width_mm=max_row_mm, plate_margin_mm=plate_margin_mm))
     targets.add(make_feature_array(TARGET_CUTOUTS, TARGET_KIND_CUTOUT_ARRAY, diameters, isolation_mm, gap, blanks,
                                    max_row_width_mm=max_row_mm, plate_margin_mm=plate_margin_mm))
     for target_id in (TARGET_DISKS, TARGET_CUTOUTS):

@@ -83,7 +83,7 @@ from sensorperf.geometry.targets import (
 )
 from sensorperf.geometry.transforms import RigidTransform
 from sensorperf.io.manifest import (
-    FIELD_FRACTION_ACHIEVED_KEY, SUBSERIES_EXTENDED, SUBSERIES_FIELD, SUBSERIES_FILTERS_OFF, SUBSERIES_JITTER, SUBSERIES_LADDER, SUBSERIES_MAIN,
+    FIELD_FRACTION_ACHIEVED_KEY, SUBSERIES_EXTENDED, SUBSERIES_FIELD, SUBSERIES_FILTERS_OFF, SUBSERIES_JITTER, SUBSERIES_LATERAL_SWEEP, SUBSERIES_LADDER, SUBSERIES_MAIN,
     SUBSERIES_NOMINAL, SUBSERIES_OPEN, SUBSERIES_RAMP, SUBSERIES_REMOUNT, SUBSERIES_SENTINEL, SUBSERIES_STAIRCASE, SUBSERIES_TILT,
     TARGET_POSE_COLUMNS, TILT_AXIS_H, TILT_AXIS_V, VISIT_A, VISIT_B, format_file_name, pose_to_six,
     six_to_pose,
@@ -158,8 +158,9 @@ sentinels (11, on the mounted target) are part of the totals. plan_summary.txt c
 numbers, so a change of the parameters shows up as a ratio away from 1. The filters-off repeat and the optional B-Z
 staircase are never part of these totals (see ``capture_budget``)."""
 
-OPTIONAL_SUBSERIES = (SUBSERIES_FILTERS_OFF, SUBSERIES_STAIRCASE)
-"""Sub-series outside the main (Section 9) budget: the filters-off repeat and the optional B-Z staircase."""
+OPTIONAL_SUBSERIES = (SUBSERIES_FILTERS_OFF, SUBSERIES_STAIRCASE, SUBSERIES_LATERAL_SWEEP)
+"""Sub-series outside the main (Section 9) budget: the filters-off repeat, the optional B-Z staircase and the optional
+B-HV lateral sweep."""
 
 PLAN_CSV_NAME = "poses.csv"
 PLAN_SUMMARY_NAME = "plan_summary.txt"
@@ -273,6 +274,22 @@ class PlannedCapture:
 # ---------------------------------------------------------------------------
 # Diagnostics collected while planning
 # ---------------------------------------------------------------------------
+@dataclass(frozen=True)
+class CReuse:
+    """The D poses that ``--reuse-c-first-frames`` leaves out of the plan because the first frame of a C pose of the same
+    configuration and station serves as the D trial instead (Section 8, Reuse). The Section 9 budget is computed
+    without reuse, so :func:`capture_budget` adds these poses back to the D row."""
+
+    poses: int
+    """Number of D poses taken from C (one per reused C pose)."""
+    frames: int
+    """Frames those D poses would have had (FRAMES_PER_DETECTION_TRIAL each)."""
+    per_configuration: int
+    """The most C poses reused by one (target, gap, station) configuration (30 with the defaults)."""
+    configurations: int
+    """Number of (target, gap, station) configurations that reuse C poses."""
+
+
 @dataclass
 class PlanDiagnostics:
     """Warnings and information lines collected while planning, for plan_summary.txt.
@@ -288,6 +305,8 @@ class PlanDiagnostics:
     """Poses left out of the plan, each with its reason (the infeasible tilts of series A), listed in plan_summary.txt."""
     master_seed: int | None = None
     """Seed of the master generator, when the caller knows it (logged in the summary)."""
+    c_reuse: CReuse | None = None
+    """Set by the detection planner when it reused the first frames of C poses (``reuse_c_first_frames=True``)."""
 
     def warn(self, message: str) -> None:
         """Record a warning once (identical messages are not repeated)."""
@@ -709,7 +728,7 @@ def plan_noise_series(params: CharacterizationParameters, geometry: SensorGeomet
 def plan_edge_series(params: CharacterizationParameters, geometry: SensorGeometry, rng: np.random.Generator,
                      targets: TargetSet | None = None,
                      diagnostics: PlanDiagnostics | None = None,
-                     filters_off: bool = False) -> list[PlannedCapture]:
+                     filters_off: bool = False, lateral_sweep: bool = False) -> list[PlannedCapture]:
     """Section 6.1 (Series B-HV): T3a (raised square) then T3b (square window), each with G =
     GAP_SMALL_MM and then GAP_LARGE_MM. The slant of the square is part of the target definition.
 
@@ -718,6 +737,17 @@ def plan_edge_series(params: CharacterizationParameters, geometry: SensorGeometr
     each with its own logged random lateral offset uniform over +/- PHASE_JITTER_SPAN_PX / 2 in both
     H and V (subseries "jitter"), FRAMES_PER_EDGE_POSE frames each. Steps 4 and 5 are the loop over the
     two gaps and the two targets; stations run in ascending Z.
+
+    Optional second pass, the lateral sweep (``lateral_sweep=True``; default off; outside the Section 9 budget, as the
+    filters-off repeat and the staircase): for the edge target already mounted (T3a, the raised square, with
+    GAP_SMALL_MM) at the reference station Z_REFERENCE_MM, a systematic sweep of the lateral position, first in H and then
+    in V, in steps of LATERAL_SWEEP_STEP_PX over LATERAL_SWEEP_SPAN_PX centered on the nominal position, both ends
+    included (21 positions per axis, 42 poses, ``params.lateral_sweep_positions_px``). Each step is converted to
+    millimeters at the reference station with the pixel pitch p(Z) = Z / f_x, so the step is 0.1 px x p(Z_REFERENCE_MM)
+    (0.116 mm at the indicative geometry). Each pose has FRAMES_PER_EDGE_POSE frames and the sub-series "lateral_sweep";
+    the pose indices continue after the main poses of the same configuration (as the staircase of series B-Z), the
+    sweep is placed right after the stations of T3a with the small gap, while that target is still mounted, and the
+    sweep axis, position index and offset in pixels are in ``notes``. The sweep is not repeated in the filters-off pass.
 
     Section 4, Step 4.2 (``filters_off=True``): returns the filters-off repeat of the whole series instead,
     with the same poses (new logged jitter offsets) and the sub-series "filters_off" on every one, and pose
@@ -742,7 +772,43 @@ def plan_edge_series(params: CharacterizationParameters, geometry: SensorGeometr
                     plan.append(_jitter_capture(counter, params, geometry, rng, PROCEDURE_EDGES, target_id, gap, z,
                                                 FIELD_POSITION_CENTER, params.frames_per_edge_pose,
                                                 jitter_label, 0.0, 0.0))
+            # Optional second pass: the lateral sweep, right after the stations of T3a with the small gap, while that
+            # target is still mounted (Section 6.1, Step 6: "where the target is already mounted").
+            if (lateral_sweep and not filters_off and target_id == TARGET_RAISED_SQUARE
+                    and gap == params.gap_small_mm):
+                plan += _plan_lateral_sweep(counter, params, geometry, diagnostics)
     return _renumber(plan)
+
+
+LATERAL_SWEEP_AXES = ("H", "V")
+"""The axes of the lateral sweep, in the order they are captured: H first, then V."""
+
+
+def _plan_lateral_sweep(counter: _PoseCounter, params: CharacterizationParameters, geometry: SensorGeometry,
+                        diagnostics: PlanDiagnostics | None) -> list[PlannedCapture]:
+    """The poses of the optional lateral sweep (Section 6.1, Step 6; see :func:`plan_edge_series`): T3a with
+    GAP_SMALL_MM at Z_REFERENCE_MM, LATERAL_SWEEP_SPAN_PX swept in steps of LATERAL_SWEEP_STEP_PX in H and then in V."""
+    z_ref = params.z_reference_mm
+    pitch_mm = geometry.pixel_footprint_mm(z_ref)                    # p(Z) = Z / f_x
+    positions_px = params.lateral_sweep_positions_px()
+    if diagnostics is not None:
+        diagnostics.note(f"B-HV lateral sweep (optional) of {TARGET_RAISED_SQUARE} (G = {params.gap_small_mm:g} mm) at "
+                         f"Z = {z_ref:g} mm: {len(positions_px)} positions per axis in H and then in V, steps of "
+                         f"{params.lateral_sweep_step_px:g} px = {params.lateral_sweep_step_px * pitch_mm:.4f} mm over "
+                         f"{params.lateral_sweep_span_px:g} px, {params.frames_per_edge_pose} frames each, outside the "
+                         "main budget")
+    plan: list[PlannedCapture] = []
+    for axis in LATERAL_SWEEP_AXES:
+        for index, position_px in enumerate(positions_px):
+            offset_mm = position_px * pitch_mm
+            offset = (offset_mm, 0.0) if axis == "H" else (0.0, offset_mm)
+            pose = fronto_parallel_pose(offset[0], offset[1], z_ref)
+            plan.append(_new_capture(
+                counter, PROCEDURE_EDGES, TARGET_RAISED_SQUARE, params.gap_small_mm, z_ref, FIELD_POSITION_CENTER,
+                params.frames_per_edge_pose, SUBSERIES_LATERAL_SWEEP, pose, offset=offset,
+                notes={"lateral_sweep_axis": axis, "lateral_sweep_index": index, "lateral_sweep_offset_px": position_px,
+                       "lateral_sweep_step_px": params.lateral_sweep_step_px, "pixel_pitch_mm": pitch_mm}))
+    return plan
 
 
 def _jitter_capture(counter: _PoseCounter, params: CharacterizationParameters, geometry: SensorGeometry,
@@ -1029,7 +1095,8 @@ def plan_area_series(params: CharacterizationParameters, geometry: SensorGeometr
 def plan_detection_series(params: CharacterizationParameters, geometry: SensorGeometry, rng: np.random.Generator,
                           extended: bool = True, targets: TargetSet | None = None,
                           diagnostics: PlanDiagnostics | None = None,
-                          shuffle_within_mounting: bool = True) -> list[PlannedCapture]:
+                          shuffle_within_mounting: bool = True, reuse_c_first_frames: bool = False,
+                          c_plan: Sequence[PlannedCapture] | None = None) -> list[PlannedCapture]:
     """Section 8 (Series D): the two feature plates T4 and T5, one mounting each.
 
     Main trials: for each configuration {T4, T5} x {GAP_SMALL_MM, GAP_LARGE_MM} x every station of the ladder
@@ -1041,11 +1108,23 @@ def plan_detection_series(params: CharacterizationParameters, geometry: SensorGe
     the shuffle is applied within each mounting (``shuffle_within_mounting=True``), because shuffling across mountings
     would swap the plate thousands of times; with False the whole series is shuffled as the procedure's wording reads
     literally.
-    Extended trials for the 0 percent point (``extended=True``): at the DETECTION_ZERO_STATION_COUNT farthest stations
-    (``params.detection_zero_stations_mm()``: 1131, 1345 and 1600 mm), where the smallest feature lies below the
-    expected threshold, the pose count is raised to DETECTION_ZERO_TRIALS for every configuration (the additional poses
-    carry sub-series "extended"). Reuse: the first frame of each C pose at a matching configuration may count as a D
-    trial; the plan does not reduce the D poses for it, so the technician or the analysis may drop them.
+    Extended trials for the low point, D_5 (``extended=True``): at the DETECTION_LOW_STATION_COUNT farthest stations
+    (``params.detection_low_stations_mm()``: 1131, 1345 and 1600 mm), where the smallest feature lies near and below the
+    expected threshold, the pose count is raised to DETECTION_LOW_TRIALS for every configuration (the additional poses
+    carry sub-series "extended"); 300 trials measure the probability DETECTION_LOW_PROBABILITY (5 percent) to about
+    +/- 2.5 percent. The 0 percent point is not measured; Analysis D predicts it from the fitted curve.
+
+    Reuse (``reuse_c_first_frames=True``; default off): the first frame of each C pose of the same configuration (target,
+    gap, station, centered field, sub-series "jitter") counts as a D trial (Section 8, Reuse: 30 of the 60 per
+    configuration and station), so the D main series plans only the remaining poses, the number of matching C poses fewer
+    per configuration (at most DETECTION_TRIALS_PER_LEVEL, so the extended poses of the far stations are never
+    reduced). The matching C poses are those of ``c_plan`` (the C part of the same plan); without it the C series
+    is assumed to be planned as :func:`plan_area_series` plans it, PHASE_JITTER_POSES_AREA poses per configuration. Only
+    the first frame of a C pose is independent of the D poses, and the C pose carries FRAMES_PER_AREA_POSE frames, so
+    the analysis uses the first one. The Section 9 budget counts the D poses without reuse: ``diagnostics.c_reuse``
+    records what was left out and :func:`capture_budget` adds it back, and each planned D pose notes in
+    ``notes[REUSED_CLOCK_SHARE_KEY]`` how many reused poses it stands for, so that the drift sentinels (which follow the
+    budget clock) are the same as without reuse.
 
     The D pilot keeps only the post check (post-only sites of the disk plate are not detected, see
     ``acquisition.check.pilot_post_check``); the former level selection from a pilot D_50 is gone, since the levels are
@@ -1054,8 +1133,11 @@ def plan_detection_series(params: CharacterizationParameters, geometry: SensorGe
     camera = camera_of(geometry)
     counter = _PoseCounter()
     plan: list[PlannedCapture] = []
-    zero_stations = {int(round(z)) for z in params.detection_zero_stations_mm()}
+    low_stations = {int(round(z)) for z in params.detection_low_stations_mm()}
     series_order_seed = derive_seed(rng)
+    reusable = c_first_frame_counts(params, c_plan) if reuse_c_first_frames else Counter()
+    reused_poses = reused_frames = 0
+    reused_configurations = reused_most = 0
 
     def shuffled(entries: list[PlannedCapture], order_seed: int) -> list[PlannedCapture]:
         """The entries in the order of a seeded permutation, each noting the seed."""
@@ -1068,24 +1150,62 @@ def plan_detection_series(params: CharacterizationParameters, geometry: SensorGe
         for gap in (params.gap_small_mm, params.gap_large_mm):
             target = target_set.get(target_id).with_gap(gap)
             for z in params.z_stations_mm():
-                total = params.detection_zero_trials if (extended and int(round(z)) in zero_stations) \
+                total = params.detection_low_trials if (extended and int(round(z)) in low_stations) \
                     else params.detection_trials_per_level
+                # Reuse: the C poses of this configuration replace that many of the main D poses.
+                reused = min(reusable[(target_id, gap, int(round(z)))], params.detection_trials_per_level)
+                if reused:
+                    reused_poses += reused
+                    reused_frames += reused * params.frames_per_detection_trial
+                    reused_configurations += 1
+                    reused_most = max(reused_most, reused)
                 if not pose_fits_field(camera, target, fronto_parallel_pose(0.0, 0.0, z),
                                        _fit_margin_px(params, jittered=True)):
                     _warn(diagnostics, f"D: {target_id} (G = {gap:g} mm) does not fit the field of view at Z = {z:g} "
                                        "mm with the phase-jitter margin; features may be cut off")
-                for trial in range(total):
+                # Each planned pose also stands for its share of the reused ones on the budget clock (sentinels).
+                clock_notes = {REUSED_CLOCK_SHARE_KEY: reused / (total - reused)} if 0 < reused < total else {}
+                for trial in range(reused, total):
                     label = SUBSERIES_JITTER if trial < params.detection_trials_per_level else SUBSERIES_EXTENDED
                     block.append(_jitter_capture(counter, params, geometry, rng, PROCEDURE_DETECTION, target_id, gap, z,
                                                  FIELD_POSITION_CENTER, params.frames_per_detection_trial, label,
-                                                 0.0, 0.0))
+                                                 0.0, 0.0, notes=clock_notes))
         if shuffle_within_mounting:
             plan.extend(shuffled(block, derive_seed(rng)))
         else:
             plan.extend(block)
     if not shuffle_within_mounting:
         plan = shuffled(plan, series_order_seed)
+    if reuse_c_first_frames:
+        if diagnostics is not None:
+            diagnostics.c_reuse = CReuse(reused_poses, reused_frames, reused_most, reused_configurations)
+        if not reused_poses:
+            _warn(diagnostics, "D: reuse of the C first frames was asked for, but no C pose matches a D configuration "
+                               "(plan the C series too, or check the stations); all D poses are planned")
     return _renumber(plan)
+
+
+def c_first_frame_counts(params: CharacterizationParameters,
+                         c_plan: Sequence[PlannedCapture] | None = None) -> Counter:
+    """The number of C poses whose first frame may serve as a D trial, per (target_id, gap_mm, station_z_mm).
+
+    A C pose matches a D configuration when its target, gap and station are the same and it is centered
+    (field 0) with the sub-series "jitter": the field sub-series is off-axis and the open-background poses have no
+    back plate, so neither is the D configuration (Section 8, Reuse). With ``c_plan`` the poses are counted in it;
+    without, every configuration is assumed to have PHASE_JITTER_POSES_AREA of them, as :func:`plan_area_series`
+    plans."""
+    counts: Counter = Counter()
+    if c_plan is None:
+        for target_id in AREA_TARGET_ORDER:
+            for gap in (params.gap_small_mm, params.gap_large_mm):
+                for z in params.z_stations_mm():
+                    counts[(target_id, gap, int(round(z)))] = params.phase_jitter_poses_area
+        return counts
+    for capture in c_plan:
+        if (capture.procedure == PROCEDURE_AREA and capture.subseries == SUBSERIES_JITTER
+                and capture.field == FIELD_POSITION_CENTER):
+            counts[(capture.target_id, capture.gap_mm, int(round(capture.station_z_mm)))] += 1
+    return counts
 
 
 # ---------------------------------------------------------------------------
@@ -1106,6 +1226,11 @@ def capture_duration_s(capture: PlannedCapture, seconds_per_frame: float, move_s
     return capture_duration_s_for_frames(capture.frames, seconds_per_frame, move_settle_s)
 
 
+REUSED_CLOCK_SHARE_KEY = "budget_clock_reused_share"
+"""``notes`` key of a D pose planned with ``reuse_c_first_frames``: the number of reused D poses that this pose stands for on
+the budget clock (reused poses of its configuration divided by its planned poses). The drift sentinels follow the budget
+clock, which assumes no reuse (Section 9), so :func:`insert_sentinels` counts each such pose as 1 + this many poses of
+time; the sentinels, and with them the Section 9 totals, are then the same with and without the reuse."""
 SENTINEL_NOTE_KEY = "sentinel_note"
 SENTINEL_TARGET_KEY = "sentinel_target"
 SENTINEL_GAP_KEY = "sentinel_gap_mm"
@@ -1207,7 +1332,8 @@ def insert_sentinels(plan: list[PlannedCapture], params: CharacterizationParamet
             since_last = sentinel_duration
         mount(capture)
         result.append(capture)
-        since_last += capture_duration_s(capture, seconds_per_frame, move_settle_s)
+        since_last += capture_duration_s(capture, seconds_per_frame, move_settle_s) \
+            * (1.0 + capture.notes.get(REUSED_CLOCK_SHARE_KEY, 0.0))
         previous = capture
     if previous is not None:
         result.append(sentinel(previous))                        # after the last pose of the last series
@@ -1241,7 +1367,8 @@ def plan_full_session(params: CharacterizationParameters, geometry: SensorGeomet
                       registration: Registration | None = None, expected_quantum_mm: Callable[[float], float] | float | None = None,
                       filters_off: bool = False, open_background: bool = False, extended: bool = True,
                       targets: TargetSet | None = None, series: Iterable[str] | None = None,
-                      diagnostics: PlanDiagnostics | None = None, staircase: bool = False) -> list[PlannedCapture]:
+                      diagnostics: PlanDiagnostics | None = None, staircase: bool = False,
+                      reuse_c_first_frames: bool = False, lateral_sweep: bool = False) -> list[PlannedCapture]:
     """All series in the order of the procedure (R, A, B-HV, B-Z, C, D) with drift sentinels inserted once over
     the whole plan and ``order`` renumbered 0..N-1.
 
@@ -1249,7 +1376,10 @@ def plan_full_session(params: CharacterizationParameters, geometry: SensorGeomet
     appends the filters-off repeat (Section 4, Step 4.2: series A, B-HV and B-Z, each right after its filters-on
     series; sub-series "filters_off", outside the main budget) to each of those series. ``staircase`` adds the optional
     second pass of series B-Z (the staircase of Section 6.2, outside the main budget; the filters-off repeat of B-Z then
-    includes it). ``registration`` is only checked here: a
+    includes it). ``lateral_sweep`` adds the optional second pass of series B-HV (the lateral sweep of Section 6.1 at the
+    reference station, outside the main budget). ``reuse_c_first_frames`` lets the D main series count the first frame
+    of each matching C pose as a D trial and plan only the remaining D poses (:func:`plan_detection_series`; the
+    budget is still computed without the reuse). ``registration`` is only checked here: a
     registration whose residual was not accepted triggers a warning (the commanded flange poses depend on it; they
     are computed by :func:`write_plan`). The other arguments are those of the series planners."""
     chosen = set(PLANNED_SERIES) if series is None else {s.upper() for s in series}
@@ -1269,7 +1399,7 @@ def plan_full_session(params: CharacterizationParameters, geometry: SensorGeomet
         if filters_off:
             parts += plan_noise_series(params, geometry, rng, True, False, target_set, diagnostics)
     if PROCEDURE_EDGES in chosen:
-        parts += plan_edge_series(params, geometry, rng, target_set, diagnostics)
+        parts += plan_edge_series(params, geometry, rng, target_set, diagnostics, lateral_sweep=lateral_sweep)
         if filters_off:
             parts += plan_edge_series(params, geometry, rng, target_set, diagnostics, filters_off=True)
     if PROCEDURE_ZSTEP in chosen:
@@ -1278,10 +1408,13 @@ def plan_full_session(params: CharacterizationParameters, geometry: SensorGeomet
         if filters_off:
             parts += plan_zstep_series(params, geometry, rng, expected_quantum_mm, target_set, diagnostics,
                                        filters_off=True, staircase=staircase)
+    area_plan: list[PlannedCapture] | None = None
     if PROCEDURE_AREA in chosen:
-        parts += plan_area_series(params, geometry, rng, open_background, target_set, diagnostics)
+        area_plan = plan_area_series(params, geometry, rng, open_background, target_set, diagnostics)
+        parts += area_plan
     if PROCEDURE_DETECTION in chosen:
-        parts += plan_detection_series(params, geometry, rng, extended, target_set, diagnostics)
+        parts += plan_detection_series(params, geometry, rng, extended, target_set, diagnostics,
+                                       reuse_c_first_frames=reuse_c_first_frames, c_plan=area_plan)
     return insert_sentinels(parts, params, geometry, _seconds_per_frame(geometry), params.move_and_settle_time_s,
                             diagnostics=diagnostics, targets=target_set)
 
@@ -1300,13 +1433,28 @@ class BudgetRow:
     robot_hours: float
 
 
-def capture_budget(plan: Sequence[PlannedCapture], frame_rate_hz: float, move_settle_s: float) -> list[BudgetRow]:
+def capture_budget(plan: Sequence[PlannedCapture], frame_rate_hz: float, move_settle_s: float,
+                   c_reuse: CReuse | None = None) -> list[BudgetRow]:
     """The Section 9 table: poses, frames and robot hours per series, in the order of the procedure.
     "The estimate assumes 10 frames/s and 3 s per move plus settle": hours = (poses x move_settle_s + frames /
     frame_rate_hz) / 3600. Series without poses are omitted. The optional passes, the filters-off repeat (sub-series
     "filters_off") and the B-Z staircase (sub-series "staircase"), are outside the main budget and are not counted here;
-    see :func:`filters_off_budget` and :func:`staircase_budget`."""
-    return _budget_rows([c for c in plan if c.subseries not in OPTIONAL_SUBSERIES], frame_rate_hz, move_settle_s)
+    see :func:`filters_off_budget`, :func:`staircase_budget` and :func:`lateral_sweep_budget`.
+
+    The budget is computed WITHOUT the reuse of C first frames (Section 9: "the budget assumes no reuse"): when the plan
+    was made with ``reuse_c_first_frames`` and the caller passes ``c_reuse`` (``diagnostics.c_reuse``), the D poses and
+    frames left out of the plan are added back to the D row."""
+    rows = _budget_rows([c for c in plan if c.subseries not in OPTIONAL_SUBSERIES], frame_rate_hz, move_settle_s)
+    if c_reuse is None or not c_reuse.poses:
+        return rows
+    adjusted = []
+    for row in rows:
+        if row.procedure == PROCEDURE_DETECTION:
+            poses, frames = row.poses + c_reuse.poses, row.frames + c_reuse.frames
+            row = BudgetRow(row.procedure, row.series, poses, frames,
+                            (poses * move_settle_s + frames / frame_rate_hz) / SECONDS_PER_HOUR)
+        adjusted.append(row)
+    return adjusted
 
 
 def filters_off_budget(plan: Sequence[PlannedCapture], frame_rate_hz: float, move_settle_s: float) -> list[BudgetRow]:
@@ -1319,6 +1467,12 @@ def staircase_budget(plan: Sequence[PlannedCapture], frame_rate_hz: float, move_
     """The same table for the optional B-Z staircase alone (Section 6.2, second pass), which is outside the main budget.
     Empty when the plan has no staircase poses."""
     return _budget_rows([c for c in plan if c.subseries == SUBSERIES_STAIRCASE], frame_rate_hz, move_settle_s)
+
+
+def lateral_sweep_budget(plan: Sequence[PlannedCapture], frame_rate_hz: float, move_settle_s: float) -> list[BudgetRow]:
+    """The same table for the optional B-HV lateral sweep alone (Section 6.1, second pass), which is outside the main
+    budget. Empty when the plan has no lateral-sweep poses."""
+    return _budget_rows([c for c in plan if c.subseries == SUBSERIES_LATERAL_SWEEP], frame_rate_hz, move_settle_s)
 
 
 def _budget_rows(members_of_plan: Sequence[PlannedCapture], frame_rate_hz: float,
@@ -1527,8 +1681,8 @@ def plan_summary_text(plan: Sequence[PlannedCapture], params: CharacterizationPa
               "  B-Z and tilt reduced stations: " + ", ".join(f"{z:g}" for z in params.z_reduced_stations_mm()),
               "  A legacy-metric extra stations (center field only): "
               + ", ".join(f"{z:g}" for z in params.legacy_extra_stations_mm()),
-              "  D zero-detection stations (extra trials): "
-              + ", ".join(f"{z:g}" for z in params.detection_zero_stations_mm()),
+              "  D low-point (D_5) stations (extended trials): "
+              + ", ".join(f"{z:g}" for z in params.detection_low_stations_mm()),
               "  Feature diameters (mm): " + ", ".join(f"{d:.1f}" for d in params.feature_diameters_mm(geometry))
               if geometry is not None and geometry.sensor_fx_px is not None else "  Feature diameters: geometry unknown"]
     lines += ["", f"Poses planned: {len(plan)}; frames: {sum(c.frames for c in plan)}", "",
@@ -1540,10 +1694,14 @@ def plan_summary_text(plan: Sequence[PlannedCapture], params: CharacterizationPa
     if rate is None:
         lines.append("Capture budget (Section 9): not computed, the sensor frame rate is not known (a † value of Section 2).")
     else:
-        rows = capture_budget(plan, rate, params.move_and_settle_time_s)
+        c_reuse = None if diagnostics is None else diagnostics.c_reuse
+        rows = capture_budget(plan, rate, params.move_and_settle_time_s, c_reuse)
         total = budget_total(rows)
         lines.append(f"Capture budget (Section 9; {rate:g} frames/s, {params.move_and_settle_time_s:g} s per move plus settle):")
         lines.append(format_budget_table(rows))
+        if c_reuse is not None and c_reuse.poses:
+            lines.append(f"  (computed without the reuse of C first frames: the {c_reuse.poses:,} reused D poses are "
+                         "counted in the D row, as Section 9 assumes no reuse)")
         lines.append("")
         lines.append(f"Document estimate: {DOCUMENT_ESTIMATE_POSES:,} poses, {DOCUMENT_ESTIMATE_FRAMES:,} frames, "
                      f"{DOCUMENT_ESTIMATE_HOURS:g} h. This plan: {total.poses:,} poses ({total.poses / DOCUMENT_ESTIMATE_POSES:.2f} x), "
@@ -1558,6 +1716,20 @@ def plan_summary_text(plan: Sequence[PlannedCapture], params: CharacterizationPa
         if stair_rows:
             lines += ["", "Outside the main budget (optional B-Z staircase, Section 6.2, second pass; not in the totals "
                           "above or in the comparison with the document's estimate):", format_budget_table(stair_rows)]
+        sweep_rows = lateral_sweep_budget(plan, rate, params.move_and_settle_time_s)
+        if sweep_rows:
+            lines += ["", "Outside the main budget (optional B-HV lateral sweep, Section 6.1, second pass; not in the "
+                          "totals above or in the comparison with the document's estimate):",
+                      format_budget_table(sweep_rows)]
+    if diagnostics is not None and diagnostics.c_reuse is not None:
+        reuse = diagnostics.c_reuse
+        d_planned = sum(1 for c in plan if c.procedure == PROCEDURE_DETECTION)
+        lines += ["", "D reuse of C first frames (--reuse-c-first-frames, Section 8, Reuse): "
+                      f"{reuse.poses:,} D poses were taken from C (the first frame of each C pose of the same target, gap "
+                      f"and station counts as a D trial: {reuse.per_configuration} per configuration and station at "
+                      f"{reuse.configurations} configurations); {d_planned:,} D poses are planned instead of "
+                      f"{d_planned + reuse.poses:,}. Only the first frame of a C pose may be used (Section 8, Independence "
+                      "rule)."]
     if any(c.procedure == PROCEDURE_ZSTEP for c in plan):
         lines += ["", f"Series Z approach: every visit {APPROACH_FROM_BELOW} (back off {params.z_step_approach_overshoot_mm:g} mm "
                       "toward smaller Z, then move up onto the pose), so that backlash does not enter the A / B difference.",
