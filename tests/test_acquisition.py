@@ -126,10 +126,10 @@ def test_optional_variants_keep_keys_unique():
     assert len({c.pose_key() for c in plan}) == len(plan)
     off = [c for c in plan if c.subseries == "filters_off"]
     assert all(c.pose_index >= FILTERS_OFF_POSE_INDEX_BASE for c in off)
-    # Section 4, Step 4.2: the repeat covers A, B-HV and B-Z (A: 55 station poses + 24 tilt poses).
+    # Section 4, Step 4.2: the repeat covers A, B-HV and B-Z (A: 47 station poses + 16 tilt poses).
     off_by_series = {p: sum(1 for c in off if c.procedure == p) for p in ("A", "B", "Z")}
     assert len(off) == sum(off_by_series.values())
-    assert off_by_series["A"] == 55 + 24
+    assert off_by_series["A"] == 47 + 16
     assert off_by_series["B"] == sum(1 for c in plan if c.procedure == "B" and c.subseries in ("nominal", "jitter"))
     assert off_by_series["Z"] == sum(1 for c in plan if c.procedure == "Z" and c.subseries in ("ladder", "staircase"))
     assert off_by_series["B"] > 0 and off_by_series["Z"] > 0
