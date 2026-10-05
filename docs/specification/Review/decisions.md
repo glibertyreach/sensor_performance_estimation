@@ -377,4 +377,12 @@ Reviewer findings (proposals; nothing executed until Neil closes the chunk):
 - C08-R4 (low): Step 2 should give the values (30 poses, ±4 px of the 8 px span, 10 frames) in the plain style;
   Step 5's sentinel sentence is now consistent with Section 5 and needs no change.
 
-Neil's comments: (pending)
+Neil's comments: no additional comments on C08 (2026-10-05). On the edge position transfer analysis: place it in
+the test plan where it is most efficiently executed, and in the specification wherever it is most logical given the
+document's structure.
+Executed: R1–R4 (Section 7 rewritten in the pose-list, plain-language style; open-background clearance stated as
+Z_MAX − Z_REFERENCE_MM; field sub-series pull-in and achieved fraction stated). Edge position transfer: the analysis
+goes into Section 11.1 at C12 (it uses the B jitter poses, no capture cost); the optional fine lateral sweep is
+added now as Section 6.1, Step 6 (optional second pass, LATERAL_SWEEP_STEP_PX = 0.1 px, LATERAL_SWEEP_SPAN_PX = 2 px,
+rows added to Section 2), outside the budget; in the technician procedure it belongs to Series B as an optional
+step after the edge captures, where the target is already mounted.

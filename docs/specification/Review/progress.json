@@ -43,9 +43,9 @@
  },
  "C08": {
   "title": "Acquisition C, area arrays",
-  "reviewed": null,
-  "tier": null,
-  "note": "not yet reviewed"
+  "reviewed": "2026-10-05",
+  "tier": "fable",
+  "note": "R1–R4 executed; optional lateral sweep added to 6.1; edge position transfer analysis scheduled for C12"
  },
  "C09": {
   "title": "Acquisition D, detection trials",
