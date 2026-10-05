@@ -86,6 +86,84 @@ VALUE_PATTERNS = {
 """Where a section is taken to assert an invariant: the parameter name or the number with its unit."""
 
 
+# ---------------------------------------------------------------------------
+# Formula typesetting for the review PDF. The live document keeps each display
+# formula as a ```latex block, which the Docs viewer renders as math; the .docx
+# export carries only the bare TeX in a "Code" paragraph. For the review render
+# the TeX is typeset with matplotlib's mathtext and placed as an inline picture,
+# with the TeX kept as the picture's alt text.
+# ---------------------------------------------------------------------------
+FORMULA_STYLE_NAME = "Code"
+"""Paragraph style the export gives a ```latex block."""
+FORMULA_FONT_PT = 11.0
+"""Type size of the typeset formula, matching the body text."""
+FORMULA_DPI = 300
+"""Rendering resolution of the formula pictures."""
+FORMULA_MAX_WIDTH_IN = 6.2
+"""Widest picture that fits the page's text column; wider renders are scaled down."""
+FORMULA_DIR_NAME = "formulas"
+"""Sub-directory of archive/ that holds the rendered formula pictures."""
+TEX_TO_MATHTEXT = [
+    (r"\qquad", r"\quad\quad"), (r"\big(", "("), (r"\big)", ")"), (r"\Big(", "("), (r"\Big)", ")"),
+    (r"\!", ""), (r"\;", r"\,"), (r"\mid", "|"),
+]
+"""Literal TeX constructs mathtext does not accept, with their mathtext spelling."""
+
+
+def tex_to_mathtext(tex: str) -> str:
+    """Rewrite bare display TeX into the subset matplotlib's mathtext parses."""
+    text = tex.strip()
+    for old, new in TEX_TO_MATHTEXT:
+        text = text.replace(old, new)
+    text = re.sub(r"\\text\{([^}]*)\}", lambda m: r"\mathrm{" + m.group(1) + "}", text)
+    text = re.sub(r"\\le\b", r"\\leq", text)
+    text = re.sub(r"\\ge\b", r"\\geq", text)
+    return text
+
+
+def render_formula(tex: str, out_png: Path) -> tuple[float, float]:
+    """Typeset one formula to a PNG; returns its (width, height) in inches at FORMULA_DPI."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    plt.rcParams["mathtext.fontset"] = "cm"
+    figure = plt.figure(figsize=(0.1, 0.1))
+    figure.text(0, 0, "$" + tex_to_mathtext(tex) + "$", fontsize=FORMULA_FONT_PT)
+    figure.savefig(out_png, dpi=FORMULA_DPI, bbox_inches="tight", pad_inches=0.04, transparent=False)
+    plt.close(figure)
+    from PIL import Image
+    with Image.open(out_png) as image:
+        width_px, height_px = image.size
+    return width_px / FORMULA_DPI, height_px / FORMULA_DPI
+
+
+def typeset_formulas(docx_path: Path = DOCX_PATH) -> int:
+    """Replace every TeX 'Code' paragraph of the .docx with its typeset picture; returns the count."""
+    from docx import Document
+    from docx.shared import Inches
+    doc = Document(str(docx_path))
+    out_dir = ARCHIVE_DIR / FORMULA_DIR_NAME
+    out_dir.mkdir(parents=True, exist_ok=True)
+    count = 0
+    for paragraph in doc.paragraphs:
+        if paragraph.style.name != FORMULA_STYLE_NAME or "\\" not in paragraph.text:
+            continue
+        tex = paragraph.text.strip()
+        count += 1
+        png = out_dir / f"formula_{count:02d}.png"
+        width_in, height_in = render_formula(tex, png)
+        scale = min(1.0, FORMULA_MAX_WIDTH_IN / width_in)
+        for run in list(paragraph.runs):
+            run._element.getparent().remove(run._element)
+        paragraph.style = doc.styles["Normal"]
+        picture = paragraph.add_run().add_picture(str(png), width=Inches(width_in * scale),
+                                                  height=Inches(height_in * scale))
+        picture._inline.docPr.set("descr", tex)
+    doc.save(str(docx_path))
+    print(f"typeset {count} formulas into {docx_path.name} (pictures under {out_dir})")
+    return count
+
+
 def decode(export_json: Path) -> Path:
     raw = export_json.read_text(encoding="utf-8")
     try:
@@ -110,6 +188,7 @@ def decode(export_json: Path) -> Path:
         raise SystemExit("no base64 payload found in the export result")
     DOCX_PATH.write_bytes(base64.b64decode(payload))
     ARCHIVE_DIR.mkdir(exist_ok=True)
+    typeset_formulas(DOCX_PATH)
     stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
     archived = ARCHIVE_DIR / f"{DOCX_PATH.stem}_{stamp}.docx"
     shutil.copy2(DOCX_PATH, archived)
@@ -224,11 +303,14 @@ def main(argv=None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     p_decode = sub.add_parser("decode"); p_decode.add_argument("export_json", type=Path)
     sub.add_parser("manifest")
+    sub.add_parser("typeset")
     p_gate = sub.add_parser("gate"); p_gate.add_argument("--baseline"); p_gate.add_argument("--intended", nargs="*", default=[])
     p_render = sub.add_parser("render"); p_render.add_argument("chunk_id"); p_render.add_argument("--page", default="")
     args = parser.parse_args(argv)
     if args.command == "decode":
         decode(args.export_json)
+    elif args.command == "typeset":
+        typeset_formulas()
     elif args.command == "manifest":
         build_manifest()
     elif args.command == "gate":
