@@ -1,6 +1,6 @@
 # sensorperf: code design
 
-Status: interfaces of the shared modules fixed, 2026-10-05. This document is the
+Status: implemented and integrated, 2026-10-05 (see Section 7 for the status after integration). This document is the
 contract every module is written against. The procedure it implements is the
 Claude Docs document "VSX3000 Resolution, Area-Fidelity, Detectability, and Noise
 Characterization Procedure" (2026-10-04), referred to below by its section
@@ -66,22 +66,22 @@ sensorperf/
   features/depth_features.py  temporal statistics (vendored)                                                       DONE
   features/normals.py    plane-fit normals (vendored)                                                              DONE
   features/planes.py     robust plane fit, plane depth images, normalized height, pixel area                       DONE
-  stats/intervals.py     Clopper-Pearson, rule of three, bootstrap helper                                          wave 1
-  stats/psychometric.py  psychometric curves, isotonic regression, threshold (floor) model                         wave 1
-  simulate/sensor_model.py  indicative VSX3000-like depth renderer of a TwoPlaneTarget                             wave 1
-  simulate/session.py    write a synthetic session (any subset of series) with its manifest                        wave 1
-  acquisition/plan.py    station and pose lists for registration, A, B-HV, B-Z, C, D, sentinels                    wave 1
-  acquisition/pose_log.py  robot pose log (any rotation convention) -> manifest                                    wave 1
-  acquisition/check.py   quick-look check of a capture set, D pilot counts                                         wave 1
-  analysis/common.py     ROI masks, reference planes, figure and table writers shared by A-E                       wave 2
-  analysis/noise.py      Analysis A (Section 10)                                                                   wave 2
-  analysis/resolution_lateral.py  Analysis B-HV (Section 11.1)                                                     wave 2
-  analysis/resolution_depth.py    Analysis B-Z (Section 11.2)                                                      wave 2
-  analysis/area.py       Analysis C (Section 12)                                                                   wave 2
-  analysis/detection.py  Analysis D (Section 13)                                                                   wave 2
-  analysis/boundary.py   Analysis E (Section 14)                                                                   wave 2
-  analysis/forward_model.py  forward_model_parameters.json assembly                                                wave 2
-  cli/plan_stations.py, make_manifest.py, check_captures.py, register.py, simulate.py, analyze.py                   waves 1-2
+  stats/intervals.py     Clopper-Pearson, rule of three, bootstrap helper  DONE
+  stats/psychometric.py  psychometric curves, isotonic regression, threshold (floor) model  DONE
+  simulate/sensor_model.py  indicative VSX3000-like depth renderer of a TwoPlaneTarget  DONE
+  simulate/session.py    write a synthetic session (any subset of series) with its manifest  DONE
+  acquisition/plan.py    station and pose lists for registration, A, B-HV, B-Z, C, D, sentinels  DONE
+  acquisition/pose_log.py  robot pose log (any rotation convention) -> manifest  DONE
+  acquisition/check.py   quick-look check of a capture set, D pilot counts  DONE
+  analysis/common.py     ROI masks, reference planes, figure and table writers shared by A-E  DONE
+  analysis/noise.py      Analysis A (Section 10)  DONE
+  analysis/resolution_lateral.py  Analysis B-HV (Section 11.1)  DONE
+  analysis/resolution_depth.py    Analysis B-Z (Section 11.2)  DONE
+  analysis/area.py       Analysis C (Section 12)  DONE
+  analysis/detection.py  Analysis D (Section 13)  DONE
+  analysis/boundary.py   Analysis E (Section 14)  DONE
+  analysis/forward_model.py  forward_model_parameters.json assembly  DONE
+  cli/plan_stations.py, make_manifest.py, check_captures.py, register.py, simulate.py, analyze.py  DONE
 tests/
 docs/design/code_design.md (this file)
 docs/procedures/performance_test_procedure.md (+ figures/, build/, Review/)
@@ -274,7 +274,7 @@ def pilot_detection_counts(session, params, station_z_mm, ...) -> dict   # Secti
     # first frame of each C pose at Z_REFERENCE_MM; per configuration the detection fraction per level, a pilot D_50 and D_0
 ```
 
-### analysis/* (wave 2; each writes into session.analysis_dir())
+### analysis/* (each writes into session.analysis_dir())
 Each analysis exposes `run_<letter>(session: Session, options) -> <Letter>Result`
 and `write_outputs(result, out_dir)`; results are dataclasses with the
 quantities the procedure names, and the CSV column names are the document's
@@ -291,3 +291,29 @@ stations and a few frames per pose is the shared fixture for the acquisition
 tools and the analyses; a full-size run of one series each is the integration
 check (`python3 -m sensorperf.cli.simulate --quick`). Every test states which
 step of the procedure it exercises and its acceptance criterion.
+
+## 7. Status after integration (2026-10-05)
+
+All modules exist and 104 tests pass (`python3 -m pytest -q`, about 90 s on
+an idle 4-core container). The synthetic quick session (160 x 120, 115 poses,
+376 frames) renders in 3.5 s and the six analyses run on it in 22 s; a
+640 x 480 demonstration session (121 poses, 388 frames, 149 MB) renders in
+55 s and analyzes in 83 s. On the quick session the analyses recover the
+rendering model: sigma_d within 8 percent, the power-law exponent 1.97 against
+2, the depth quantum within 1 percent, the correlation length at the analytic
+value of the bilinear block interpolation, the rise distance within 5 percent
+of the matcher window's analytic value, and the edge offset within 2 percent.
+
+Deviations from the first version of this document that the integration
+forced or that the implementers chose, each recorded in the module docstrings:
+the D threshold tau is set on the rule's own window statistic so that the
+false-alarm rate of the rule (after the connected-pixel criterion) equals the
+target, instead of a per-pixel quantile; the D bootstrap refits only the best
+curve family and the model D_0 interval is the profile-likelihood one; the
+staircase quantum falls back to the pooled depth levels (the phase-resultant
+estimator of the 6DOF repository's repeatability module) when the single-pixel
+noise leaves no resolved plateaus; the plan's field-of-view fit pulls a pose
+inward to the largest offset that fits (a plate may cover the whole image
+across an axis); the D shuffle is applied within each target mounting; the
+legacy repeatability metrics follow testZRepeatabilityBrownBoard.py's
+definitions (ddof 0, boxes skipped when outside the image).
