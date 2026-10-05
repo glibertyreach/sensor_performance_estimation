@@ -132,6 +132,14 @@ def list_numbering(p):
         lvl = abstract.find(f"{qn('w:lvl')}[@{qn('w:ilvl')}='{level}']")
         fmt = lvl.find(qn("w:numFmt")).get(qn("w:val"))
         kind = "ol" if fmt in ORDERED_FORMATS else "ul"
+        # A list that continues an earlier one (after a formula or figure) carries its first
+        # number as the level's start value; seed the running count from it once.
+        start = lvl.find(qn("w:start"))
+        override = num.find(f"{qn('w:lvlOverride')}[@{qn('w:ilvl')}='{level}']")
+        if override is not None and override.find(qn("w:startOverride")) is not None:
+            start = override.find(qn("w:startOverride"))
+        if start is not None and (num_val, level) not in LIST_COUNTS:
+            LIST_COUNTS[(num_val, level)] = int(start.get(qn("w:val"))) - 1
     except Exception:
         pass
     return kind, level, num_val

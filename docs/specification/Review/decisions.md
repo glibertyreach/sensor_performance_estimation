@@ -444,3 +444,31 @@ Neil's comments: none; closed 2026-10-05.
 Executed (document rev 92): R2 manifest columns listed as the manifest module writes them; R3 file-name digits,
 G0 and f00 stated; R4 the budget's exclusions and the optional captures listed. R1 (the table numbers) waits for
 the ramp code: the plan tool's rows and totals are written in when it lands, with the gate invariants updated.
+
+## C11 — Section 10 Analysis A, noise vs Z (opened 2026-10-05)
+
+Reviewer findings (proposals; nothing executed until Neil closes the chunk):
+- C11-R1 (correctness): Step 4 takes the standard deviation of the residual of the frame mean about a free plane
+  as σ_fp, but the mean of 100 frames still carries temporal noise of σ_t/√100, about 10 % of σ_t, which inflates
+  σ_fp where the fixed pattern is small. Proposal: σ_fp² = var(residual) − σ_t²/N with N the frame count, stated.
+- C11-R2 (consistency of the closure check): Step 5 checks σ_tot² ≈ σ_t² + σ_fp² + bias², but σ_fp is defined
+  about a free plane while σ_tot and bias are about the registered plane; the tilt between the two planes (Step 4
+  reports the angle) breaks the identity. Proposal: define σ_fp as the spread of (Z̄ − Z_GT − bias) about the
+  registered plane, keep the free-plane fit only for the reported tilt angle, and cite the tolerance of 20 %
+  (NOISE_CLOSURE_TOLERANCE) instead of "≈".
+- C11-R3 (plain style and names): Steps 1, 7, 8, 12 carry names without values or values without names
+  (8 px band, 1/e, 20 × 20 px, half side 10 px, the five box positions of the legacy script); rewrite under the
+  plain-language rule.
+- C11-R4 (consistency with C06): Step 10 says "at each Z" for the incidence-angle plots; the tilt sub-series now
+  runs only where the tilted plate fits (800 and 1600 mm at the indicative plate size). Proposal: "at each tilt
+  station".
+- C11-R5: Step 7 should point to the jitter-span check of Section 5, Step 7 as the moment the comparison with
+  PHASE_JITTER_SPAN_PX is made; Step 9 should say what weights the least squares uses (the standard error of
+  each station's median σ_t).
+- C11-R6 (outputs): Step 11 should report the drift rate per mounted target and flag any series whose drift
+  exceeded the warm-up fraction; Step 13's summary gains the achieved field fraction per station (C06) and the
+  per-target drift.
+- Pipeline: the renderer restarted the step numbers after the formula (10–13 shown as 1–4); fixed by honoring the
+  continued list's start number.
+
+Neil's comments: (pending)
