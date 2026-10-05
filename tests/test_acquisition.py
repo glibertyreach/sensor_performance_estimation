@@ -32,6 +32,7 @@ from sensorperf.acquisition.plan import (
     camera_of, fit_violation_px, format_budget_table, insert_sentinels, jitter_offset_mm, place_in_field,
     plan_detection_series, plan_edge_series, plan_full_session, plan_noise_series, plan_registration,
     plan_zstep_series, read_plan_csv, write_plan, APPROACH_FROM_BELOW, MIN_POSE_LOG_DECIMALS,
+    count_sentinel_remounts, tilt_is_feasible, tilt_near_edge_mm,
 )
 from sensorperf.acquisition.pose_log import PoseLogError, build_manifest, build_manifest_with_report
 from sensorperf.cli import check_captures as check_cli
@@ -42,7 +43,7 @@ from sensorperf.geometry.registration import Registration, plane_of_pose
 from sensorperf.geometry.targets import fronto_parallel_pose, make_standard_target_set
 from sensorperf.geometry.transforms import RigidTransform
 from sensorperf.io.manifest import (
-    FrameRecord, SUBSERIES_FIELD, SUBSERIES_JITTER, VISIT_A, VISIT_B, write_manifest_csv,
+    FIELD_FRACTION_ACHIEVED_KEY, FrameRecord, SUBSERIES_FIELD, SUBSERIES_JITTER, VISIT_A, VISIT_B, write_manifest_csv,
 )
 from sensorperf.features.planes import plane_depth_image
 from sensorperf.io.matcloud import write_matcloud
@@ -50,7 +51,7 @@ from sensorperf.io.session import PARAMETERS_FILE_NAME, SENSOR_CONFIG_FILE_NAME,
 from sensorperf.parameters import (
     CharacterizationParameters, FIELD_POSITION_CODES, PROCEDURE_AREA, PROCEDURE_DETECTION, PROCEDURE_EDGES,
     PROCEDURE_NOISE, PROCEDURE_REGISTRATION, PROCEDURE_SENTINEL, SensorGeometry, TARGET_DISKS,
-    TARGET_NOISE_PLATE,
+    TARGET_NOISE_PLATE, TARGET_CUTOUTS,
 )
 
 PARAMS = CharacterizationParameters()
@@ -167,13 +168,15 @@ def test_registration_poses_span_the_volume():
 
 
 def test_noise_station_order_is_a_permutation_of_the_station_list(full_plan):
-    """Section 5 Steps 1 and 2 and redesign note Section 1: the nine ladder stations plus the two legacy depths (700 and
-    1000 mm), 11 Z stations x 5 field positions, are all visited once, in the order of the logged seed; tilt sub-series
-    (24 poses at the three reduced stations) and repeat-mount check follow."""
+    """Section 5 Steps 1 and 2 and redesign note Section 1: the nine ladder stations at the five field positions plus the two
+    legacy depths (700 and 1000 mm) at the center only, 9 x 5 + 2 = 47 main poses, are all visited once, in the order of the
+    logged seed; the tilt sub-series (16 poses: the 800 and 1600 mm stations, every tilt at 400 mm being infeasible) and the
+    repeat-mount check follow."""
     plan, _ = full_plan
     main = [c for c in plan if c.procedure == PROCEDURE_NOISE and c.subseries == "main"]
-    stations = [(z, code) for z in PARAMS.noise_stations_mm() for code in FIELD_POSITION_CODES]
-    assert len(main) == len(stations) == 55
+    stations = [(z, code) for z in PARAMS.z_stations_mm() for code in FIELD_POSITION_CODES]
+    stations += [(z, 0) for z in PARAMS.legacy_extra_stations_mm()]
+    assert len(main) == len(stations) == 47
     assert {c.station_z_mm for c in main} == set(PARAMS.z_stations_mm()) | set(PARAMS.legacy_metric_depths_mm)
     assert sorted((c.station_z_mm, c.field) for c in main) == sorted(stations)
     assert [(c.station_z_mm, c.field) for c in main] != sorted(stations)
@@ -183,11 +186,89 @@ def test_noise_station_order_is_a_permutation_of_the_station_list(full_plan):
     assert [(c.station_z_mm, c.field) for c in main] == [stations[int(i)] for i in permutation]
     assert all(c.frames == PARAMS.frames_per_noise_station for c in main)
     tilt = [c for c in plan if c.procedure == PROCEDURE_NOISE and c.subseries == "tilt"]
-    assert len(tilt) == len(PARAMS.z_reduced_stations_mm()) * 2 * len(PARAMS.tilt_angles_deg)
-    assert Counter((c.tilt_axis, c.tilt_deg) for c in tilt)[("V", 15.0)] == len(PARAMS.z_reduced_stations_mm())
+    assert len(tilt) == 2 * 2 * len(PARAMS.tilt_angles_deg) == 16
+    assert Counter((c.tilt_axis, c.tilt_deg) for c in tilt)[("V", 15.0)] == 2
     assert all(c.frames == PARAMS.frames_per_tilt_pose and c.field == 0 for c in tilt)
     remount = [c for c in plan if c.subseries == "remount"]
     assert len(remount) == 1 and remount[0].station_z_mm == PARAMS.z_reference_mm and remount[0].field == 0
+
+
+def test_tilt_feasibility_skips_tilts_that_bring_the_plate_edge_inside_z_min():
+    """Section 5, Step 5 (tilt feasibility): a tilt is planned only where Z - h sin(tilt) >= Z_MIN, h the half extent of the
+    400 x 400 mm plate across the tilt axis (200 mm). At the indicative geometry every tilt at 400 mm is skipped, with its
+    reason listed in the diagnostics, and the tilt sub-series keeps the 800 and 1600 mm stations in both axes and all angles."""
+    plate = make_standard_target_set(PARAMS, GEOMETRY).get(TARGET_NOISE_PLATE)
+    assert (plate.half_width_mm, plate.half_height_mm) == (200.0, 200.0)
+    # The rule itself, including its equality case (Z = 500 mm, 30 deg: the edge is exactly at Z_MIN).
+    assert tilt_near_edge_mm(plate, 800.0, "V", 30.0) == pytest.approx(700.0)
+    for axis in ("H", "V"):
+        assert not any(tilt_is_feasible(PARAMS, plate, 400.0, axis, angle) for angle in (15.0, 30.0, 45.0))
+        assert all(tilt_is_feasible(PARAMS, plate, z, axis, angle) for z in (800.0, 1600.0)
+                   for angle in PARAMS.tilt_angles_deg)
+    assert tilt_is_feasible(PARAMS, plate, PARAMS.z_min_mm + 200.0 * np.sin(np.radians(30.0)), "V", 30.0)
+    assert not tilt_is_feasible(PARAMS, plate, PARAMS.z_min_mm + 200.0 * np.sin(np.radians(30.0)) - 0.01, "V", 30.0)
+    diagnostics = PlanDiagnostics()
+    plan = plan_noise_series(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), with_sentinels=False,
+                             diagnostics=diagnostics)
+    tilt = [c for c in plan if c.subseries == "tilt"]
+    assert {c.station_z_mm for c in tilt} == {800.0, 1600.0}
+    assert Counter((c.station_z_mm, c.tilt_axis) for c in tilt) == {
+        (z, axis): len(PARAMS.tilt_angles_deg) for z in (800.0, 1600.0) for axis in ("H", "V")}
+    assert all(tilt_near_edge_mm(plate, c.station_z_mm, c.tilt_axis, c.tilt_deg) >= PARAMS.z_min_mm for c in tilt)
+    # The skipped poses are listed with the reason, per axis.
+    assert len(diagnostics.skipped) == 2
+    for axis, message in zip(("V", "H"), diagnostics.skipped):
+        assert f"tilt about {axis} at Z = 400 mm: skipped 0, 15, 30, 45 deg" in message and "Z_MIN" in message
+    from sensorperf.acquisition.plan import plan_summary_text
+    text = plan_summary_text(plan, PARAMS, GEOMETRY, diagnostics)
+    assert "Skipped poses (left out of the plan): 2" in text and "A tilt about V at Z = 400 mm" in text
+
+
+def test_tilt_feasibility_follows_the_plate_size_and_z_min():
+    """A smaller plate lets a tilt through at 400 mm: with a 100 mm half extent a 15 degree tilt keeps the near edge at 374 mm
+    < 400 (skipped), while with Z_MIN lowered to 300 mm the 400 mm station is feasible up to 45 degrees (329 mm)."""
+    small_plate = dataclasses.replace(PARAMS, noise_plate_size_mm=(200.0, 200.0))
+    plate = make_standard_target_set(small_plate, GEOMETRY).get(TARGET_NOISE_PLATE)
+    assert not tilt_is_feasible(small_plate, plate, 400.0, "V", 15.0)
+    low = dataclasses.replace(small_plate, z_min_mm=300.0)
+    assert all(tilt_is_feasible(low, plate, 400.0, "H", angle) for angle in low.tilt_angles_deg)
+
+
+def test_legacy_depths_are_captured_at_the_center_only(full_plan):
+    """Redesign note Section 1 (specification review): the legacy depths 700 and 1000 mm are extra A stations at the center
+    field position only, so the main sub-series has 9 x 5 + 2 = 47 poses; the nine ladder stations keep all five positions."""
+    plan, _ = full_plan
+    main = [c for c in plan if c.procedure == PROCEDURE_NOISE and c.subseries == "main"]
+    assert len(main) == 9 * len(FIELD_POSITION_CODES) + len(PARAMS.legacy_extra_stations_mm()) == 47
+    for z in PARAMS.legacy_extra_stations_mm():
+        assert [c.field for c in main if c.station_z_mm == z] == [0]
+    for z in PARAMS.z_stations_mm():
+        assert sorted(c.field for c in main if c.station_z_mm == z) == sorted(FIELD_POSITION_CODES)
+    assert PARAMS.legacy_extra_stations_mm() == (700.0, 1000.0)
+
+
+def test_field_fraction_achieved_is_recorded_in_the_pose_notes(full_plan):
+    """Section 5, Step 1: every pose placed at a field position records the achieved fraction of the requested offset in its
+    notes; it is 1 for a position that fits (the center always) and equals the fraction kept of a pulled-in pose, which is
+    the one listed as "kept N%" in plan_summary.txt. The margin of the fit is BOUNDARY_BAND_HALF_WIDTH_PX."""
+    plan, _ = full_plan
+    main = [c for c in plan if c.procedure == PROCEDURE_NOISE and c.subseries == "main"]
+    assert all(FIELD_FRACTION_ACHIEVED_KEY in c.notes for c in main)
+    assert all(c.notes[FIELD_FRACTION_ACHIEVED_KEY] == 1.0 for c in main if c.field == 0 and "field_placement" not in c.notes)
+    pulled = [c for c in main if "field_placement" in c.notes and c.field != 0]
+    assert pulled
+    for c in pulled:
+        assert c.notes[FIELD_FRACTION_ACHIEVED_KEY] == c.notes["field_placement"]["fraction_kept"]
+        assert 0.0 <= c.notes[FIELD_FRACTION_ACHIEVED_KEY] <= 1.0
+    assert any(c.notes[FIELD_FRACTION_ACHIEVED_KEY] < 1.0 for c in pulled)
+    # The manifest carries it as string metadata; poses without a field placement carry nothing.
+    assert float(pulled[0].manifest_metadata()[FIELD_FRACTION_ACHIEVED_KEY]) == pulled[0].notes[FIELD_FRACTION_ACHIEVED_KEY]
+    assert [c for c in plan if c.subseries == "tilt"][0].manifest_metadata() == {}
+    # The fit margin is the ROI shrink of Analysis A: moving the margin changes the fraction kept.
+    plate = make_standard_target_set(PARAMS, GEOMETRY).get(TARGET_NOISE_PLATE)
+    at_band = place_in_field(PARAMS, GEOMETRY, plate, 1000.0, (1.0, -1.0), PARAMS.boundary_band_half_width_px)
+    wider = place_in_field(PARAMS, GEOMETRY, plate, 1000.0, (1.0, -1.0), 2.0 * PARAMS.boundary_band_half_width_px)
+    assert wider.fraction_kept < at_band.fraction_kept
 
 
 def test_field_positions_are_pulled_inward_until_the_target_fits():
@@ -215,13 +296,15 @@ def test_field_positions_are_pulled_inward_until_the_target_fits():
 
 
 def test_sentinels_follow_the_budget_clock(full_plan):
-    """Section 5 Step 3: a sentinel before the first station, one every DRIFT_SENTINEL_INTERVAL_MIN of estimated clock,
-    one after the last; each is T2, center, Z_REFERENCE_MM, SENTINEL_FRAMES frames."""
+    """Section 5 Step 3: a sentinel before the first station, one every DRIFT_SENTINEL_INTERVAL_MIN of estimated clock or
+    earlier at a series boundary, one after the last; each is centered at Z_REFERENCE_MM with SENTINEL_FRAMES frames on the
+    mounted target (see test_sentinels_are_captured_on_the_mounted_target)."""
     plan, _ = full_plan
     seconds_per_frame = 1.0 / GEOMETRY.frame_rate_hz
     interval = PARAMS.drift_sentinel_interval_min * 60.0
     non_registration = [c for c in plan if c.procedure != PROCEDURE_REGISTRATION]
     assert non_registration[0].procedure == PROCEDURE_SENTINEL and non_registration[-1].procedure == PROCEDURE_SENTINEL
+    assert non_registration[0].target_id == TARGET_NOISE_PLATE            # series A comes first: its T2 is mounted
     clock, starts = 0.0, []
     longest = 0.0
     for c in non_registration:
@@ -229,17 +312,74 @@ def test_sentinels_follow_the_budget_clock(full_plan):
         longest = max(longest, duration)
         if c.procedure == PROCEDURE_SENTINEL:
             starts.append(clock)
-            assert (c.target_id, c.gap_mm, c.field, c.frames) == ("T2", None, 0, PARAMS.sentinel_frames)
+            assert (c.field, c.frames) == (0, PARAMS.sentinel_frames)
             assert c.station_z_mm == PARAMS.z_reference_mm
         clock += duration
     gaps = np.diff(starts)
     assert len(starts) >= int(clock // interval) + 1                     # at least one per full interval, plus the last
-    # Every gap but the last is at least one interval and overshoots it by at most the longest single capture.
-    assert np.all(gaps[:-1] >= interval - 1e-6) and np.all(gaps[:-1] <= interval + longest + 1e-6)
-    assert gaps[-1] <= interval + longest
+    # No gap exceeds one interval by more than the longest single capture (a boundary sentinel only shortens a gap).
+    assert np.all(gaps <= interval + longest + 1e-6)
     # Inserting again changes nothing: existing sentinels are replaced, not duplicated.
     again = insert_sentinels(plan, PARAMS, GEOMETRY, seconds_per_frame, PARAMS.move_and_settle_time_s)
     assert [c.pose_key() for c in again] == [c.pose_key() for c in plan]
+
+
+def test_sentinels_are_captured_on_the_mounted_target(full_plan):
+    """Section 5 Step 3 (specification review): a sentinel is captured on the front plane of the target mounted at that point of
+    the plan, with the gap as mounted, so no sentinel row carries T2 while another target is mounted; the first sentinel after
+    each mount is that target's reference; T2 sentinels bracket A (before and after) and sit at the end of B-Z; the plan
+    summary reports zero sentinel re-mounts and no warning about re-mounts."""
+    plan, diagnostics = full_plan
+    captures = [c for c in plan if c.procedure not in (PROCEDURE_SENTINEL,)]
+    mounted_of_position = {}
+    last = None
+    for index, c in enumerate(plan):
+        if c.procedure != PROCEDURE_SENTINEL:
+            last = c
+        elif last is not None:
+            mounted_of_position[index] = last
+    sentinels = [(i, c) for i, c in enumerate(plan) if c.procedure == PROCEDURE_SENTINEL]
+    assert len(sentinels) >= 8
+    mount_serial_of = {}
+    serial, previous_target = 0, None
+    for c in plan:                                           # mount number of every capture, as the analysis counts them
+        if c.procedure != PROCEDURE_SENTINEL:
+            if previous_target is not None and c.target_id != previous_target:
+                serial += 1
+            previous_target = c.target_id
+        mount_serial_of[id(c)] = serial
+    referenced = set()
+    for index, c in sentinels:
+        mounted = mounted_of_position.get(index)
+        if mounted is None:                                   # before everything: the first capture after it is mounted
+            mounted = next(x for x in plan[index:] if x.procedure not in (PROCEDURE_SENTINEL, PROCEDURE_REGISTRATION))
+        assert (c.target_id, c.gap_mm) == (mounted.target_id, mounted.gap_mm)
+        # In particular T2 only while T2 (the plate of A and B-Z) is what is mounted.
+        assert c.target_id != TARGET_NOISE_PLATE or mounted.target_id == TARGET_NOISE_PLATE
+        assert c.notes["sentinel_target"] == c.target_id and "mounted target" in c.notes["sentinel_note"]
+        assert (c.field, c.station_z_mm, c.frames) == (0, PARAMS.z_reference_mm, PARAMS.sentinel_frames)
+        # The reference note marks the first sentinel of each mount and only that one.
+        mount = mount_serial_of[id(mounted)] if index in mounted_of_position else 0
+        assert c.notes["mount_reference"] == (mount not in referenced)
+        referenced.add(mount)
+    # No sentinel sits between captures of another target: its neighbors in the plan include its own target.
+    for index, c in sentinels:
+        around = [x.target_id for x in plan[max(index - 1, 0):index + 2] if x.procedure != PROCEDURE_SENTINEL]
+        assert c.target_id in around
+    targets_with_sentinels = {c.target_id for _, c in sentinels}
+    assert targets_with_sentinels >= {TARGET_NOISE_PLATE, TARGET_DISKS, TARGET_CUTOUTS}
+    # T2 sentinels: before and after A (T2 still mounted at the end of A) and at the end of B-Z.
+    t2_positions = [i for i, c in sentinels if c.target_id == TARGET_NOISE_PLATE]
+    first_a = next(i for i, c in enumerate(plan) if c.procedure == PROCEDURE_NOISE)
+    last_a = max(i for i, c in enumerate(plan) if c.procedure == PROCEDURE_NOISE)
+    assert t2_positions[0] == first_a - 1 and t2_positions[1] == last_a + 1
+    assert count_sentinel_remounts(plan) == 0 and len(captures) + len(sentinels) == len(plan)
+    assert any("0 sentinel re-mounts" in note for note in diagnostics.notes)
+    assert not any("re-mount" in warning for warning in diagnostics.warnings)
+    # The check really detects a T2 sentinel inside another series.
+    broken = [dataclasses.replace(c, target_id=TARGET_NOISE_PLATE, gap_mm=None) if c.procedure == PROCEDURE_SENTINEL
+              and c.target_id != TARGET_NOISE_PLATE else c for c in plan]
+    assert count_sentinel_remounts(broken) > 0
 
 
 def test_jitter_offsets_are_uniform_within_the_span_and_logged(full_plan):
@@ -394,8 +534,7 @@ def test_budget_totals_are_the_stored_estimate(full_plan, capsys):
     assert by_series["D"].poses == d_poses
     c_poses = 2 * 2 * n_all * PARAMS.phase_jitter_poses_area + 2 * 4 * PARAMS.field_subseries_poses_area
     assert by_series["C"].poses == c_poses
-    assert by_series["A"].poses == 5 * len(PARAMS.noise_stations_mm()) + 2 * len(PARAMS.tilt_angles_deg) \
-        * len(PARAMS.z_reduced_stations_mm()) + 1
+    assert by_series["A"].poses == 47 + 2 * len(PARAMS.tilt_angles_deg) * 2 + 1
 
 
 def test_write_plan_round_trip(tmp_path: Path):

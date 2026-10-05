@@ -11,6 +11,7 @@ delta_Z = q Z^2 / k with the log's sigma_d and q and k = f_x B of the quick geom
 from __future__ import annotations
 
 import csv
+import dataclasses
 import json
 import math
 import re
@@ -47,8 +48,13 @@ SIGMA_D_TOLERANCE = 0.30
 """Test A, Step 9: the fitted sigma_d is within this fraction of the truth."""
 POWER_LAW_RANGE = (1.5, 2.5)
 """Test A, Step 9: range of the fitted exponent n."""
-DRIFT_TOLERANCE = 0.5
-"""Test A, Step 11: the drift rate is within this fraction of the model's drift."""
+DRIFT_SIGMA_MULTIPLE = 4.0
+"""Test A, Step 11: the drift rate of the T2 sentinels of A's mount agrees with the model's drift within this many standard
+errors of the fitted slope (the sentinels of A's mount span only the few seconds of the quick session's A series, so the
+slope is dominated by the frame noise; the accuracy of the rate is tested on a long synthetic record, see
+test_a_step11_target_drift_relative_to_first_sentinel)."""
+DRIFT_RECOVERY_TOLERANCE = 0.05
+"""Test A, Step 11: the drift rate recovered from a long synthetic sentinel record is within this fraction of the truth."""
 QUANTUM_TOLERANCE = 0.15
 """Test A, Step 8: the measured disparity quantum is within this fraction of the truth."""
 RISE_RANGE_WINDOWS = (0.5, 2.0)
@@ -214,14 +220,16 @@ def test_a_step10_tilt_curves(result_a):
 
 
 def test_a_step11_sentinel_drift(result_a, truth, session):
-    """Section 10, Step 11: the sentinel line (mean of Z - Z_GT against time) gives the drift rate of the model (1 mm/h in
-    the demonstration) within 50 percent. The correction is applied exactly when the drift over the session exceeds
-    the allowance of 0.1 sigma_t at the sentinel Z (the quick session lasts a few minutes, so either outcome is
-    legitimate); when it is applied the corrected bias differs from the raw bias by the interpolated sentinel offset,
-    otherwise the two are equal."""
+    """Section 10, Step 11: the T2 sentinels of A's mount (before and after A) give a line of the mean of Z - Z_GT against
+    time whose slope agrees with the drift of the model (1 mm/h in the demonstration) within DRIFT_SIGMA_MULTIPLE standard
+    errors. The correction is applied exactly when the drift over A's span exceeds the allowance of 0.1 sigma_t at the
+    sentinel Z (the quick session's A series lasts a few seconds, so either outcome is legitimate); when it is applied the
+    corrected bias differs from the raw bias by the interpolated sentinel offset, otherwise the two are equal."""
     drift = result_a.drift
     assert drift is not None
-    assert drift.rate_mm_per_hour == pytest.approx(truth["drift_mm_per_hour"], rel=DRIFT_TOLERANCE)
+    coefficients, covariance = np.polyfit(drift.elapsed_hours, drift.mean_z_mm, 1, cov=True)
+    assert drift.rate_mm_per_hour == pytest.approx(coefficients[0])
+    assert abs(drift.rate_mm_per_hour - truth["drift_mm_per_hour"]) <= DRIFT_SIGMA_MULTIPLE * math.sqrt(covariance[0, 0])
     span_mm = abs(drift.rate_mm_per_hour) * max(drift.elapsed_hours)
     sentinel_sigma = next(r.sigma_t_median_mm for r in result_a.rows
                           if r.station_z_mm == session.params.z_reference_mm and r.subseries == "main")
@@ -231,6 +239,96 @@ def test_a_step11_sentinel_drift(result_a, truth, session):
             assert abs(row.bias_corrected_mm - row.bias_mm) <= span_mm + 1e-9
         else:
             assert row.bias_corrected_mm == row.bias_mm
+
+
+def test_a_step11_sentinels_are_grouped_by_mounted_target(result_a, session):
+    """Section 10, Step 11: the sentinels of the quick session are T2 (before and after A) and T5 (the mounted target at
+    the end of the plan); the analysis groups them by target and mount, the A correction uses the T2 group of A's mount, and
+    every group's first offset is zero (relative to its first sentinel after mounting)."""
+    targets = result_a.drift.targets
+    assert [(t.target_id, t.sentinel_poses, t.used_for_a_correction) for t in targets] == [("T2", 2, True), ("T5", 1, False)]
+    assert all(t.pose_offset_mm[0] == 0.0 for t in targets)
+    assert math.isnan(targets[1].rate_mm_per_hour) and targets[1].span_hours == 0.0   # a single sentinel: only its reference
+    sentinels = [r for r in session.records if r.procedure == "S"]
+    assert {r.target_id for r in sentinels} == {"T2", "T5"}
+    epochs = noise.mount_epochs(session.records)
+    t2_epochs = {epochs[r.pose_key()] for r in sentinels if r.target_id == "T2"}
+    assert t2_epochs == noise.a_mount_epochs(session.records, epochs) and len(t2_epochs) == 1
+
+
+def _synthetic_frames(rate_mm_per_hour: float, noise_mm: float, mounts: list[tuple[str, int, list[float]]]) -> list[dict]:
+    """Sentinel frame dictionaries of ``_frame_means`` for a linear drift: ``mounts`` lists (target, mount number, pose
+    times in hours); each pose has ten frames over two minutes. A fixed offset per mount (the mount's own bias) is added."""
+    rng = np.random.default_rng(SIMULATION_SEED)
+    frames, pose_id = [], 0
+    for target_id, mount, pose_times in mounts:
+        bias = 0.3 * (mount + 1)                                  # a different bias in every mount
+        for start in pose_times:
+            for frame in range(10):
+                hours = start + frame * 12.0 / 3600.0
+                value = bias + rate_mm_per_hour * hours + rng.normal(0.0, noise_mm)
+                frames.append({"pose_id": pose_id, "target_id": target_id, "gap_mm": None, "epoch": mount,
+                               "time_s": hours * 3600.0, "temperature_c": None, "registered_mm": value,
+                               "raw_mm": value, "station_z_mm": 800.0})
+            pose_id += 1
+    return frames
+
+
+def test_a_step11_target_drift_relative_to_first_sentinel():
+    """Section 10, Step 11: from a long record of sentinels on three mounted targets (T2 mounted for A, T3b, then T2 mounted
+    again), each (target, mount) group's drift is computed relative to its own first sentinel after mounting, so the bias of
+    a mount does not enter; the rate of the T2 mount of A is recovered within DRIFT_RECOVERY_TOLERANCE of the true drift and
+    only that group is flagged for the A correction."""
+    truth_rate = 0.8
+    frames = _synthetic_frames(truth_rate, 0.001, [("T2", 0, [0.0, 0.25, 1.0, 2.0]), ("T3b", 1, [2.5, 3.5]),
+                                                   ("T2", 2, [4.0, 5.0])])
+    drifts = noise.target_drifts(frames, noise.NoiseOptions(), 0.0, correction_epochs={0})
+    assert [(d.target_id, d.mount, d.sentinel_poses, d.used_for_a_correction) for d in drifts] == [
+        ("T2", 0, 4, True), ("T3b", 1, 2, False), ("T2", 2, 2, False)]
+    for d in drifts:
+        assert d.pose_offset_mm[0] == 0.0                           # the first sentinel after mounting is the reference
+        assert d.rate_mm_per_hour == pytest.approx(truth_rate, rel=DRIFT_RECOVERY_TOLERANCE)
+        assert d.pose_offset_mm[-1] == pytest.approx(truth_rate * d.span_hours, rel=DRIFT_RECOVERY_TOLERANCE, abs=0.01)
+    assert drifts[0].span_hours == pytest.approx(2.0, abs=0.01)
+    assert drifts[0].drift_over_span_mm == pytest.approx(truth_rate * 2.0, rel=DRIFT_RECOVERY_TOLERANCE)
+
+
+def test_mount_epochs_count_changes_of_the_mounted_target():
+    """A mount is a change of target between captures that are not sentinels; a sentinel belongs to the mount it is captured
+    in, and registration poses (T2) belong to the mount of A."""
+    from sensorperf.io.manifest import FrameRecord
+    pose = RigidTransform.identity()
+
+    def record(procedure, target, index):
+        return FrameRecord(path=Path("x"), procedure=procedure, target_id=target, gap_mm=None, station_z_mm=800.0, field=0,
+                           pose_index=index, frame_index=0, robot_pose=pose, target_pose_camera=pose)
+
+    sequence = [record("R", "T2", 0), record("S", "T2", 0), record("A", "T2", 0), record("S", "T2", 1),
+                record("B", "T3a", 0), record("B", "T3a", 1), record("S", "T3a", 0), record("Z", "T2", 0),
+                record("S", "T2", 2)]
+    epochs = noise.mount_epochs(sequence)
+    assert [epochs[r.pose_key()] for r in sequence] == [0, 0, 0, 0, 1, 1, 1, 2, 2]
+    assert noise.a_mount_epochs(sequence, epochs) == {0}
+
+
+def test_a_summary_carries_the_achieved_field_fraction(result_a, analysis_dir, session):
+    """Section 5, Step 1 and Section 10, Step 13: A_noise_summary.csv has a ``field_fraction_achieved`` column, filled from
+    the manifest for the poses the planner placed at a field position (1 for the center and any off-axis position that fit)
+    and NaN for the poses that carry no such value (the tilt poses); a record without the metadata gives NaN."""
+    from sensorperf.io.manifest import FIELD_FRACTION_ACHIEVED_KEY
+    assert "field_fraction_achieved" in noise.SUMMARY_COLUMNS
+    rows = _read_csv(analysis_dir / noise.SUMMARY_CSV_NAME)
+    assert "field_fraction_achieved" in rows[0]
+    by_subseries = {}
+    for row in rows:
+        by_subseries.setdefault(row["subseries"], []).append(row["field_fraction_achieved"])
+    # The demonstration plan is hand-made and carries no field placement, so the column is empty (NaN) for every pose.
+    assert all(value in ("", "nan") for values in by_subseries.values() for value in values)
+    record = next(r for r in session.records if r.procedure == "A")
+    assert math.isnan(noise._metadata_float(record, FIELD_FRACTION_ACHIEVED_KEY))
+    with_value = dataclasses.replace(record, metadata={FIELD_FRACTION_ACHIEVED_KEY: "0.75"})
+    assert noise._metadata_float(with_value, FIELD_FRACTION_ACHIEVED_KEY) == 0.75
+    assert all(math.isnan(row.field_fraction_achieved) for row in result_a.rows)
 
 
 def test_a_step12_legacy_boxes_skipped_and_said(result_a):

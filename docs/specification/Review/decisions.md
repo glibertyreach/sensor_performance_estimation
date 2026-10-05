@@ -329,3 +329,18 @@ Neil's comments: (pending)
   the quantization plateaus along the ramp, and the many small Z moves are not needed. Reviewer assessment given in
   chat (adopt as a ramp sub-series; geometry table; fixed-pattern subtraction from A; one time-staircase kept at the
   reference station as a cross-check is the open question).
+- C07-P1 decision (Neil, 2026-10-05): replace the fine staircase entirely with the tilted-ramp probe; Neil does not
+  believe the robot can resolve Z motions smaller than 0.1 mm. Consequences to execute at the close of C07: Section
+  6.2 Step 3 becomes the ramp sub-series (T2 tilted about H at every ladder station by the angle that spans
+  RAMP_QUANTA = 4 expected quanta across the visible plate, FRAMES_PER_RAMP_POSE = 50, read-back pose logged);
+  Section 2 drops Z_STAIRCASE_QUANTA, Z_STAIRCASE_SUBDIVISION and Z_STAIRCASE_FRAMES and gains RAMP_QUANTA and
+  FRAMES_PER_RAMP_POSE; Section 10 Step 8 points to the ramp instead of the staircase; Section 11.2 Step 5 becomes
+  the ramp analysis (fixed-pattern map from A subtracted, row averages against the true depth per row from the
+  read-back pose, plateau widths = quantum, single-pixel curve against the row average for dithering); Section 9
+  budget B-Z row changes; the Z-step ladder floor stays at 0.1 mm (R1). Code: planner, simulator, resolution_depth
+  analysis, tests, technician procedure.
+- C06-P2 decision (Neil, 2026-10-05): carry the plain-language style throughout the document unless it makes the
+  meaning unclear. Style rule: in prose, say the quantity in words with its value, and give the parameter name once
+  in parentheses at its first mention in a section; the Section 2 table, equations and code keep the names.
+  Applied to every chunk from C07 on as it is executed; Sections 1, 3 and 4 (already closed) get a style pass with
+  the gate at the end of the review, declared as intended.
