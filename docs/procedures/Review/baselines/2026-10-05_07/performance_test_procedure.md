@@ -33,7 +33,7 @@ Figure 2. The experimental setup, side view. The sensor stands on its own rigid 
 
 Table 1. Equipment, requirements, and the reason for each.
 
-The robot must report its actual pose at the time of the capture, not only the commanded one. If it cannot, tell the engineer before you start: for series Z the read-back pose is the step truth.
+The robot must report its actual pose at the time of the capture, not only the commanded one. If it cannot, tell the engineer before you start (appendix E, open question 5).
 
 ## 2. Targets
 
@@ -294,7 +294,7 @@ x_mm, y_mm, z_mm, rotation_type, r1, r2, r3, r4, r5, r6, r7, r8, r9
 Optional columns that end up in the manifest: `timestamp`, `sensor_temp_c`, `air_temp_c`, `ambient_ir`. A one-row-per-frame form also exists: the first column is `file`, the Section 9 file name, followed by `x_mm` and the rest.
 
 - `procedure` to `pose_index`: exactly the values of the plan row, which also name the files. `gap_mm` is empty for a target without a back plate.
-- `x_mm`, `y_mm`, `z_mm`: the reported flange position in the robot base frame, in mm, written with at least 2 decimals (a resolution of 0.01 mm). This is a requirement: for series Z the read-back pose is the step truth, and a log rounded to 0.1 mm makes the smallest rungs meaningless. `make_manifest` warns when every `z_mm` of series Z has fewer decimals.
+- `x_mm`, `y_mm`, `z_mm`: the reported flange position in the robot base frame, in mm, written with at least 3 decimals (a resolution of 0.001 mm). This is a requirement: for series Z the read-back pose is the step truth, and a log rounded to 0.1 mm makes the small rungs meaningless. `make_manifest` warns when every `z_mm` of series Z has fewer decimals.
 - `rotation_type` and `r1` to `r9`: the reported orientation, in whatever form the controller gives, named by one of the types of Table 5. Fill unused `r` columns with nothing.
 
 | rotation_type | Values | Meaning |
@@ -875,3 +875,13 @@ C.8 If something goes wrong.
 | 6 | The default full plan: target centers in the sensor frame, side view (H against Z) and front view (H against V), colored by series, with the frustum. Each cloud around a station is a set of random lateral offsets. | `figures/fig_plan.png` |
 | 7 | The series Z visits at one Z0. Left: the step ladder, the 6 step sizes in turn, each with its A, B, A, B alternation. Right: the fine staircase. | `figures/fig_zstep.png` |
 | 8 | The session folder feeds the six analyses, which write into `analysis/`. The fits of A and the boundary terms of E converge on `forward_model_parameters.json`. | `figures/fig_data_flow.png` |
+
+## Appendix E. Open questions
+
+These questions of the specification decide how the test is run. Answer them before the session; the answers fill the dagger values, the chamfer check, and the time budget.
+
+- [ ] VSX3000 f_x, f_y, baseline, projector offset, field of view, depth LSB, and frame rate in the chosen trigger mode. These fill the dagger parameters, the chamfer check (§2), and the time budget (§13).
+- [ ] Can the emitter be switched off, or a flood illuminator switched on, for fiducial imaging? This decides between the independent and the depth-only registration (§4).
+- [ ] Which on-sensor processing configuration is the production one (§3, step 2)?
+- [ ] Which surface finish represents the production targets, and is a second finish needed (§2)?
+- [ ] Does the robot controller report the actual pose at the time of capture (§1, §5)? For series Z the read-back pose is the step truth, so a controller that reports only the commanded pose makes the rungs below the robot's accuracy meaningless.

@@ -39,7 +39,7 @@ base frame, the read-back flange pose = flange -> base)
     sensor_temp_c, air_temp_c, ambient_ir.
 
     Resolution of the logged position: for series Z the read-back pose is the ground truth of the depth step, so
-    x_mm, y_mm, z_mm must be written with at least ``MIN_POSE_LOG_DECIMALS`` decimals (0.001 mm). A log rounded to 0.1 mm
+    x_mm, y_mm, z_mm must be written with at least ``MIN_POSE_LOG_DECIMALS`` decimals (0.01 mm). A log rounded to 0.1 mm
     makes the small ladder rungs meaningless; ``build_manifest`` warns, naming the problem, when every z_mm value of the
     series-Z rows has fewer decimals.
 
@@ -379,7 +379,7 @@ def _check_z_resolution(entries: list[LogFrame], z_text_by_where: dict[str, str]
         messages.warnings.append(
             f"pose log resolution: every z_mm value of the series-Z rows has fewer than {MIN_POSE_LOG_DECIMALS} decimals "
             f"(at most {max(counts)}); the read-back pose is the step truth of series Z, so write x_mm, y_mm, z_mm "
-            f"with at least {MIN_POSE_LOG_DECIMALS} decimals (0.001 mm) or the small rungs are meaningless")
+            f"with at least {MIN_POSE_LOG_DECIMALS} decimals (0.01 mm) or the small rungs are meaningless")
 
 
 # ---------------------------------------------------------------------------

@@ -33,7 +33,7 @@ Figure 2. The experimental setup, side view. The sensor stands on its own rigid 
 
 Table 1. Equipment, requirements, and the reason for each.
 
-The robot must report its actual pose at the time of the capture, not only the commanded one. If it cannot, tell the engineer before you start (appendix E, open question 5).
+The robot must report its actual pose at the time of the capture, not only the commanded one. If it cannot, tell the engineer before you start: for series Z the read-back pose is the step truth.
 
 ## 2. Targets
 
@@ -237,7 +237,7 @@ Follow the order of the plan, which keeps each target mounted for as long as it 
 
 The depth series gives the smallest Z step the sensor detects. It uses small Z moves of the noise plate. This is the series most limited by the robot's repeatability, because the truth of each step is the read-back robot pose, carried into the sensor frame through the registration. The true step between two visits is the difference of their registered front-plane depths along the optical axis (the z component of the target pose, which is the front-plane depth for the fronto-parallel plate of this series). Because it is a difference of two registered poses, the registration's translation cancels and its rotation error enters only through the cosine of the angle error, which is negligible: only the robot's relative motion accuracy matters.
 
-Design change: the specification of 2026-10-04 used a dial indicator on the target adapter as the step truth; this procedure uses the read-back robot pose instead, so the smallest rungs carry the robot's repeatability as their uncertainty.
+Design change: the specification of 2026-10-04 used a dial indicator on the target adapter as the step truth; this procedure uses the read-back robot pose instead, so the smallest rungs carry the robot's repeatability as their uncertainty, and the 0.02 and 0.05 mm rungs of that specification's ladder were removed because their truth would be no better than the robot.
 
 ![](figures/fig_zstep.png)
 
@@ -248,7 +248,7 @@ Figure 7. The series Z visits at one Z0. Left: the step ladder, the {{DERIVED:zs
 3. Fine staircase. Sweep from Z0 to Z0 plus {{VALUE:z_staircase_quanta}} times the expected depth quantum, in steps of one expected quantum divided by {{VALUE:z_staircase_subdivision}}, with {{VALUE:z_staircase_frames}} frames per step (sub-series `staircase`). This reveals whether the output moves in quantized steps, or is smoothed by the sensor's interpolation. The expected quantum, listed in `plan_summary.txt`, uses the Tier-A disparity quantum until analysis A has measured the real one. If the engineer has re-planned the staircase with the measured quantum, use the new rows. The horizontal axis of the staircase is the read-back Z of each step, whose uncertainty is the robot repeatability of {{VALUE:robot_repeatability_mm}} mm; when the fine step is smaller than that, the analysis notes it and the plateau widths carry that uncertainty.
 4. No extra capture is needed for the blank windows: the Z0 frames of step 2 serve as the no-step reference for the false-alarm threshold.
 
-The first rungs of the ladder are smaller than the robot repeatability of {{VALUE:robot_repeatability_mm}} mm; they are captured and flagged rather than measured. Do not try to correct the robot pose by hand. Log the read-back pose as it is.
+The smallest rung ({{DERIVED:zstep_smallest_mm}} mm) is twice the robot repeatability of {{VALUE:robot_repeatability_mm}} mm; the ladder starts there because a rung below the repeatability would be captured and flagged rather than measured. Do not try to correct the robot pose by hand. Log the read-back pose as it is.
 
 ## 9. Series C: disk and cutout areas
 
@@ -294,7 +294,7 @@ x_mm, y_mm, z_mm, rotation_type, r1, r2, r3, r4, r5, r6, r7, r8, r9
 Optional columns that end up in the manifest: `timestamp`, `sensor_temp_c`, `air_temp_c`, `ambient_ir`. A one-row-per-frame form also exists: the first column is `file`, the Section 9 file name, followed by `x_mm` and the rest.
 
 - `procedure` to `pose_index`: exactly the values of the plan row, which also name the files. `gap_mm` is empty for a target without a back plate.
-- `x_mm`, `y_mm`, `z_mm`: the reported flange position in the robot base frame, in mm, written with at least {{DERIVED:pose_log_min_decimals}} decimals (a resolution of 0.001 mm). This is a requirement: for series Z the read-back pose is the step truth, and a log rounded to 0.1 mm makes the small rungs meaningless. `make_manifest` warns when every `z_mm` of series Z has fewer decimals.
+- `x_mm`, `y_mm`, `z_mm`: the reported flange position in the robot base frame, in mm, written with at least {{DERIVED:pose_log_min_decimals}} decimals (a resolution of 0.01 mm). This is a requirement: for series Z the read-back pose is the step truth, and a log rounded to 0.1 mm makes the smallest rungs meaningless. `make_manifest` warns when every `z_mm` of series Z has fewer decimals.
 - `rotation_type` and `r1` to `r9`: the reported orientation, in whatever form the controller gives, named by one of the types of Table 5. Fill unused `r` columns with nothing.
 
 | rotation_type | Values | Meaning |
@@ -571,13 +571,3 @@ C.8 If something goes wrong.
 ## Appendix D. Figure index
 
 {{FIGURE_INDEX}}
-
-## Appendix E. Open questions
-
-These questions of the specification decide how the test is run. Answer them before the session; the answers fill the dagger values, the chamfer check, and the time budget.
-
-- [ ] VSX3000 f_x, f_y, baseline, projector offset, field of view, depth LSB, and frame rate in the chosen trigger mode. These fill the dagger parameters, the chamfer check (§2), and the time budget (§13).
-- [ ] Can the emitter be switched off, or a flood illuminator switched on, for fiducial imaging? This decides between the independent and the depth-only registration (§4).
-- [ ] Which on-sensor processing configuration is the production one (§3, step 2)?
-- [ ] Which surface finish represents the production targets, and is a second finish needed (§2)?
-- [ ] Does the robot controller report the actual pose at the time of capture (§1, §5)? For series Z the read-back pose is the step truth, so a controller that reports only the commanded pose makes the rungs below the robot's accuracy meaningless.

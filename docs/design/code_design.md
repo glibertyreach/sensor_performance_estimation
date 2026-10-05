@@ -118,7 +118,7 @@ docs/procedures/performance_test_procedure.md (+ figures/, build/, Review/)
   (`robot_readback_repeatability_mm`, from the A -> A visit pairs) is reported
   per station. Series Z is approached from below
   (`z_step_approach_overshoot_mm`) and its pose log needs x_mm, y_mm, z_mm with
-  at least three decimals (`build_manifest` warns otherwise).
+  at least two decimals, 0.01 mm (`build_manifest` warns otherwise).
 - **Manifest** (`io/manifest.py`): one `FrameRecord` per frame with the Section
   9 columns; `pose_key()` groups frames of a pose, `configuration_key()` groups
   poses of one (procedure, target, gap, station, field, sub-series). Lateral

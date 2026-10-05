@@ -84,7 +84,7 @@ DEMO_AREA_JITTER_POSES = 4
 """Random-offset poses per C configuration."""
 DEMO_DETECTION_POSES = 12
 """Single-frame random-offset poses of the D demonstration."""
-DEMO_ZSTEP_LADDER_INDICES = (3, 5, 7)
+DEMO_ZSTEP_LADDER_INDICES = (1, 3, 5)
 """Indices into ``params.z_step_ladder_mm`` of the three demonstration step sizes."""
 DEMO_ZSTEP_CYCLES = 2
 """ABAB cycles per step size."""

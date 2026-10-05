@@ -64,10 +64,10 @@ SMALL_PARAMS = dataclasses.replace(
     frames_per_zstep_pose=3, z_staircase_frames=2, frames_per_noise_station=4, frames_per_tilt_pose=2)
 """Reduced parameters for the tests that write files (few poses, few frames)."""
 
-DOCUMENT_POSES = 6710
-DOCUMENT_FRAMES = 46910
-DOCUMENT_HOURS = 6.9
-"""The Section 9 estimate: 6,710 poses, 46,910 frames, 6.9 h."""
+DOCUMENT_POSES = 6590
+DOCUMENT_FRAMES = 45710
+DOCUMENT_HOURS = 6.8
+"""The Section 9 estimate: 6,590 poses, 45,710 frames, 6.8 h."""
 BUDGET_TOLERANCE = 0.03
 """Relative tolerance of the comparison with the document's totals, with the document's accounting of D (one array
 per kind, see test_budget_matches_the_document). The document gives its totals to three or four digits as estimates;
@@ -327,13 +327,13 @@ def test_zstep_visits_are_approached_from_below():
     assert all(c.notes["approach_overshoot_mm"] == SMALL_PARAMS.z_step_approach_overshoot_mm == 2.0 for c in plan)
     from sensorperf.acquisition.plan import plan_summary_text
     text = plan_summary_text(plan, SMALL_PARAMS, GEOMETRY)
-    assert "approach: every visit from below" in text and "at least 3 decimals" in text
+    assert "approach: every visit from below" in text and "at least 2 decimals" in text
 
 
 def test_budget_matches_the_document(full_plan, capsys):
     """Section 9: poses, frames and robot hours per series ("10 frames/s and 3 s per move plus settle"). The formula
-    reproduces the document's 6.9 h from its own 6,710 poses and 46,910 frames. The plan's totals are compared with the
-    document's within BUDGET_TOLERANCE using the document's accounting of series D, which the 6,710 evidently
+    reproduces the document's 6.8 h from its own 6,590 poses and 45,710 frames. The plan's totals are compared with the
+    document's within BUDGET_TOLERANCE using the document's accounting of series D, which the 6,590 evidently
     counts as one plate per kind ({disk, cutout} x 2 gaps x 5 stations, Section 8 Step 3, plus the extended series);
     this plan plans both the small and the large array of each kind, so its D series is exactly twice as large."""
     plan, _ = full_plan
@@ -501,7 +501,7 @@ def test_build_manifest_from_a_per_frame_log(tmp_path: Path):
 
 def test_build_manifest_warns_when_the_series_z_log_is_rounded(tmp_path: Path):
     """Section 11 (pose log): the read-back pose is the step truth of series Z, so a log whose z_mm values all have fewer
-    than three decimals draws a warning that names the problem; the same log with full resolution does not."""
+    than two decimals draws a warning that names the problem; the same log with full resolution does not."""
     registration = random_registration()
     plan = plan_zstep_series(SMALL_PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED))[:8]
     root = tmp_path / "session"
@@ -513,13 +513,13 @@ def test_build_manifest_warns_when_the_series_z_log_is_rounded(tmp_path: Path):
     with (tmp_path / "full.csv").open(newline="") as handle:
         rows = list(csv.DictReader(handle))
     for row in rows:
-        row["z_mm"] = f"{float(row['z_mm']):.{MIN_POSE_LOG_DECIMALS - 2}f}"          # 0.1 mm rounding
+        row["z_mm"] = f"{float(row['z_mm']):.{MIN_POSE_LOG_DECIMALS - 1}f}"          # 0.1 mm rounding
     with (tmp_path / "rounded.csv").open("w", newline="") as handle:
         writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
     _, messages = build_manifest_with_report(tmp_path / "rounded.csv", root, tmp_path / "plan" / PLAN_CSV_NAME, registration)
-    assert any("pose log resolution" in w and "fewer than 3 decimals" in w for w in messages.warnings)
+    assert any("pose log resolution" in w and "fewer than 2 decimals" in w for w in messages.warnings)
 
 
 def test_build_manifest_from_a_per_pose_log_and_unmatched_items(tmp_path: Path):

@@ -1,6 +1,6 @@
 {
   "document": "performance_test_procedure.docx",
-  "built": "2026-10-05T12:39:38",
+  "built": "2026-10-05T12:36:08",
   "invariant_values": {
     "noise_station_count": 11,
     "shape_station_count": 5,
@@ -308,6 +308,21 @@
         "zstep_rung_count": 6
       },
       "refs": []
+    },
+    {
+      "id": "\u00a7E",
+      "kind": "section",
+      "source": "performance_test_procedure.template.md",
+      "title": "Appendix E. Open questions",
+      "asserts": {},
+      "refs": [
+        "\u00a71",
+        "\u00a713",
+        "\u00a72",
+        "\u00a73",
+        "\u00a74",
+        "\u00a75"
+      ]
     },
     {
       "id": "Figure 1",

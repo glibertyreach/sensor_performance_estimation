@@ -247,7 +247,7 @@ class CharacterizationParameters:
     """Random-offset poses per array at each off-axis field position (Section 7, Step 3)."""
 
     # Z-step test
-    z_step_ladder_mm: tuple[float, ...] = (0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 4.0)
+    z_step_ladder_mm: tuple[float, ...] = (0.1, 0.2, 0.5, 1.0, 2.0, 4.0)
     """Commanded step sizes of the B-Z ladder."""
     robot_repeatability_mm: float = 0.05
     """Position repeatability of the robot (ISO 9283), the equipment requirement of Section 3.1; a commanded Z step

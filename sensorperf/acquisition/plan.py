@@ -129,9 +129,9 @@ PERCENT = 100.0
 PLOT_GRID_ALPHA = 0.3
 """Opacity of the grid lines of plan.png."""
 
-DOCUMENT_ESTIMATE_POSES = 6710
-DOCUMENT_ESTIMATE_FRAMES = 46910
-DOCUMENT_ESTIMATE_HOURS = 6.9
+DOCUMENT_ESTIMATE_POSES = 6590
+DOCUMENT_ESTIMATE_FRAMES = 45710
+DOCUMENT_ESTIMATE_HOURS = 6.8
 """The capture-budget estimate printed in Section 9 of the procedure document
 (poses, frames, robot hours), for the comparison in plan_summary.txt."""
 
@@ -164,8 +164,8 @@ FLANGE_POSE_COLUMNS = (("base_x_mm", "base_y_mm", "base_z_mm", "base_rx_deg", "b
 """Flange pose to command in the robot base frame (only with a registration): position in mm and
 rotation vector in degrees (six values), the rotation matrix r00..r22 row-major, and the unit
 quaternion (w >= 0), as plan_poses.py of the calibration repository wrote them."""
-MIN_POSE_LOG_DECIMALS = 3
-"""Fewest decimals (0.001 mm) the series-Z rows of a robot pose log must show in x_mm, y_mm, z_mm: the read-back pose is
+MIN_POSE_LOG_DECIMALS = 2
+"""Fewest decimals (0.01 mm) the series-Z rows of a robot pose log must show in x_mm, y_mm, z_mm: the read-back pose is
 the step truth of series Z, and the smallest rungs are tens of micrometers (``pose_log.build_manifest`` warns)."""
 APPROACH_FROM_BELOW = "from below"
 """``notes["approach"]`` of every series Z pose: the robot arrives at the pose moving toward larger Z (from the side of
@@ -1300,7 +1300,7 @@ def write_plan(path_dir: str | Path, plan: Sequence[PlannedCapture], registratio
     target pose in the camera frame (target_x_mm .. target_rz_deg: x, y, z in mm and the rotation vector in degrees),
     the notes as JSON and, with a registration, base_x_mm .. base_rz_deg (flange -> base), r00..r22 and quat_w..quat_z.
     If matplotlib is missing, plan.png is skipped with a warning on stderr (and in the summary).
-    The pose log the robot writes for series Z must carry x_mm, y_mm, z_mm with at least MIN_POSE_LOG_DECIMALS decimals (0.001 mm): the
+    The pose log the robot writes for series Z must carry x_mm, y_mm, z_mm with at least MIN_POSE_LOG_DECIMALS decimals (0.01 mm): the
     read-back pose is the step truth, and plan_summary.txt says so (``build_manifest`` warns otherwise)."""
     directory = Path(path_dir)
     directory.mkdir(parents=True, exist_ok=True)
