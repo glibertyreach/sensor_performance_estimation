@@ -1,0 +1,243 @@
+{
+  "targets": [
+    {
+      "target_id": "T2",
+      "kind": "plate",
+      "half_width_mm": 200.0,
+      "half_height_mm": 200.0,
+      "gap_mm": null,
+      "back_half_width_mm": null,
+      "back_half_height_mm": null,
+      "features": [],
+      "finish": ""
+    },
+    {
+      "target_id": "T3a",
+      "kind": "raised_square",
+      "half_width_mm": 200.0,
+      "half_height_mm": 200.0,
+      "gap_mm": 15.0,
+      "back_half_width_mm": null,
+      "back_half_height_mm": null,
+      "features": [
+        {
+          "site_id": "square",
+          "kind": "square_raised",
+          "x_mm": 0.0,
+          "y_mm": 0.0,
+          "diameter_mm": 160.0,
+          "diameter_uncertainty_mm": 0.0,
+          "land_mm": 0.0,
+          "bevel_deg": 45.0,
+          "rotation_deg": 5.0,
+          "level_index": null
+        }
+      ],
+      "finish": ""
+    },
+    {
+      "target_id": "T3b",
+      "kind": "square_window",
+      "half_width_mm": 200.0,
+      "half_height_mm": 200.0,
+      "gap_mm": 15.0,
+      "back_half_width_mm": null,
+      "back_half_height_mm": null,
+      "features": [
+        {
+          "site_id": "square",
+          "kind": "square_window",
+          "x_mm": 0.0,
+          "y_mm": 0.0,
+          "diameter_mm": 160.0,
+          "diameter_uncertainty_mm": 0.0,
+          "land_mm": 0.0,
+          "bevel_deg": 45.0,
+          "rotation_deg": 5.0,
+          "level_index": null
+        }
+      ],
+      "finish": ""
+    },
+    {
+      "target_id": "T4",
+      "kind": "disk_array",
+      "half_width_mm": 167.96823269550788,
+      "half_height_mm": 98.8149079499511,
+      "gap_mm": 15.0,
+      "back_half_width_mm": null,
+      "back_half_height_mm": null,
+      "features": [
+        {
+          "site_id": "blank_02",
+          "kind": "blank",
+          "x_mm": -114.49192956965197,
+          "y_mm": -45.33860482409521,
+          "diameter_mm": 69.75169972937726,
+          "diameter_uncertainty_mm": 0.0,
+          "land_mm": 0.0,
+          "bevel_deg": 45.0,
+          "rotation_deg": 0.0,
+          "level_index": 2
+        },
+        {
+          "site_id": "disk_02",
+          "kind": "disk",
+          "x_mm": 18.036299916164833,
+          "y_mm": -45.33860482409521,
+          "diameter_mm": 55.801359783501816,
+          "diameter_uncertainty_mm": 0.0,
+          "land_mm": 0.0,
+          "bevel_deg": 45.0,
+          "rotation_deg": 0.0,
+          "level_index": 2
+        },
+        {
+          "site_id": "blank_01",
+          "kind": "blank",
+          "x_mm": 132.5282294858168,
+          "y_mm": -45.33860482409521,
+          "diameter_mm": 33.679099897047664,
+          "diameter_uncertainty_mm": 0.0,
+          "land_mm": 0.0,
+          "bevel_deg": 45.0,
+          "rotation_deg": 0.0,
+          "level_index": 1
+        },
+        {
+          "site_id": "blank_00",
+          "kind": "blank",
+          "x_mm": -118.22951455612082,
+          "y_mm": 69.75169972937726,
+          "diameter_mm": 20.925509918813177,
+          "diameter_uncertainty_mm": 0.0,
+          "land_mm": 0.0,
+          "bevel_deg": 45.0,
+          "rotation_deg": 0.0,
+          "level_index": 0
+        },
+        {
+          "site_id": "disk_01",
+          "kind": "disk",
+          "x_mm": -28.150679891750883,
+          "y_mm": 69.75169972937726,
+          "diameter_mm": 19.72875995117221,
+          "diameter_uncertainty_mm": 0.0,
+          "land_mm": 0.0,
+          "bevel_deg": 45.0,
+          "rotation_deg": 0.0,
+          "level_index": 1
+        },
+        {
+          "site_id": "disk_00",
+          "kind": "disk",
+          "x_mm": 54.95298479968133,
+          "y_mm": 69.75169972937726,
+          "diameter_mm": 6.975169972937725,
+          "diameter_uncertainty_mm": 0.0,
+          "land_mm": 0.0,
+          "bevel_deg": 45.0,
+          "rotation_deg": 0.0,
+          "level_index": 0
+        },
+        {
+          "site_id": "post_00",
+          "kind": "post",
+          "x_mm": 128.44226951552744,
+          "y_mm": 69.75169972937726,
+          "diameter_mm": 0.5,
+          "diameter_uncertainty_mm": 0.0,
+          "land_mm": 0.0,
+          "bevel_deg": 45.0,
+          "rotation_deg": 0.0,
+          "level_index": null
+        }
+      ],
+      "finish": ""
+    },
+    {
+      "target_id": "T5",
+      "kind": "cutout_array",
+      "half_width_mm": 167.96823269550788,
+      "half_height_mm": 98.8149079499511,
+      "gap_mm": 15.0,
+      "back_half_width_mm": null,
+      "back_half_height_mm": null,
+      "features": [
+        {
+          "site_id": "blank_02",
+          "kind": "blank",
+          "x_mm": -114.49192956965197,
+          "y_mm": -45.33860482409521,
+          "diameter_mm": 69.75169972937726,
+          "diameter_uncertainty_mm": 0.0,
+          "land_mm": 0.0,
+          "bevel_deg": 45.0,
+          "rotation_deg": 0.0,
+          "level_index": 2
+        },
+        {
+          "site_id": "cutout_02",
+          "kind": "cutout",
+          "x_mm": 18.036299916164833,
+          "y_mm": -45.33860482409521,
+          "diameter_mm": 55.801359783501816,
+          "diameter_uncertainty_mm": 0.0,
+          "land_mm": 0.0,
+          "bevel_deg": 45.0,
+          "rotation_deg": 0.0,
+          "level_index": 2
+        },
+        {
+          "site_id": "blank_01",
+          "kind": "blank",
+          "x_mm": 132.5282294858168,
+          "y_mm": -45.33860482409521,
+          "diameter_mm": 33.679099897047664,
+          "diameter_uncertainty_mm": 0.0,
+          "land_mm": 0.0,
+          "bevel_deg": 45.0,
+          "rotation_deg": 0.0,
+          "level_index": 1
+        },
+        {
+          "site_id": "blank_00",
+          "kind": "blank",
+          "x_mm": -83.10366469143221,
+          "y_mm": 69.75169972937726,
+          "diameter_mm": 20.925509918813177,
+          "diameter_uncertainty_mm": 0.0,
+          "land_mm": 0.0,
+          "bevel_deg": 45.0,
+          "rotation_deg": 0.0,
+          "level_index": 0
+        },
+        {
+          "site_id": "cutout_01",
+          "kind": "cutout",
+          "x_mm": 6.975169972937723,
+          "y_mm": 69.75169972937726,
+          "diameter_mm": 19.72875995117221,
+          "diameter_uncertainty_mm": 0.0,
+          "land_mm": 0.0,
+          "bevel_deg": 45.0,
+          "rotation_deg": 0.0,
+          "level_index": 1
+        },
+        {
+          "site_id": "cutout_00",
+          "kind": "cutout",
+          "x_mm": 90.07883466436994,
+          "y_mm": 69.75169972937726,
+          "diameter_mm": 6.975169972937725,
+          "diameter_uncertainty_mm": 0.0,
+          "land_mm": 0.0,
+          "bevel_deg": 45.0,
+          "rotation_deg": 0.0,
+          "level_index": 0
+        }
+      ],
+      "finish": ""
+    }
+  ]
+}

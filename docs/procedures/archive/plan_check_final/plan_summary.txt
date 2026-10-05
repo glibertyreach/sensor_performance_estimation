@@ -1,0 +1,149 @@
+Capture plan summary
+====================
+
+Master random seed: 1 (every pose also carries its own seed in poses.csv)
+Registration: none given; poses.csv holds the target poses in the camera frame only.
+
+Station ladder (9 stations, ratio 1.1892, Z_MIN 400 to Z_MAX 1600 mm): 400, 476, 566, 673, 800, 951, 1131, 1345, 1600
+  B-HV shape stations: 400, 566, 800, 1131, 1600
+  B-Z and tilt reduced stations: 400, 800, 1600
+  A legacy-metric extra stations: 700, 1000
+  D zero-detection stations (extra trials): 1131, 1345, 1600
+  Feature diameters (mm): 7.0, 19.7, 55.8
+
+Poses planned: 7292; frames: 44140
+
+Poses per station depth and series (R, the registration poses, span Z_MIN to Z_MAX and are not listed by station):
+    Z mm       A       B       Z       C       D       S   total
+     400      13     104     151     120     240       0     628
+     476       5       0       0     120     240       0     365
+     566       5     104       0     120     240       0     469
+     673       5       0       0     120     240       0     365
+     700       5       0       0       0       0       0       5
+     800      14     104     151     200     240       9     718
+     951       5       0       0     120     240       0     365
+    1000       5       0       0       0       0       0       5
+    1131       5     104       0     120    1200       0    1429
+    1345       5       0       0     120    1200       0    1325
+    1600      13     104     151     120    1200       0    1588
+
+Poses and frames per sub-series:
+  Registration (R)   main              30 poses      300 frames
+  A noise            main              55 poses     5500 frames
+  A noise            tilt              24 poses     1200 frames
+  A noise            remount            1 poses      100 frames
+  B-HV edges         nominal           20 poses      600 frames
+  B-HV edges         jitter           500 poses    15000 frames
+  B-Z depth steps    ladder           360 poses     3600 frames
+  B-Z depth steps    staircase         93 poses      930 frames
+  C area             jitter          1080 poses    10800 frames
+  C area             field             80 poses      800 frames
+  D detection        jitter          2160 poses     2160 frames
+  D detection        extended        2880 poses     2880 frames
+  Sentinels          sentinel           9 poses      270 frames
+
+Capture budget (Section 9; 10 frames/s, 3 s per move plus settle):
+Series               Poses   Frames  Robot time h
+-------------------------------------------------
+Registration (R)        30      300          0.03
+A noise                 80    6,800          0.26
+B-HV edges             520   15,600          0.87
+B-Z depth steps        453    4,530          0.50
+C area               1,160   11,600          1.29
+D detection          5,040    5,040          4.34
+Sentinels                9      270          0.01
+-------------------------------------------------
+Total                7,292   44,140          7.30
+
+Document estimate: 7,292 poses, 44,140 frames, 7.3 h. This plan: 7,292 poses (1.00 x), 44,140 frames (1.00 x), 7.3 h (1.00 x).
+
+Series Z approach: every visit from below (back off 2 mm toward smaller Z, then move up onto the pose), so that backlash does not enter the A / B difference.
+Series Z pose log: write x_mm, y_mm, z_mm with at least 2 decimals; the read-back pose is the step truth.
+
+Field-offset adjustments (Section 5, Step 1: the target must fit the field): 68
+  R T2 Z=400 field 0: requested (-80.2, 38.0) mm -> (0.0, 0.0) mm, kept 0%, still short by 19 px (as at the center)
+  R T2 Z=441 field 0: requested (-19.2, 32.8) mm -> (-7.4, 12.7) mm, kept 39%
+  R T2 Z=483 field 0: requested (54.8, 38.4) mm -> (21.5, 15.1) mm, kept 39%, still short by 9 px (as at the center)
+  R T2 Z=524 field 0: requested (96.0, 66.1) mm -> (0.0, 0.0) mm, kept 0%, still short by 9 px (as at the center)
+  R T2 Z=566 field 0: requested (113.5, -42.7) mm -> (78.4, -29.5) mm, kept 69%
+  R T2 Z=607 field 0: requested (153.5, -36.4) mm -> (50.1, -11.9) mm, kept 33%
+  R T2 Z=648 field 0: requested (-96.0, 1.3) mm -> (-51.3, 0.7) mm, kept 53%
+  R T2 Z=690 field 0: requested (30.1, -73.5) mm -> (21.9, -53.4) mm, kept 73%
+  R T2 Z=731 field 0: requested (197.6, 80.8) mm -> (67.7, 27.7) mm, kept 34%
+  R T2 Z=772 field 0: requested (-181.8, 25.5) mm -> (-120.0, 16.8) mm, kept 66%
+  R T2 Z=814 field 0: requested (-63.8, 52.1) mm -> (-39.6, 32.4) mm, kept 62%
+  R T2 Z=855 field 0: requested (186.5, -157.4) mm -> (108.4, -91.4) mm, kept 58%
+  R T2 Z=897 field 0: requested (-23.4, 154.7) mm -> (-11.9, 79.0) mm, kept 51%
+  R T2 Z=979 field 0: requested (-179.2, -119.5) mm -> (-176.1, -117.4) mm, kept 98%
+  R T2 Z=1021 field 0: requested (-97.8, -156.2) mm -> (-91.9, -146.7) mm, kept 94%
+  R T2 Z=1062 field 0: requested (27.9, -217.4) mm -> (21.4, -166.9) mm, kept 77%
+  R T2 Z=1186 field 0: requested (10.4, 223.0) mm -> (7.3, 155.7) mm, kept 70%
+  R T2 Z=1269 field 0: requested (-276.5, 258.3) mm -> (-186.6, 174.3) mm, kept 67%
+  R T2 Z=1310 field 0: requested (-354.1, -119.3) mm -> (-344.4, -116.0) mm, kept 97%
+  A T2 Z=673 field 3: requested (187.8, 140.8) mm -> (12.7, 9.5) mm, kept 7%
+  A T2 Z=951 field 3: requested (265.3, 199.0) mm -> (128.0, 96.0) mm, kept 48%
+  A T2 Z=951 field 2: requested (265.3, -199.0) mm -> (191.5, -143.6) mm, kept 72%
+  A T2 Z=700 field 3: requested (195.3, 146.5) mm -> (23.8, 17.9) mm, kept 12%
+  A T2 Z=400 field 4: requested (-111.6, 83.7) mm -> (-3.1, 2.3) mm, kept 3%
+  A T2 Z=1131 field 4: requested (-315.6, 236.7) mm -> (-202.8, 152.1) mm, kept 64%
+  A T2 Z=476 field 0: requested (0.0, 0.0) mm -> (0.0, 0.0) mm, kept 100%, still short by 5 px (as at the center)
+  A T2 Z=800 field 1: requested (-223.2, -167.4) mm -> (-118.8, -89.1) mm, kept 53%
+  A T2 Z=566 field 0: requested (0.0, 0.0) mm -> (0.0, 0.0) mm, kept 100%, still short by 6 px (as at the center)
+  A T2 Z=476 field 4: requested (-132.8, 99.6) mm -> (0.0, 0.0) mm, kept 0%, still short by 5 px (as at the center)
+  A T2 Z=1131 field 3: requested (315.6, 236.7) mm -> (202.8, 152.1) mm, kept 64%
+  A T2 Z=566 field 2: requested (157.9, -118.5) mm -> (37.8, -28.3) mm, kept 24%, still short by 6 px (as at the center)
+  A T2 Z=1345 field 4: requested (-375.3, 281.5) mm -> (-291.3, 218.5) mm, kept 78%
+  A T2 Z=400 field 1: requested (-111.6, -83.7) mm -> (-3.1, -2.3) mm, kept 3%
+  A T2 Z=700 field 4: requested (-195.3, 146.5) mm -> (-23.8, 17.9) mm, kept 12%
+  A T2 Z=700 field 1: requested (-195.3, -146.5) mm -> (-70.6, -52.9) mm, kept 36%
+  A T2 Z=951 field 1: requested (-265.3, -199.0) mm -> (-191.5, -143.6) mm, kept 72%
+  A T2 Z=476 field 3: requested (132.8, 99.6) mm -> (37.5, 28.1) mm, kept 28%, still short by 5 px (as at the center)
+  A T2 Z=800 field 2: requested (223.2, -167.4) mm -> (118.8, -89.1) mm, kept 53%
+  A T2 Z=1000 field 4: requested (-279.0, 209.3) mm -> (-148.2, 111.2) mm, kept 53%
+  A T2 Z=1000 field 3: requested (279.0, 209.3) mm -> (148.2, 111.2) mm, kept 53%
+  A T2 Z=673 field 4: requested (-187.8, 140.8) mm -> (-12.7, 9.5) mm, kept 7%
+  A T2 Z=1131 field 2: requested (315.6, -236.7) mm -> (278.3, -208.7) mm, kept 88%
+  A T2 Z=566 field 4: requested (-157.9, 118.5) mm -> (0.0, 0.0) mm, kept 0%, still short by 6 px (as at the center)
+  A T2 Z=1345 field 3: requested (375.3, 281.5) mm -> (291.3, 218.5) mm, kept 78%
+  A T2 Z=1000 field 2: requested (279.0, -209.3) mm -> (215.2, -161.5) mm, kept 77%
+  A T2 Z=800 field 3: requested (223.2, 167.4) mm -> (65.4, 49.0) mm, kept 29%
+  A T2 Z=476 field 1: requested (-132.8, -99.6) mm -> (0.0, 0.0) mm, kept 0%, still short by 5 px (as at the center)
+  A T2 Z=673 field 2: requested (187.8, -140.8) mm -> (57.6, -43.2) mm, kept 31%
+  A T2 Z=566 field 3: requested (157.9, 118.5) mm -> (0.0, 0.0) mm, kept 0%, still short by 6 px (as at the center)
+  A T2 Z=566 field 1: requested (-157.9, -118.5) mm -> (-37.8, -28.3) mm, kept 24%, still short by 6 px (as at the center)
+  A T2 Z=400 field 2: requested (111.6, -83.7) mm -> (34.7, -26.0) mm, kept 31%
+  A T2 Z=1600 field 3: requested (446.4, 334.8) mm -> (397.1, 297.9) mm, kept 89%
+  A T2 Z=1600 field 4: requested (-446.4, 334.8) mm -> (-397.1, 297.9) mm, kept 89%
+  A T2 Z=673 field 1: requested (-187.8, -140.8) mm -> (-57.6, -43.2) mm, kept 31%
+  A T2 Z=951 field 4: requested (-265.3, 199.0) mm -> (-128.0, 96.0) mm, kept 48%
+  A T2 Z=800 field 4: requested (-223.2, 167.4) mm -> (-65.4, 49.0) mm, kept 29%
+  A T2 Z=1000 field 1: requested (-279.0, -209.3) mm -> (-213.1, -159.8) mm, kept 76%
+  A T2 Z=700 field 2: requested (195.3, -146.5) mm -> (70.6, -52.9) mm, kept 36%
+  A T2 Z=476 field 2: requested (132.8, -99.6) mm -> (37.5, -28.1) mm, kept 28%, still short by 5 px (as at the center)
+  A T2 Z=400 field 3: requested (111.6, 83.7) mm -> (34.7, 26.0) mm, kept 31%
+  A T2 Z=1131 field 1: requested (-315.6, -236.7) mm -> (-267.2, -200.4) mm, kept 85%
+  A T2 Z=1345 field 1: requested (-375.3, -281.5) mm -> (-355.5, -266.6) mm, kept 95%
+  C T4 G=15 Z=800 field 1: requested (-223.2, -167.4) mm -> (-176.3, -132.3) mm, kept 79%
+  C T4 G=15 Z=800 field 4: requested (-223.2, 167.4) mm -> (-176.3, 132.3) mm, kept 79%
+  C T4 G=15 Z=800 field 3: requested (223.2, 167.4) mm -> (218.8, 164.2) mm, kept 98%
+  C T5 G=15 Z=800 field 1: requested (-223.2, -167.4) mm -> (-176.3, -132.3) mm, kept 79%
+  C T5 G=15 Z=800 field 3: requested (223.2, 167.4) mm -> (218.8, 164.2) mm, kept 98%
+  C T5 G=15 Z=800 field 4: requested (-223.2, 167.4) mm -> (-176.3, 132.3) mm, kept 79%
+
+Notes:
+  B-Z staircase at Z0 = 400 mm: expected depth quantum 0.388 mm (Tier-A q = 0.125 px unless a measured value was given), 31 steps of 0.0388 mm
+  B-Z staircase at Z0 = 800 mm: expected depth quantum 1.550 mm (Tier-A q = 0.125 px unless a measured value was given), 31 steps of 0.1550 mm
+  B-Z staircase at Z0 = 1600 mm: expected depth quantum 6.200 mm (Tier-A q = 0.125 px unless a measured value was given), 31 steps of 0.6200 mm
+  9 drift sentinels (every 60 min of estimated clock, 30 frames, T2 at Z = 800 mm center)
+
+Warnings: 10
+  WARNING: no --sensor-config was given, so the INDICATIVE sensor geometry is used (640 x 480 px, f about 688 px, 10 frames/s). These are not datasheet values: the field-of-view fit, the jitter in millimeters, the expected depth quantum and the Section 9 budget will change when the real values are known (Step 4.5).
+  WARNING: R: T2 (no back plate) does not fit the field of view at Z = 400 mm even when centered (short by 19 px at the edge margin); off-axis stations are placed no worse than the center, and plate edges or features may be cut off
+  WARNING: R: T2 (no back plate) does not fit the field of view at Z = 482.759 mm even when centered (short by 9 px at the edge margin); off-axis stations are placed no worse than the center, and plate edges or features may be cut off
+  WARNING: R: T2 (no back plate) does not fit the field of view at Z = 524.138 mm even when centered (short by 9 px at the edge margin); off-axis stations are placed no worse than the center, and plate edges or features may be cut off
+  WARNING: A: T2 (no back plate) does not fit the field of view at Z = 476 mm even when centered (short by 5 px at the edge margin); off-axis stations are placed no worse than the center, and plate edges or features may be cut off
+  WARNING: A: T2 (no back plate) does not fit the field of view at Z = 566 mm even when centered (short by 6 px at the edge margin); off-axis stations are placed no worse than the center, and plate edges or features may be cut off
+  WARNING: A: the T2 plate tilted 30 deg about V at Z = 400 mm fits the field of view worse than the untilted plate; check that it covers the analysis region
+  WARNING: A: the T2 plate tilted 45 deg about V at Z = 400 mm fits the field of view worse than the untilted plate; check that it covers the analysis region
+  WARNING: A: the T2 plate tilted 45 deg about H at Z = 400 mm fits the field of view worse than the untilted plate; check that it covers the analysis region
+  WARNING: 8 of 9 drift sentinels fall between captures of another target; each needs T2 mounted (a re-mount), as the procedure defines the sentinel on the noise plate
