@@ -10,7 +10,7 @@ Person's comments:
   table, B-HV row; the definition belongs where the term first appears, with the 10–90 percent rule
   of Section 11.1 Step 6 stated in one sentence).
 
-Agreed reviewer proposals (not yet executed):
+Agreed reviewer proposals (executed 2026-10-05, document rev 45 + flow-diagram republish):
 - C01-R1: counts: "five properties" in the opening sentence; figure caption "6 capture series, 6 analyses"
   with registration counted; figure label text to match.
 - C01-R2: dependency claim restated: A supplies sigma_tot to E and to the warm-up and flatness gates;
@@ -21,4 +21,10 @@ Agreed reviewer proposals (not yet executed):
 - C01-R4: forward-model mapping sentence gains E's boundary terms (W_fab, W_drop, π_near).
 - C01-R5: B-HV outputs "and gap"; out-of-scope sentence "A–E".
 
-Status: open; waiting for the person's remaining comments on this chunk.
+Status: closed 2026-10-05. Executed in the live document: C01-P1 (rise-distance definition in the B-HV
+measurand cell), C01-R1 ("five properties"; caption "6 capture series, 6 analyses"), C01-R2 (dependency
+sentence; flow-diagram label "σ, τ" → "q"; new A → E connector labeled "σ_tot"), C01-R3 (right camera at +H,
+Step 4.5 checks direction and side; the Step 4.5 side check itself is deferred to C05), C01-R4 (W_fab, W_drop,
+π_near in the mapping sentence), C01-R5 ("polarity, and gap"; "A–E").
+Gate: ALL CHECKS PASSED against baseline 20261005_124738; scope diff = Section 1 only.
+Deferred follow-up: C05 — add the baseline-side check to Step 4.5 (from C01-R3).
