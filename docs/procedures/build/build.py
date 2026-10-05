@@ -25,7 +25,8 @@ Outputs
     docs/procedures/performance_test_procedure.md / .docx
     docs/procedures/Review/manifest.json      elements (sections, figures, tables) + invariants with phrases
     docs/procedures/Review/progress.json      review ledger (seeded once, never overwritten)
-    docs/procedures/archive/performance_test_procedure_<date>_<n>.docx   dated baseline after each build
+    docs/procedures/Review/baselines/<date>_<n>/   dated baseline (docx, md, manifest) after each build,
+                                                  the convention of the flexible_plane_fit specification
     the gate report of build/verify_doc.py (exit status 1 when it fails)
 
 Why a builder: the document quotes dozens of counts (stations, poses, frames,
@@ -53,7 +54,7 @@ PROCEDURES_DIR = HERE.parent
 REPO_ROOT = PROCEDURES_DIR.parent.parent
 FIGURES_DIR = PROCEDURES_DIR / "figures"
 REVIEW_DIR = PROCEDURES_DIR / "Review"
-ARCHIVE_DIR = PROCEDURES_DIR / "archive"
+BASELINES_DIR = REVIEW_DIR / "baselines"
 TEMPLATE_PATH = PROCEDURES_DIR / "performance_test_procedure.template.md"
 MARKDOWN_PATH = PROCEDURES_DIR / "performance_test_procedure.md"
 DOCX_PATH = PROCEDURES_DIR / "performance_test_procedure.docx"
@@ -351,16 +352,20 @@ def build_docx() -> Path:
 
 
 def latest_baseline() -> Path | None:
-    candidates = sorted(ARCHIVE_DIR.glob("performance_test_procedure_*.docx"))
+    """The docx of the most recent baseline snapshot, or None."""
+    candidates = sorted(BASELINES_DIR.glob("*/" + DOCX_PATH.name))
     return candidates[-1] if candidates else None
 
 
 def snapshot_baseline() -> Path:
-    ARCHIVE_DIR.mkdir(exist_ok=True)
-    stamp = dt.date.today().strftime("%Y%m%d")
-    existing = sorted(ARCHIVE_DIR.glob(f"performance_test_procedure_{stamp}_*.docx"))
-    target = ARCHIVE_DIR / f"performance_test_procedure_{stamp}_{len(existing) + 1:02d}.docx"
-    shutil.copy2(DOCX_PATH, target)
+    """Copy the docx, the rendered Markdown and the manifest into Review/baselines/<date>_<n>/."""
+    BASELINES_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = dt.date.today().isoformat()
+    existing = sorted(BASELINES_DIR.glob(f"{stamp}_*"))
+    target = BASELINES_DIR / f"{stamp}_{len(existing) + 1:02d}"
+    target.mkdir()
+    for item in (DOCX_PATH, MARKDOWN_PATH, MANIFEST_PATH):
+        shutil.copy2(item, target / item.name)
     return target
 
 

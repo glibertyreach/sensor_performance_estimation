@@ -109,14 +109,27 @@ class SensorGeometry:
 
     @classmethod
     def indicative(cls) -> "SensorGeometry":
-        """INDICATIVE values for simulation and tests only: the 640 x 480 VSX3000
-        intrinsics used by the earlier calibration repository, a 50 mm baseline
-        and a projector midway between the cameras, a 0.1 mm depth LSB and
-        10 frames per second. None of these is a confirmed datasheet value."""
+        """INDICATIVE values for simulation and tests only, for the first VSX3000 unit
+        (VSm01, 640 x 480): the header intrinsics recorded in the 6DOF-via-2D-and-3D
+        repository (sixdof/core/camera.py, VSX3000_HEADER_*), the 75 mm stereo baseline
+        and the projector 40 mm beside the lens noted there (sixdof/render/raycast_renderer.py,
+        VSX3000_STEREO_BASELINE_MM; sixdof/core/types.py, PointLight), a 0.1 mm depth LSB
+        and 10 frames per second (assumptions). None of these is a confirmed datasheet value."""
         return cls(sensor_fx_px=688.1552734375, sensor_fy_px=688.083251953125,
                    sensor_cx_px=292.3155517578125, sensor_cy_px=256.7590026855469,
                    image_width_px=640, image_height_px=480,
-                   sensor_baseline_mm=50.0, projector_offset_mm=(25.0, 0.0, 0.0),
+                   sensor_baseline_mm=75.0, projector_offset_mm=(40.0, 0.0, 0.0),
+                   depth_lsb_mm=0.1, frame_rate_hz=10.0)
+
+    @classmethod
+    def indicative_vsm04(cls) -> "SensorGeometry":
+        """INDICATIVE values for the second VSX3000 unit (VSm04, 1280 x 960): the header
+        intrinsics recorded in the 6DOF-via-2D-and-3D repository (sixdof/core/camera.py,
+        VSX3000_VSM04_HEADER_*); baseline, projector offset, depth LSB and frame rate as in
+        indicative(). Not confirmed datasheet values."""
+        return cls(sensor_fx_px=1043.956, sensor_fy_px=1043.956, sensor_cx_px=639.494, sensor_cy_px=477.306,
+                   image_width_px=1280, image_height_px=960,
+                   sensor_baseline_mm=75.0, projector_offset_mm=(40.0, 0.0, 0.0),
                    depth_lsb_mm=0.1, frame_rate_hz=10.0)
 
     def require(self, name: str) -> Any:
