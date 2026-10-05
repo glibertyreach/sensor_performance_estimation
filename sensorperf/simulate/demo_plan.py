@@ -18,7 +18,7 @@ needed to exercise every analysis once. It follows the same rules the real plann
 The demonstration plan covers
     R  registration: T2 (the noise plate; plane-only solve) at several tilted poses spread over the volume
     A  noise: T2 at three stations (center field), two tilt poses, and a drift sentinel at each end
-    B  edges: T3a and T3b at two stations, one nominal pose and four jitter poses each, small gap
+    B  edges: T3a and T3b at two shape stations (566 and 800 mm), one nominal pose and four jitter poses each, small gap
     Z  Z-step: T2 at one station, a ladder of three step sizes with two ABAB cycles each, and a
        short staircase
     C  area: T4 (disks) and T5 (cutouts) at the five shape stations (400, 566, 800, 1131, 1600 mm), a few
@@ -82,7 +82,7 @@ DEMO_EDGE_JITTER_POSES = 4
 """Random-offset poses per B edge station (after the nominal pose)."""
 DEMO_AREA_JITTER_POSES = 3
 """Random-offset poses per C configuration (a plate, a station)."""
-DEMO_DETECTION_POSES = 16
+DEMO_DETECTION_POSES = 24
 """Single-frame random-offset poses per D configuration (a plate, a station)."""
 DEMO_ZSTEP_LADDER_INDICES = (1, 3, 5)
 """Indices into ``params.z_step_ladder_mm`` of the three demonstration step sizes."""
@@ -226,8 +226,10 @@ def _plan_noise(builder: _PlanBuilder) -> None:
 def _plan_edges(builder: _PlanBuilder) -> None:
     """Section 6.1: T3a and T3b at two stations, a nominal pose and jitter poses each, small gap."""
     params = builder.params
+    # The two shape stations around the reference: nearer than Z_MAX so that the 160 mm square stays wide enough on the
+    # coarse pixels of the --quick sensor (35 and 49 px at 800 and 566 mm; 17 px at 1600 mm).
     for target_id in (TARGET_RAISED_SQUARE, TARGET_SQUARE_WINDOW):
-        for station in (params.z_reference_mm, params.z_max_mm):
+        for station in params.z_shape_stations_mm()[1:3]:
             builder.add_jitter_poses(PROCEDURE_EDGES, target_id, params.gap_small_mm, station,
                                      DEMO_EDGE_JITTER_POSES, params.frames_per_edge_pose, include_nominal=True)
 

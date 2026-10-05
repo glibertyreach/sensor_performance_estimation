@@ -26,7 +26,7 @@ from sensorperf.io.matcloud import read_matcloud
 from sensorperf.io.session import SERIES_DIRS, Session
 from sensorperf.parameters import (
     CharacterizationParameters, PROCEDURE_EDGES, PROCEDURE_NOISE, PROCEDURE_SENTINEL, SensorGeometry,
-    TARGET_CUTOUTS_SMALL, TARGET_NOISE_PLATE, TARGET_RAISED_SQUARE,
+    TARGET_CUTOUTS, TARGET_DISKS, TARGET_NOISE_PLATE, TARGET_RAISED_SQUARE,
 )
 from sensorperf.simulate.demo_plan import ALL_SERIES, demo_plan, demo_registration, scaled_geometry
 from sensorperf.simulate.sensor_model import (
@@ -36,8 +36,10 @@ from sensorperf.simulate.session import write_synthetic_session
 
 QUICK_DIVISOR = 4
 """The test geometry is the indicative one divided by this (640 x 480 -> 160 x 120)."""
-STATION_MM = 750.0
+STATION_MM = CharacterizationParameters().z_reference_mm
 """The mid-range station of the tests (Z_REFERENCE_MM)."""
+MIN_FEATURE_PX = 10.0
+"""The minimum feature diameter of the indicative synthetic matcher, pixels of the full-size sensor."""
 NOISE_FRAMES = 20
 """Frames of the temporal statistics in test (a)."""
 CENTER_ROI_HALF_PX = 20
@@ -102,7 +104,9 @@ def geometry() -> SensorGeometry:
 
 @pytest.fixture(scope="module")
 def model(geometry) -> SyntheticSensorModel:
-    return SyntheticSensorModel.indicative(geometry)
+    """The indicative matcher on the test geometry with the minimum-feature-size rule off, so that the tests of the
+    matcher mechanics (windows, fill, noise) may use any feature size; the rule has its own test below."""
+    return replace(SyntheticSensorModel.indicative(geometry), min_feature_diameter_px=0.0)
 
 
 def _ideal(model: SyntheticSensorModel) -> SyntheticSensorModel:
@@ -165,8 +169,8 @@ def test_cutout_array_depths_and_no_reads(params, model):
     near Z, and with a strict matcher the smallest cutouts have more no-reads than the largest (occlusion
     shadows fill a small hole completely, a large one only along one edge)."""
     rng = np.random.default_rng(TEST_SEED)
-    target = make_feature_array(TARGET_CUTOUTS_SMALL, TARGET_KIND_CUTOUT_ARRAY, list(CUTOUT_DIAMETERS_MM),
-                                CUTOUT_ISOLATION_MM, GAP_LARGE_MM)
+    target = make_feature_array(TARGET_CUTOUTS, TARGET_KIND_CUTOUT_ARRAY, list(CUTOUT_DIAMETERS_MM),
+                                CUTOUT_ISOLATION_MM, GAP_LARGE_MM, blank_diameter_mm=0.0, blank_sites=0)
     station = params.z_min_mm                      # the near station has the widest occlusion shadows
     pose = fronto_parallel_pose(0.0, 0.0, station)
     stereo = StereoGeometry.from_sensor_geometry(model.geometry)
@@ -408,7 +412,7 @@ def test_full_size_frame_renders_fast(params):
     """A 640 x 480 frame of a feature array renders in well under 0.5 s (vectorized numpy only)."""
     geometry = SensorGeometry.indicative()
     model = SyntheticSensorModel.indicative(geometry)
-    target = make_standard_target_set(params, geometry).get("T5-S", params.gap_small_mm)
+    target = make_standard_target_set(params, geometry).get(TARGET_CUTOUTS, params.gap_small_mm)
     pose = fronto_parallel_pose(0.0, 0.0, STATION_MM)
     rng = np.random.default_rng(TEST_SEED)
     render_frame(model, target, pose, rng)                               # warm the caches
@@ -424,9 +428,14 @@ def _timed(call) -> float:
 
 def test_demo_plan_covers_every_series(params, geometry):
     """The demonstration plan has every series, unique pose indices per configuration, seeds, and the
-    jitter offsets inside +/- PHASE_JITTER_SPAN_PX / 2."""
+    jitter offsets inside +/- PHASE_JITTER_SPAN_PX / 2. Registration uses the noise plate T2 (T1 is gone), and C and D
+    cover the five shape stations of both feature plates T4 and T5."""
     plan = demo_plan(params, geometry, np.random.default_rng(TEST_SEED), quick=True)
     assert {capture.procedure for capture in plan} >= set(ALL_SERIES) | {PROCEDURE_SENTINEL}
+    assert {c.target_id for c in plan if c.procedure == "R"} == {TARGET_NOISE_PLATE}
+    for series in ("C", "D"):
+        assert {c.target_id for c in plan if c.procedure == series} == {TARGET_DISKS, TARGET_CUTOUTS}
+        assert {c.station_z_mm for c in plan if c.procedure == series} == set(params.z_shape_stations_mm())
     assert [capture.order for capture in plan] == list(range(len(plan)))
     keys = [capture.pose_key() for capture in plan]
     assert len(keys) == len(set(keys))
@@ -438,3 +447,40 @@ def test_demo_plan_covers_every_series(params, geometry):
     assert {capture.procedure for capture in subset} == {"D"}
     with pytest.raises(ValueError):
         demo_plan(params, geometry, np.random.default_rng(TEST_SEED), quick=True, series=["Q"])
+
+
+def test_minimum_feature_diameter_is_a_named_parameter_of_the_matcher(params):
+    """Redesign note Section 5 and the simulator: the imitation matcher resolves no disk or cutout below
+    ``min_feature_diameter_px`` (indicative 10 px, inside the 8 to 12 px asked for). On the full-size sensor at Z_MAX
+    the 7.0 mm disk is 3 px and the 19.7 mm disk 8.5 px: both are left out (the back plate is read where they are), the
+    55.8 mm disk (24 px) is rendered; at Z_MIN the 19.7 mm disk (34 px) is rendered. A model without the rule renders
+    all of them."""
+    geometry = SensorGeometry.indicative()
+    model = replace(SyntheticSensorModel.indicative(geometry), disparity_noise_px=0.0, disparity_quantum_px=0.0,
+                    output_lsb_mm=0.0, fixed_pattern_amplitude_mm=0.0)
+    assert 8.0 <= model.min_feature_diameter_px <= 12.0 and model.min_feature_diameter_px == MIN_FEATURE_PX
+    target = make_standard_target_set(params, geometry).get(TARGET_DISKS, params.gap_small_mm)
+    disks = sorted(target.features_of_kind("disk"), key=lambda f: f.diameter_mm)
+    rng = np.random.default_rng(TEST_SEED)
+
+    def rendered_front_fraction(feature, station, rule_model):
+        """1.0 when the pixel at the feature's center sees the front surface in the rendered scene, else 0.0."""
+        pose = fronto_parallel_pose(0.0, 0.0, station)
+        frame = render_frame(rule_model, target, pose, rng)
+        camera = StereoGeometry.from_sensor_geometry(geometry).camera
+        u, v, _ = camera.project(target.feature_center_camera(pose, feature))
+        return float(frame.true_surface[int(round(v)), int(round(u))] == SURFACE_FRONT)
+
+    small, middle, large = disks
+    unconstrained = replace(model, min_feature_diameter_px=0.0)
+    for feature, station, expected in ((small, params.z_max_mm, 0.0), (middle, params.z_max_mm, 0.0),
+                                       (large, params.z_max_mm, 1.0), (middle, params.z_min_mm, 1.0)):
+        assert rendered_front_fraction(feature, station, model) == expected, (feature.site_id, station)
+    assert rendered_front_fraction(small, params.z_max_mm, unconstrained) == 1.0
+    scaled = SyntheticSensorModel.indicative_scaled(scaled_geometry(geometry, QUICK_DIVISOR), QUICK_DIVISOR)
+    assert scaled.min_feature_diameter_px == pytest.approx(MIN_FEATURE_PX / QUICK_DIVISOR)
+    indicative = SyntheticSensorModel.indicative(geometry)
+    assert scaled.disparity_noise_px == pytest.approx(indicative.disparity_noise_px / QUICK_DIVISOR)
+    assert scaled.disparity_quantum_px == pytest.approx(indicative.disparity_quantum_px / QUICK_DIVISOR)
+    with pytest.raises(ValueError):
+        replace(model, min_feature_diameter_px=-1.0)

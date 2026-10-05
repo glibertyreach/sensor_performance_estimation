@@ -13,6 +13,7 @@ import pytest
 
 from sensorperf.parameters import CharacterizationParameters
 from sensorperf.stats.intervals import bootstrap_statistic, clopper_pearson, clopper_pearson_upper
+from sensorperf.stats.logistic import fit_logistic, likelihood_ratio_pvalue
 from sensorperf.stats.psychometric import (CURVE_NAMES, PsychometricFitParameters, best_fit, corrected_rate,
                                            fit_all_curves, fit_psychometric, fit_threshold_model,
                                            isotonic_threshold)
@@ -27,12 +28,16 @@ D50_TOLERANCE = 0.10
 D10_TOLERANCE = 0.25
 EXACT_TOLERANCE = 1.0e-12
 RULE_OF_THREE_CEILING = 0.0105
+TEST_LEVELS = 9
+"""Levels of the synthetic psychometric data sets of these tests."""
+TEST_LEVEL_LOW_FACTOR = 0.3
+TEST_LEVEL_HIGH_FACTOR = 2.5
+"""The synthetic levels run from 0.3 to 2.5 times the true D_50."""
 
 
 def simulate_logistic_counts(rng: np.random.Generator):
     """Nine log-spaced levels (0.3 to 2.5 times D_50), 60 trials each, from a known logistic curve."""
-    levels = TRUE_D50_MM * np.geomspace(PARAMS.detection_level_low_factor, PARAMS.detection_level_high_factor,
-                                        PARAMS.detection_levels)
+    levels = TRUE_D50_MM * np.geomspace(TEST_LEVEL_LOW_FACTOR, TEST_LEVEL_HIGH_FACTOR, TEST_LEVELS)
     z = (np.log(levels) - math.log(TRUE_D50_MM)) / TRUE_BETA
     psi = TRUE_GAMMA + (1.0 - TRUE_GAMMA - TRUE_LAMBDA) / (1.0 + np.exp(-z))
     trials = np.full(levels.shape, PARAMS.detection_trials_per_level)
@@ -126,7 +131,7 @@ def test_threshold_model_recovers_floor():
     """Section 13, Step 7: D_0 = 1.0 mm lies inside a profile-likelihood interval of positive width."""
     rng = np.random.default_rng(SEED)
     true_d0, true_scale, true_shape = 1.0, 1.2, 2.0
-    levels = np.linspace(0.5, 4.0, PARAMS.detection_levels)
+    levels = np.linspace(0.5, 4.0, TEST_LEVELS)
     trials = np.full(levels.shape, PARAMS.detection_trials_per_level)
     probability = -np.expm1(-np.power(np.maximum(levels - true_d0, 0.0) / true_scale, true_shape))
     successes = rng.binomial(trials, probability)
@@ -143,3 +148,52 @@ def test_corrected_rate():
     assert corrected_rate(1.0, TRUE_GAMMA) == 1.0
     assert corrected_rate(0.0, TRUE_GAMMA) == 0.0
     assert np.allclose(corrected_rate(np.array([0.01, 0.505]), TRUE_GAMMA), [0.0, 0.5])
+
+
+def test_stratified_bootstrap_keeps_the_group_count_of_every_stratum():
+    """Section 13 (pooled design): with strata, every resample draws as many groups from each stratum as it has, so a
+    station is never over- or under-represented."""
+    groups = [(stratum, index) for stratum in range(3) for index in range(10 + 5 * stratum)]
+    strata = [g[0] for g in groups]
+    seen_counts = []
+
+    def statistic(drawn):
+        seen_counts.append(tuple(sum(1 for g in drawn if g[0] == stratum) for stratum in range(3)))
+        return float(len(drawn))
+
+    bootstrap_statistic(groups, statistic, 20, PARAMS.confidence_level, np.random.default_rng(SEED), strata=strata)
+    assert set(seen_counts) == {(10, 15, 20)}
+    with pytest.raises(ValueError):
+        bootstrap_statistic(groups, statistic, 5, PARAMS.confidence_level, np.random.default_rng(SEED), strata=[0])
+
+
+def test_logistic_regression_recovers_the_noise_covariate():
+    """Section 13 (noise covariate): grouped logistic regression on ln D_px and ln sigma recovers known coefficients
+    within a few standard errors; the likelihood-ratio test rejects dropping a true covariate and keeps a useless one."""
+    rng = np.random.default_rng(SEED)
+    true = np.array([-3.4, 1.5, -1.0])
+    d_px = np.tile(np.geomspace(3.0, 96.0, 9), 3)
+    log_sigma = rng.normal(0.0, 0.5, d_px.size)
+    design = np.column_stack([np.log(d_px), log_sigma])
+    p = 1.0 / (1.0 + np.exp(-(true[0] + design @ true[1:])))
+    trials = np.full(d_px.size, PARAMS.detection_trials_per_level)
+    successes = rng.binomial(trials, p)
+    full = fit_logistic(design, successes, trials)
+    assert full.converged and not full.separated
+    assert np.all(np.abs(full.coefficients - true) < 4.0 * full.standard_errors)
+    assert likelihood_ratio_pvalue(full, fit_logistic(design[:, :1], successes, trials)) < 1.0e-3
+    useless = np.column_stack([np.log(d_px), rng.normal(0.0, 0.5, d_px.size)])
+    p_useless = 1.0 / (1.0 + np.exp(-(true[0] + true[1] * useless[:, 0])))
+    successes_useless = rng.binomial(trials, p_useless)
+    assert likelihood_ratio_pvalue(fit_logistic(useless, successes_useless, trials),
+                                   fit_logistic(useless[:, :1], successes_useless, trials)) > 1.0e-3
+
+
+def test_logistic_regression_flags_separation():
+    """A step in the data (all misses below a size, all detections above it) is reported as separated, with finite
+    coefficients (the ridge) and no standard errors."""
+    d_px = np.geomspace(3.0, 96.0, 10)
+    trials = np.full(10, 20)
+    successes = np.where(d_px > 10.0, 20, 0)
+    fit = fit_logistic(np.log(d_px)[:, None], successes, trials)
+    assert fit.separated and np.all(np.isfinite(fit.coefficients)) and np.all(np.isnan(fit.standard_errors))

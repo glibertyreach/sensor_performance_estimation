@@ -18,8 +18,8 @@ Parameters (alpha, beta, lambda) are fitted by maximum binomial likelihood;
 gamma is not fitted. beta is carried through its logarithm so it stays
 positive.
 
-Conventions: levels are positive sizes in millimeters (the natural logarithm
-is taken inside); probabilities are in [0, 1]; ``successes`` and ``trials``
+Conventions: levels are positive sizes (millimeters, or D_px for the pooled
+detection fit; the natural logarithm is taken inside); probabilities are in [0, 1]; ``successes`` and ``trials``
 are counts per level; ``deviance`` is 2 (saturated log-likelihood minus
 fitted log-likelihood) with the saturated model psi_i = s_i / n_i at every
 level.
@@ -64,8 +64,9 @@ LOGISTIC_SPAN_PROBABILITY = 0.9
 
 INITIAL_BETA_SPAN_DIVISOR = 2.0 * math.log(LOGISTIC_SPAN_PROBABILITY / (1.0 - LOGISTIC_SPAN_PROBABILITY))
 """Initial beta = (range of ln level) / this. It assumes the tested levels span
-about the 10 to 90 percent rise of the curve, which is how Section 8, Step 2
-places them (0.3 to 2.5 times the pilot D_50)."""
+about the 10 to 90 percent rise of the curve, which the feature and station
+ladders of the Z-sweep design arrange (the levels span 3 to 96 px around the
+expected 10 to 15 px threshold)."""
 
 INITIAL_BETA_MULTIPLIERS = (0.5, 1.0, 2.0)
 """The fit is started from each of these multiples of the initial beta and the
@@ -173,6 +174,10 @@ class PsychometricFitParameters:
     """Curve family: CURVE_LOGISTIC, CURVE_NORMAL or CURVE_WEIBULL."""
     max_iterations: int = DEFAULT_MAX_ITERATIONS
     """Iteration budget of each optimizer run."""
+    warm_start: tuple[float, float, float] | None = None
+    """(alpha, beta, lapse rate) of an earlier fit to the same kind of data. When given, the optimizer runs once from
+    that start instead of from each of the INITIAL_BETA_MULTIPLIERS heuristic starts: a bootstrap resample is close to
+    the original data, so the original optimum is a good start and the fit is several times faster."""
 
 
 @dataclass
@@ -301,12 +306,18 @@ def fit_psychometric(levels, successes, trials, guess_rate: float,
     half_level = _initial_half_level(levels, successes, trials, guess_rate)
     z_half = _inverse_sigmoid(params.curve, HALF_PROBABILITY)
 
+    starts = []
+    if params.warm_start is not None:
+        alpha_w, beta_w, lapse_w = params.warm_start
+        starts.append(np.array([alpha_w, math.log(beta_w), lapse_w]))
+    else:
+        for multiplier in INITIAL_BETA_MULTIPLIERS:
+            beta0 = multiplier * span / INITIAL_BETA_SPAN_DIVISOR
+            # Place alpha so that P* = 0.5 falls at the observed half level for this curve family.
+            alpha0 = half_level - beta0 * z_half
+            starts.append(np.array([alpha0, math.log(beta0), INITIAL_LAPSE_FRACTION * params.lapse_rate_max]))
     best = None
-    for multiplier in INITIAL_BETA_MULTIPLIERS:
-        beta0 = multiplier * span / INITIAL_BETA_SPAN_DIVISOR
-        # Place alpha so that P* = 0.5 falls at the observed half level for this curve family.
-        alpha0 = half_level - beta0 * z_half
-        start = np.array([alpha0, math.log(beta0), INITIAL_LAPSE_FRACTION * params.lapse_rate_max])
+    for start in starts:
         start = np.clip(start, [b[0] for b in bounds], [b[1] for b in bounds])
         result = minimize(negative_log_likelihood, start, method="L-BFGS-B", bounds=bounds,
                           options={"maxiter": params.max_iterations})

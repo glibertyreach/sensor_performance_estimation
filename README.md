@@ -19,7 +19,7 @@ sensor performance test.
   - `acquisition/`, `cli/plan_stations.py`, `cli/make_manifest.py`,
     `cli/check_captures.py`, `cli/register.py`: Part I tools (plan with logged
     randomization, manifest from the robot's pose log, quick-look check with the
-    D pilot counts, robot-to-sensor registration).
+    D pilot post check, robot-to-sensor registration by plane correspondence).
   - `analysis/`, `cli/analyze.py`: Part II analyses A (noise), B (resolution in
     H, V and Z), C (area fidelity), D (detectability), E (boundary bias), and
     the `forward_model_parameters.json` hand-off.

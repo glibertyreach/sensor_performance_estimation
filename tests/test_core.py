@@ -57,23 +57,69 @@ def test_relations_section_2():
         SensorGeometry().pixel_footprint_mm(z)
 
 
-def test_diameter_ladder_spans_the_footprints():
-    """Section 3.2: the ladder runs from 0.3 p(Z_MIN) to at least 30 p(Z_MAX) in steps of sqrt 2."""
-    ladder = PARAMS.diameter_ladder_mm(GEOMETRY)
-    assert ladder[0] == pytest.approx(PARAMS.diameter_min_footprint_fraction * GEOMETRY.pixel_footprint_mm(PARAMS.z_min_mm))
-    assert ladder[-1] >= PARAMS.diameter_max_footprint_multiple * GEOMETRY.pixel_footprint_mm(PARAMS.z_max_mm)
-    ratios = np.diff(np.log(ladder))
-    assert np.allclose(ratios, np.log(PARAMS.diameter_ladder_ratio))
+def test_station_ladder_is_geometric_from_z_min_to_z_max():
+    """Redesign note, Section 1: the one station ladder has four stations per octave from Z_MIN = 400 to
+    Z_MAX = 1600 mm, rounded to 1 mm, nine stations; the shape and reduced stations are strides of it, and the A
+    stations add the two legacy depths."""
+    assert PARAMS.z_min_mm == 400.0 and PARAMS.z_max_mm == 1600.0 and PARAMS.z_reference_mm == 800.0
+    assert PARAMS.z_stations_mm() == (400.0, 476.0, 566.0, 673.0, 800.0, 951.0, 1131.0, 1345.0, 1600.0)
+    assert PARAMS.z_shape_stations_mm() == (400.0, 566.0, 800.0, 1131.0, 1600.0)
+    assert PARAMS.z_reduced_stations_mm() == (400.0, 800.0, 1600.0)
+    assert PARAMS.z_reference_mm in PARAMS.z_stations_mm()
+    assert PARAMS.noise_stations_mm() == (400.0, 476.0, 566.0, 673.0, 700.0, 800.0, 951.0, 1000.0, 1131.0, 1345.0,
+                                          1600.0)
+    assert PARAMS.detection_zero_stations_mm() == (1131.0, 1345.0, 1600.0)
+    # Consecutive stations differ by the ratio 2^(1/4) up to the 1 mm rounding.
+    ratios = np.array(PARAMS.z_stations_mm()[1:]) / np.array(PARAMS.z_stations_mm()[:-1])
+    assert np.allclose(ratios, PARAMS.z_station_ratio, rtol=2.0e-3)
+
+
+def test_feature_ladder_diameters_cover_three_to_ninety_six_pixels():
+    """Redesign note, Section 2: D_k = 3 px x p(Z_MAX) x (2 sqrt 2)^k gives 7.0, 19.7 and 55.8 mm at the indicative
+    geometry, covering 3.0 to 12, 8.5 to 34 and 24 to 96 px over Z_MIN to Z_MAX."""
+    diameters = PARAMS.feature_diameters_mm(GEOMETRY)
+    assert len(diameters) == PARAMS.feature_count == 3
+    assert diameters == pytest.approx((7.0, 19.7, 55.8), abs=0.1)
+    assert np.allclose(np.diff(np.log(diameters)), np.log(PARAMS.feature_ladder_ratio))
+    px_far = [GEOMETRY.diameter_in_pixels(d, PARAMS.z_max_mm) for d in diameters]
+    px_near = [GEOMETRY.diameter_in_pixels(d, PARAMS.z_min_mm) for d in diameters]
+    assert px_far[0] == pytest.approx(PARAMS.feature_min_px_at_z_max)
+    assert px_far == pytest.approx([3.0, 8.5, 24.0], abs=0.05) and px_near == pytest.approx([12.0, 34.0, 96.0], abs=0.1)
+
+
+def test_standard_target_set_has_one_disk_plate_and_one_cutout_plate():
+    """Redesign note, Section 2: T1 is gone; T4 (disks) and T5 (cutouts) each carry three features and three blank
+    sites sized to the largest search window, the disk plate also one post-only site; the isolation is 30 px at Z_MAX."""
+    targets = make_standard_target_set(PARAMS, GEOMETRY)
+    assert set(targets.targets) == {"T2", "T3a", "T3b", "T4", "T5"}
+    p_far = GEOMETRY.pixel_footprint_mm(PARAMS.z_max_mm)
+    diameters = PARAMS.feature_diameters_mm(GEOMETRY)
+    window_mm = max(diameters) + 2.0 * PARAMS.detection_window_margin_px * p_far
+    for target_id, kind, posts in (("T4", "disk", PARAMS.post_sites_per_plate), ("T5", "cutout", 0)):
+        target = targets.get(target_id)
+        features = [f for f in target.features if f.kind == kind]
+        blanks = [f for f in target.features if f.kind == "blank"]
+        assert sorted(f.diameter_mm for f in features) == pytest.approx(sorted(diameters))
+        assert len(blanks) == PARAMS.blank_sites_per_plate == 3
+        assert all(b.diameter_mm == pytest.approx(window_mm) for b in blanks)
+        assert sum(f.kind == "post" for f in target.features) == posts
+        # Edge-to-edge spacing of every pair of sites is at least the isolation of 30 px at Z_MAX.
+        isolation = PARAMS.feature_isolation_px * p_far
+        sites = [f for f in target.features if f.kind != "post"]
+        for i, a in enumerate(sites):
+            for b in sites[i + 1:]:
+                centers = np.hypot(a.x_mm - b.x_mm, a.y_mm - b.y_mm)
+                assert centers - (a.diameter_mm + b.diameter_mm) / 2.0 >= isolation - 1.0e-6
 
 
 def test_file_name_rule_round_trip():
     """Section 9: the file-name rule parses what it formats."""
-    name = format_file_name("C", "T5-S", 15.0, 750.0, 0, 17, 3)
-    assert name == "C_T5S_G15_Z0750_F0_P017_f03.mc"
+    name = format_file_name("C", "T5", 15.0, 800.0, 0, 17, 3)
+    assert name == "C_T5_G15_Z0800_F0_P017_f03.mc"
     fields = parse_file_name(name)
-    assert fields == {"procedure": "C", "target_id": "T5-S", "gap_mm": 15.0, "station_z_mm": 750.0, "field": 0,
+    assert fields == {"procedure": "C", "target_id": "T5", "gap_mm": 15.0, "station_z_mm": 800.0, "field": 0,
                       "pose_index": 17, "frame_index": 3}
-    assert parse_file_name(format_file_name("A", "T2", None, 500.0, 3, 1, 99))["gap_mm"] is None
+    assert parse_file_name(format_file_name("A", "T2", None, 400.0, 3, 1, 99))["gap_mm"] is None
     with pytest.raises(ValueError):
         parse_file_name("not_a_capture.mc")
 
@@ -105,7 +151,7 @@ def test_cutout_array_ray_cast_and_visibility():
     the right camera (V = 0) while the front face is always visible."""
     targets = make_standard_target_set(PARAMS, GEOMETRY)
     stereo = StereoGeometry.from_sensor_geometry(GEOMETRY)
-    target = targets.get("T5-L", TEST_GAP_MM)
+    target = targets.get("T5", TEST_GAP_MM)
     pose = fronto_parallel_pose(0.0, 0.0, TEST_DEPTH_MM)
     hit = target.intersect_rays(pose, np.zeros(3), stereo.camera.ray_directions())
     front, back = hit.surface == SURFACE_FRONT, hit.surface == SURFACE_BACK
@@ -130,8 +176,8 @@ def test_cutout_array_ray_cast_and_visibility():
 def test_signed_distance_sign_convention():
     """Sections 11 and 14: s is positive on the front-material side for every feature kind."""
     targets = make_standard_target_set(PARAMS, GEOMETRY)
-    disk = targets.get("T4-L").features_of_kind(FEATURE_DISK)[0]
-    cutout = targets.get("T5-L").features_of_kind(FEATURE_CUTOUT)[0]
+    disk = targets.get("T4").features_of_kind(FEATURE_DISK)[0]
+    cutout = targets.get("T5").features_of_kind(FEATURE_CUTOUT)[0]
     assert disk.signed_distance_mm(disk.x_mm, disk.y_mm) > 0.0            # disk center is front material
     assert cutout.signed_distance_mm(cutout.x_mm, cutout.y_mm) < 0.0      # hole center is back plate
     square = targets.get("T3a").features[0]

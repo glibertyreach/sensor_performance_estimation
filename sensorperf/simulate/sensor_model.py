@@ -246,7 +246,8 @@ class RenderedFrame:
     xyz: np.ndarray
     """(H, W, 3) float32 camera-frame points in mm, zeros where not read (the .mc convention)."""
     true_surface: np.ndarray
-    """SURFACE_NONE / SURFACE_FRONT / SURFACE_BACK per pixel from the ideal ray cast."""
+    """SURFACE_NONE / SURFACE_FRONT / SURFACE_BACK per pixel from the ideal ray cast of the scene the matcher saw
+    (features below ``min_feature_diameter_px`` are not in it, see :func:`_resolved_target`)."""
     true_depth: np.ndarray
     """Ideal camera z of the hit, mm (NaN where SURFACE_NONE)."""
     visibility: np.ndarray

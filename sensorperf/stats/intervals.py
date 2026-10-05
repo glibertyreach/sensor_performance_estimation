@@ -91,7 +91,8 @@ def clopper_pearson(successes: int, trials: int, confidence: float) -> tuple[flo
 
 
 def bootstrap_statistic(groups: Sequence[Any], statistic: Callable[[Sequence[Any]], float | np.ndarray],
-                        resamples: int, confidence: float, rng: np.random.Generator) -> BootstrapResult:
+                        resamples: int, confidence: float, rng: np.random.Generator,
+                        strata: Sequence[Any] | None = None) -> BootstrapResult:
     """Percentile bootstrap over groups (poses) with replacement.
 
     Whole groups are resampled, never the items inside them: frames or trials
@@ -105,6 +106,11 @@ def bootstrap_statistic(groups: Sequence[Any], statistic: Callable[[Sequence[Any
     (1 - confidence) / 2 and 1 - (1 - confidence) / 2 percentiles of the
     successful samples; ``estimate`` is the statistic on the original groups
     (an exception there propagates, since no meaningful result exists).
+
+    ``strata`` (optional, one label per group) makes the resampling stratified: groups are drawn with replacement
+    WITHIN their stratum, so every stratum keeps its own group count in every resample. The pooled detection
+    bootstrap uses it with one stratum per station, so that a station is never over- or under-represented by chance
+    (the poses of a station are the replicates, the stations are fixed design points).
     """
     if resamples < 1:
         raise ValueError(f"resamples must be at least 1, got {resamples}")
@@ -114,11 +120,22 @@ def bootstrap_statistic(groups: Sequence[Any], statistic: Callable[[Sequence[Any
     if not group_list:
         raise ValueError("bootstrap needs at least one group")
 
+    if strata is not None and len(strata) != len(group_list):
+        raise ValueError("strata needs one label per group")
+    # Indices of the groups of each stratum (a single stratum holding every group when none are given).
+    members: list[np.ndarray] = []
+    if strata is None:
+        members.append(np.arange(len(group_list)))
+    else:
+        labels = list(strata)
+        for label in dict.fromkeys(labels):
+            members.append(np.array([i for i, other in enumerate(labels) if other == label]))
+
     estimate = statistic(group_list)
     kept: list[np.ndarray] = []
     failures = 0
     for _ in range(resamples):
-        chosen = rng.integers(0, len(group_list), size=len(group_list))
+        chosen = np.concatenate([stratum[rng.integers(0, stratum.size, size=stratum.size)] for stratum in members])
         try:
             value = np.asarray(statistic([group_list[index] for index in chosen]), dtype=float)
         except Exception:  # noqa: BLE001 - any statistic failure is counted, not hidden: see BootstrapResult.failures

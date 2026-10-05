@@ -1,6 +1,8 @@
 # sensorperf: code design
 
-Status: implemented and integrated, 2026-10-05 (see Section 7 for the status after integration). This document is the
+Status: implemented and integrated, 2026-10-05 (see Section 7 for the status after integration, Section 8 for the
+Z-sweep redesign of the stations, the targets and the analyses of C and D, which supersedes the earlier station lists,
+the T4-S/T4-L/T5-S/T5-L arrays and the D pilot level selection described in the first version). This document is the
 contract every module is written against. The procedure it implements is the
 Claude Docs document "VSX3000 Resolution, Area-Fidelity, Detectability, and Noise
 Characterization Procedure" (2026-10-04), referred to below by its section
@@ -70,10 +72,12 @@ sensorperf/
   stats/psychometric.py  psychometric curves, isotonic regression, threshold (floor) model  DONE
   simulate/sensor_model.py  indicative VSX3000-like depth renderer of a TwoPlaneTarget  DONE
   simulate/session.py    write a synthetic session (any subset of series) with its manifest  DONE
-  acquisition/plan.py    station and pose lists for registration, A, B-HV, B-Z, C, D, sentinels  DONE
+  acquisition/plan.py    station and pose lists for registration (T2, plane-only), A, B-HV, B-Z, C, D, sentinels  DONE
   acquisition/pose_log.py  robot pose log (any rotation convention) -> manifest  DONE
-  acquisition/check.py   quick-look check of a capture set, D pilot counts  DONE
+  acquisition/check.py   quick-look check of a capture set, D pilot post check  DONE
   analysis/common.py     ROI masks, reference planes, figure and table writers shared by A-E  DONE
+  analysis/overlap.py    overlap (scaling) test between neighboring features, shared by C and D  DONE
+  stats/logistic.py      grouped logistic regression (noise covariate of D)  DONE
   analysis/noise.py      Analysis A (Section 10)  DONE
   analysis/resolution_lateral.py  Analysis B-HV (Section 11.1)  DONE
   analysis/resolution_depth.py    Analysis B-Z (Section 11.2)  DONE
@@ -255,12 +259,12 @@ class PlannedCapture:
     order: int                               # acquisition order after randomization
     def file_name(frame) -> str              # io.manifest.format_file_name
 
-def plan_registration(params, geometry, rng) -> list[PlannedCapture]        # Section 4, Step 6
-def plan_noise_series(params, geometry, rng, filters_off=False) -> list     # Section 5: main (shuffled), tilt, remount; sentinels interleaved by the budget clock
+def plan_registration(params, geometry, rng) -> list[PlannedCapture]        # Section 4, Step 6: T2, poses span Z_MIN..Z_MAX
+def plan_noise_series(params, geometry, rng, filters_off=False) -> list     # Section 5: 9 ladder stations + the legacy depths (shuffled), tilt at the reduced stations, remount; sentinels by the budget clock
 def plan_edge_series(params, geometry, rng) -> list                          # Section 6.1: T3a, T3b x gaps x stations: nominal + jitter poses
 def plan_zstep_series(params, geometry, rng, expected_quantum_mm: Callable[[float], float]) -> list   # Section 6.2: ladder ABAB + staircase
 def plan_area_series(params, geometry, rng, open_background=False) -> list   # Section 7: arrays x gaps x stations, field sub-series, open variant
-def plan_detection_series(params, geometry, rng, pilot_d50_mm: dict, pilot_d0_mm: dict, extended=True) -> list  # Section 8
+def plan_detection_series(params, geometry, rng, extended=True) -> list     # Section 8: T4, T5 x gaps x all 9 stations; zero trials at the 3 farthest
 def insert_sentinels(plan, params, geometry, seconds_per_frame, move_settle_s) -> list   # a sentinel every DRIFT_SENTINEL_INTERVAL_MIN of estimated clock
 def capture_budget(plan, frame_rate_hz, move_settle_s) -> BudgetRow list     # Section 9 table: poses, frames, robot hours per series
 def write_plan(path_dir, plan, registration | None) -> poses.csv (+ robot flange poses when a registration is given), plan_summary.txt, plan.png
@@ -274,7 +278,7 @@ Section 7, Step 1; Section 8, Step 3) in the way each section says.
 ### acquisition/pose_log.py
 ```python
 # The robot writes one row per captured frame (or per pose, with the frame count): columns
-#   file (or pose fields), x_mm, y_mm, z_mm, rotation_type, r1..r9, timestamp, sensor_temp_c, air_temp_c, ambient_ir
+#   file (or pose fields), x_mm, y_mm, z_mm, rotation_type, r1..r9, timestamp, sensor_temp_c, air_temp_c
 # rotation_type as in the calibration repository's make_manifest (none, quaternion_wxyz, quaternion_xyzw,
 # euler_zyx_deg, euler_xyz_deg, fixed_xyz_deg, rotvec_deg, matrix); reuse that conversion table verbatim.
 def build_manifest(pose_log_csv, captures_dir, plan_csv, registration: Registration, sensor_config_id) -> list[FrameRecord]
@@ -288,8 +292,10 @@ def build_manifest(pose_log_csv, captures_dir, plan_csv, registration: Registrat
 class CheckParameters: min_valid_fraction, border_margin_px, plane_residual_warn_mm, pose_residual_warn_mm, normal_warn_deg
 def check_session(session: Session, check_params) -> CheckReport   # per pose: frames, valid fraction, border contact,
     # front-plane fit vs registered front plane (distance and angle), back-plane fit where a back plate exists
-def pilot_detection_counts(session, params, station_z_mm, ...) -> dict   # Section 8, Step 1: the Section 13 Step 2 rule on the
-    # first frame of each C pose at Z_REFERENCE_MM; per configuration the detection fraction per level, a pilot D_50 and D_0
+def pilot_post_check(session, params, geometry, station_z_mm=None, subseries=("jitter",)) -> dict   # Section 8, Step 1
+    # The D pilot keeps only the post check: the Section 13 Step 2 rule on the first frame of each C pose of the disk plate
+    # at Z_REFERENCE_MM; per (plate, gap) the blank-site threshold tau and the fraction of post-only sites detected (should
+    # be about the false-alarm target). The pilot D_50 / D_0 and the level selection from them no longer exist.
 ```
 
 ### analysis/* (each writes into session.analysis_dir())
@@ -337,3 +343,77 @@ legacy repeatability metrics follow testZRepeatabilityBrownBoard.py's
 definitions (ddof 0, boxes skipped when outside the image).
 
 Design change (2026-10-05): the dial indicator on the target adapter, the first version's step truth of series Z, is removed; the read-back robot pose through the registration is the step truth (Section 4).
+
+## 8. Z-sweep redesign (2026-10-05; `docs/design/zsweep_redesign.md`)
+
+The robot distance now varies over `Z_MIN_MM` = 400 .. `Z_MAX_MM` = 1600 (both carry the dagger: Step 4.5 confirms the
+sensor reads at both ends) for every series, and the subtended size D_px = D f_x / Z, not the diameter in millimeters, is
+the governing variable of C and D. Every constant below is a named field of `CharacterizationParameters` with a
+docstring; the planner, the target set, the simulator and the analyses read them from there.
+
+**Station ladder** (`parameters.py`). One geometric ladder, `z_station_ratio` = 2^(1/4) (four stations per octave),
+`z_stations_mm()` = 400, 476, 566, 673, 800, 951, 1131, 1345, 1600 (nine, rounded to 1 mm, both ends included). Subsets by
+stride: `z_shape_stations_mm()` (`z_shape_station_stride` = 2) = 400, 566, 800, 1131, 1600 for B-HV;
+`z_reduced_stations_mm()` (`z_reduced_station_stride` = 4) = 400, 800, 1600 for B-Z and the A tilt sub-series.
+`noise_stations_mm()` = the ladder plus `legacy_metric_depths_mm` (700, 1000) for A. C and D use all nine stations;
+`detection_zero_stations_mm()` = the `detection_zero_station_count` = 3 farthest stations (1131, 1345, 1600), where
+D takes `detection_zero_trials` = 300 trials per (feature, station) instead of `detection_trials_per_level` = 60.
+`z_reference_mm` = 800 (a station) serves the warm-up check, sentinels, re-mount check, the C field sub-series, the
+open-background variant and the D post check. `adapter_remount_repeatability_mm` = 0.02 and
+`temperature_log_interval_min` = 1 are the new equipment constants; the ambient-IR manifest column is gone.
+
+**Feature ladder.** `feature_diameters_mm(geometry)` = D_k = `feature_min_px_at_z_max` (3) x p(Z_MAX) x
+`feature_ladder_ratio` (2 sqrt 2)^k, k < `feature_count` (3): 7.0, 19.7 and 55.8 mm at the indicative geometry, covering
+3.0-12, 8.5-34 and 24-96 px over the working range (one feature spans two octaves of D_px, neighbors overlap by half an
+octave: the same D_px is reached by feature k at station j and by feature k+1 six stations later, the 1 mm rounding apart).
+The pixel-footprint ladder rules and the pilot-based detection-level rules (`diameter_*`, `detection_levels*`,
+`detection_fine_ladder_ratio`) are removed. `feature_isolation_px` (30) is evaluated at Z_MAX (70 mm).
+
+**Targets** (`geometry/targets.py`). `make_standard_target_set` builds T2 (noise plate, also the registration target), T3a,
+T3b, one disk plate T4 and one cutout plate T5 (T1 and the S/L arrays are gone). Each array carries `feature_count`
+features, `blank_sites_per_plate` (3) blank sites sized to the largest search window (`blank_site_diameter_mm`: the largest
+feature plus 2 `detection_window_margin_px` pixels at Z_MAX; blank site i serves feature i, its window is cut to that
+feature's size in the analysis) and, for disks, `post_sites_per_plate` (1) post-only site. Rows of an array are limited to
+the width of the field of view at Z_MIN.
+
+**Registration** (`cli/register.py`, `acquisition/plan.py`). With no pattern plate the default method is the plane-only
+hand-eye solve (`solve_from_planes`): camera_to_base is observable; the in-plane position of T2 on the flange and its
+rotation about its normal are not and are not needed. The registration pose planner spans Z_MIN to Z_MAX on T2.
+
+**Plan and budget** (`acquisition/plan.py`). A at all stations plus the legacy depths (five field positions, 100 frames);
+tilt at the reduced stations; B-HV at the shape stations; B-Z at the reduced stations; C for {T4, T5} x {G small, G large}
+at all nine stations, the field sub-series and the open-background variant at Z_REFERENCE; D at all nine stations (60
+trials per (feature, station), 300 at the three farthest). `plan_summary.txt` prints the station ladder and its subsets,
+the budget and the comparison with `DOCUMENT_ESTIMATE_*`, which are the totals of the default plan: 7,292 poses, 44,140
+frames, 7.30 h (10 frames/s, 3 s per move plus settle).
+
+**Analyses.**
+- C: transfer curves A_sensed/A_true and A_sensed/A_geo against D_px pooled over features and stations (the summary rows
+  keep `site_id` / `level_index`; figures draw one curve per feature). The overlap (scaling) test of `analysis/overlap.py`
+  compares neighboring features over their shared D_px range: per (kind, gap, ratio) and pair the mean difference of the two
+  curves (interpolated linearly in ln D_px), a parametric bootstrap interval of it, and whether zero lies inside; a
+  disagreement is attributed to sigma_tot(Z) (A's per-station values are reported with the pair). `C_overlap_test.csv`.
+- D: per configuration (station) tau per feature from the blank sites, gamma per station, the outcomes, independence and
+  the geometric limit; pooled per (kind, gap, field, rule) over the (feature, station) pairs: the psychometric fit on
+  ln D_px with gamma fixed from the pooled blank sites (pairs whose D_px coincide are merged), D_50 / D_10 / D_0 in D_px
+  (D_0 as the bracket [D_0,emp, next level]) converted to mm at each station (D_mm = D_px Z / f_x), a stratified bootstrap
+  over poses (strata = stations), the overlap test between neighboring features on the corrected detection curves, and a
+  logistic regression of the counts on ln D_px and ln sigma_tot(Z) (sigma_tot per station from `previous["A"]`, log-log
+  interpolated) with the likelihood-ratio test of the noise term. Outputs `D_detect_summary.csv` (per configuration),
+  `D_pooled_summary.csv`, `D_overlap_test.csv`, the details JSON, pooled psychometric figures and `D_minimum_vs_z`. The
+  pilot level selection and the continuous-angle variant are gone; the pilot keeps only the post check
+  (`acquisition.check.pilot_post_check`).
+- E unchanged except that the feature-scale profiles are against D_px, pooled over the features and stations of a plate.
+
+**Simulator.** The synthetic scene generator renders the standard target set. The imitation matcher gets a named
+parameter, `SyntheticSensorModel.min_feature_diameter_px` (indicative 10 px of the full-size sensor, inside the 8-12 px
+asked for; the real sensor is bracketed at 10-15 px by the note): a disk or cutout that subtends fewer pixels is not
+rendered (the disk reads as back plate, the cutout as front plate). `indicative_scaled(geometry, divisor)` divides the
+disparity noise, the quantum and this size by the pixel divisor of the `--quick` geometry. The demo plan covers the shape
+stations for C and D (T4 and T5), so the three features of a plate overlap in D_px.
+
+**Status after the redesign.** 128 tests pass (`python3 -m pytest -q`, about 250 s on a loaded 4-core container). The
+standard demo plan renders 357 poses / 632 frames at 160 x 120 (`--quick`, 9 s) and 363 poses / 2,260 frames at 640 x 480
+(about 8 min); the full-size session analyzes with a pooled cutout D_50 of about 9.6 px (inside the 8 to 12 px of the
+synthetic matcher) and writes `forward_model_parameters.json` with `d50_px` and `d10_px`. Not yet adapted: the build
+scripts of the technician procedure (`docs/procedures`) and the specification still quote the removed constants.

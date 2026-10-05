@@ -110,10 +110,6 @@ ARRAY_MIN_PLATE_SIZE_MM = 100.0
 """An array plate is never smaller than this (width and height), whatever the ladder."""
 POST_NOMINAL_DIAMETER_MM = 0.5
 """Nominal post diameter used when laying out an array (replaced by the as-built value)."""
-ARRAY_FIELD_MARGIN_PX = 12.0
-"""Margin kept inside the image edge, in pixels at Z_MIN, when the rows of an array are limited to the width of the
-field of view at Z_MIN: the ROI shrink BOUNDARY_BAND_HALF_WIDTH_PX plus half the phase-jitter span with the default
-parameters (8 + 4 px). The array planner checks the exact fit per station; this only steers the row packing."""
 ASBUILT_COLUMNS = ("target_id", "site_id", "kind", "x_mm", "y_mm", "diameter_mm", "diameter_uncertainty_mm",
                    "land_mm", "bevel_deg", "rotation_deg", "level_index")
 """Columns of targets_asbuilt.csv (Section 3.3)."""
@@ -653,7 +649,9 @@ def make_standard_target_set(params: CharacterizationParameters, geometry: Senso
     isolation_mm = params.feature_isolation_px * geometry.pixel_footprint_mm(params.z_max_mm)
     blank_mm = blank_site_diameter_mm(params, geometry)
     field_width_mm = 2.0 * geometry.half_field_mm(params.z_min_mm)[0]
-    max_row_mm = field_width_mm - 2.0 * ARRAY_FIELD_MARGIN_PX * geometry.pixel_footprint_mm(params.z_min_mm)
+    # Keep the rows inside the image by the analysis margin of the planner: the ROI shrink plus half the jitter span.
+    margin_px = params.boundary_band_half_width_px + params.phase_jitter_span_px / 2.0
+    max_row_mm = field_width_mm - 2.0 * margin_px * geometry.pixel_footprint_mm(params.z_min_mm)
     targets = TargetSet()
     targets.add(make_noise_plate(params))
     targets.add(make_edge_target(params, TARGET_KIND_RAISED_SQUARE, gap))

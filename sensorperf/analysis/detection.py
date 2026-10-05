@@ -1,14 +1,19 @@
 """
-Analysis D: minimum detectable size at 50, 10 and 0 percent (procedure document, Section 13), Steps 1 to 11.
+Analysis D: minimum detectable size at 50, 10 and 0 percent (procedure document, Section 13), Steps 1 to 11, in the
+Z-sweep design (redesign note, Sections 2 and 5).
 
 What it computes
     For every configuration (target kind disk or cutout, gap, station, field position) the detection probability
-    of each diameter level of the plate(s), from single-frame trials: one trial is the FIRST frame of a pose (the
-    frames of one pose are never separate trials, Section 8 Step 5). A frame yields one trial per feature and one
-    per blank site. The first frame of each C pose of a matching configuration (same target, gap, station and
-    field) is added as an extra trial and flagged as reused (Section 8, Step 6; the CSV counts new and reused
-    trials). From the trials: false-alarm-calibrated thresholds, the psychometric fit, D_50, D_10, D_0 (three
-    ways) and their units (mm, px, mrad).
+    of each feature of the plate (FEATURE_COUNT features, one blank site per feature), from single-frame trials: one
+    trial is the FIRST frame of a pose (the frames of one pose are never separate trials, Section 8 Step 5). A frame
+    yields one trial per feature and one per blank site. The first frame of each C pose of a matching configuration
+    (same target, gap, station and field) is added as an extra trial and flagged as reused (Section 8, Step 6; the
+    CSV counts new and reused trials). The detection "levels" are the (feature, station) pairs: 3 features x 9
+    stations = 27 values of D_px = D f_x / Z, spaced by the station ratio with the overlaps between neighbors.
+    From the trials: false-alarm-calibrated thresholds and the false-alarm rate gamma of every station (from the
+    blank sites), and, POOLED over the (feature, station) pairs of a (kind, gap, field, rule) group, the
+    psychometric fit on ln D_px, D_50, D_10 and D_0 in D_px and converted to mm at each station, the overlap
+    (scaling) test between neighboring features, and a logistic regression with the depth noise as a covariate.
 
 Conventions (docs/design/code_design.md, Section 4)
     Camera frame = left IR camera; depth is camera z in mm, NaN for no-reads; pixels (u, v) = (column, row);
@@ -21,50 +26,67 @@ How the steps are implemented
        cutout Delta = Z - Z_front. A candidate is a valid read with Delta > tau. The feature is detected when at
        least DETECTION_MIN_CONNECTED_PX candidates are 8-connected. Primary rule: no-reads are not candidates.
        "No-read-inclusive" rule (cutouts): no-reads inside the window (on a pixel whose ray hits the plate) are
-       candidates for every tau. Both rules are always evaluated.
+       candidates for every tau. Both rules are always evaluated. A blank site is large enough (the largest search
+       window) to hold the window of any feature, so its window is centered on the blank site with the radius of
+       the feature it serves (the same D_px as that feature at that station).
        IMPLEMENTATION: instead of re-labeling the window for every trial threshold, each window is reduced ONCE to
        its detection statistic S, the largest tau at which the rule still detects (the "k-th connected level"
        of the window: the greatest value u such that the pixels with Delta >= u contain a connected region of at
        least k pixels; k = 2 is the best adjacent pair, max over pairs of min(Delta_i, Delta_j)). The window is
        detected at threshold tau exactly when S > tau (verified against the labeling in the tests).
-    3  Threshold. tau is set PER WINDOW SIZE (per level) from the blank sites of that level over all trials of the
-       configuration: tau is the (1 - DETECTION_FALSE_ALARM_TARGET) quantile of the blank windows' S ("higher"
-       interpolation, so the false-alarm fraction does not exceed the target). That makes the false-alarm fraction
-       of the RULE (window level, after the connected-pixel criterion), not of single pixels, equal the target.
-       The measured false-alarm rate gamma is the fraction of all blank-site trials of the configuration that the
-       rule then declares detected (with fewer than 1 / target trials per level the quantile is the maximum and
-       gamma is 0 of n; the Clopper-Pearson interval is reported either way). The reported tau_mm is the median
-       over levels (the per-level values are in the details).
+    3  Threshold. tau is set PER WINDOW SIZE (per feature) from the blank sites of that size over all trials of the
+       configuration (one station): tau is the (1 - DETECTION_FALSE_ALARM_TARGET) quantile of the blank windows' S
+       ("higher" interpolation, so the false-alarm fraction does not exceed the target). That makes the false-alarm
+       fraction of the RULE (window level, after the connected-pixel criterion), not of single pixels, equal the
+       target. The measured false-alarm rate gamma is the fraction of all blank-site trials of the station that the
+       rule then declares detected (with fewer than 1 / target trials per level the quantile is the maximum and gamma
+       is 0 of n; the Clopper-Pearson interval is reported either way): gamma per station. The reported tau_mm is the
+       median over features (the per-feature values are in the details).
     1  Independence: lag-1 autocorrelation of each feature's detected/missed sequence in acquisition order
        against +/- INDEPENDENCE_SIGMA_MULTIPLE / sqrt(n), and the phi coefficient between the outcomes of adjacent
-       levels in the same frame against the same band. With many features some exceed 2 / sqrt(n) by chance, so
+       features in the same frame against the same band. With many features some exceed 2 / sqrt(n) by chance, so
        ``independence_ok`` is False only when MORE than max(1, ceil(p x tested)) features (or pairs) are outside,
        p = 2 (1 - Phi(multiplier)); the flagged ones are listed in the details. Features whose sequences do not
        vary (always or never detected) carry no information and are not tested.
-    4  Psychometric fit with gamma fixed (stats.psychometric.fit_all_curves): the raw detections per level against
-       the level's diameter in mm. D_50 and D_10 come from the best curve by deviance. A threshold is reported only
-       when the data bracket it (the corrected proportions reach it and start below it); otherwise it is NaN and
-       the status column says why.
+    4  Pooled psychometric fit on ln D_px (stats.psychometric.fit_all_curves): the detections of all (feature,
+       station) pairs of a (kind, gap, field, rule) group against D_px, with gamma fixed at the group's blank-site
+       false-alarm rate (the blank detections over the blank trials of all its stations; gamma per station is
+       reported with every configuration and used for the per-point corrections of the overlap test). Pairs whose
+       D_px agree within MERGE_D_PX_TOLERANCE (the six-station shift that makes neighboring features coincide) are
+       merged. D_50 and D_10 come from the best curve by deviance, in D_px, and are converted to mm at each station,
+       D_mm = D_px Z / f_x. A threshold is reported only when the data bracket it (the corrected proportions reach
+       it and start below it); otherwise it is NaN and the status column says why.
     5  Model range of D_10 over the logistic, normal and Weibull fits; model-free isotonic crossings (0.1, 0.5) of
        the corrected proportions.
-    6  D_0 empirical: per level the one-sided Clopper-Pearson upper bound psi_U at CONFIDENCE_LEVEL, corrected
-       P*_U = (psi_U - gamma) / (1 - gamma); D_0,emp is the largest level such that P*_U <=
+    6  D_0 empirical, as a D_px BRACKET: per merged level the one-sided Clopper-Pearson upper bound psi_U at
+       CONFIDENCE_LEVEL, corrected P*_U = (psi_U - gamma) / (1 - gamma); D_0,emp is the largest D_px such that P*_U <=
        DETECTION_ZERO_PROBABILITY_BOUND at that level and at every smaller one; NaN when even the smallest level
-       fails (not demonstrated). The bracket is [D_0,emp, next level up].
-    7  D_0 threshold model (stats.psychometric.fit_threshold_model) with its profile-likelihood interval; "not
-       estimable" when every level detects nothing (its ValueError is caught and recorded).
+       fails (not demonstrated). The bracket is [D_0,emp, next level up], converted to mm at each station.
+    7  D_0 threshold model (stats.psychometric.fit_threshold_model) on the pooled levels with its profile-likelihood
+       interval; "not estimable" when every level detects nothing (its ValueError is caught and recorded).
     8  Geometric limit (cutouts): the diameter at which A_geo of Analysis C, Step 7 reaches zero, by bisection on a
-       probe cutout at the plate center (area.geometric_limit_diameter_mm), cameras only and with the projector.
-    9  Bootstrap over poses (trials): each resample draws poses with replacement from the per-pose outcome tables,
-       recomputes the per-level tau from the resampled blank statistics, gamma and the counts, and re-fits ONE curve
-       family (the best family of the original fit; refitting all three in every resample would triple the run
-       time) to give D_50 and D_10. The model D_0 interval is the profile-likelihood interval of Step 7, not a
-       bootstrap (the threshold-model fit is far slower than the logistic fit). The number of resamples is
-       BOOTSTRAP_RESAMPLES, reduced to DetectionOptions.reduced_bootstrap_resamples when the configuration has fewer
-       than DetectionOptions.full_bootstrap_min_poses poses (stated in the details).
-    10 Every minimum in mm, px and mrad; theta against Z in a figure.
-    11 D_detect_summary.csv, D_detect_details.json, figures (psychometric curves with binomial error bars and the
-       minimums marked; theta against Z).
+       probe cutout at the plate center (area.geometric_limit_diameter_mm), cameras only and with the projector, per
+       station (mm, and px at that station).
+    9  Bootstrap over poses (trials), stratified by station: each resample draws poses with replacement within each
+       station, recomputes the per-feature tau from the resampled blank statistics, the pooled gamma and the pooled
+       counts, and re-fits ONE curve family (the best family of the original fit; refitting all three in every
+       resample would triple the run time) to give D_50 and D_10 in D_px. The model D_0 interval is the
+       profile-likelihood interval of Step 7, not a bootstrap. The number of resamples is BOOTSTRAP_RESAMPLES, reduced
+       to DetectionOptions.reduced_bootstrap_resamples when the stations of the group have fewer than
+       DetectionOptions.full_bootstrap_min_poses poses each on average (stated in the details).
+    10 Every minimum in mm, px and mrad (D_px and theta are constant over stations for a pooled minimum, D_mm scales
+       with Z); the minimum diameter in mm against Z in a figure.
+    11 D_detect_summary.csv (per configuration), D_pooled_summary.csv (per group), D_overlap_test.csv,
+       D_detect_details.json, figures (pooled psychometric curves with binomial error bars and the minimums marked;
+       the minimum diameter against Z).
+    12 Overlap (scaling) test (analysis.overlap): per group and pair of neighboring features, the mean difference of
+       their corrected detection curves over the D_px range they share and whether zero lies inside its bootstrap
+       interval; disagreement is attributed to sigma_tot(Z).
+    13 Noise covariate: logistic regression (stats.logistic) of the pooled detection counts on ln D_px and ln
+       sigma_tot(Z), sigma_tot per station from Analysis A (``previous["A"]``, log-log interpolated between its
+       stations); the coefficient of ln sigma_tot with its standard error and the likelihood-ratio p-value of
+       dropping it are reported. Skipped, with a note, when A did not run or the design cannot separate the two
+       covariates.
 
 Helpers other modules import from here: ``collect_trials`` / ``ConfigTrials`` (Analysis E, Step 6, recomputes the two
 rules per diameter), ``window_statistic``, ``detected_at``.
@@ -74,7 +96,7 @@ from __future__ import annotations
 import math
 import time
 import warnings
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -90,16 +112,18 @@ from sensorperf.analysis.common import (
     PoseGeometry, connected_components, new_figure, pose_geometry, reference_planes, save_figure, write_csv_rows,
     write_json,
 )
+from sensorperf.analysis.overlap import (
+    OverlapOptions, TransferCurve, binomial_standard_error, overlap_tests, sigma_tot_at, sigma_tot_by_station,
+)
 from sensorperf.geometry.targets import (
     FEATURE_BLANK, FEATURE_CUTOUT, FEATURE_DISK, SURFACE_NONE, Feature, StereoGeometry,
 )
 from sensorperf.io.capture_set import load_stack
-from sensorperf.io.manifest import (
-    SUBSERIES_CONTINUOUS, SUBSERIES_JITTER, SUBSERIES_MAIN, FrameRecord, group_by_pose, pose_order, select,
-)
+from sensorperf.io.manifest import SUBSERIES_JITTER, SUBSERIES_MAIN, FrameRecord, group_by_pose, pose_order, select
 from sensorperf.io.session import Session
-from sensorperf.parameters import PROCEDURE_AREA, PROCEDURE_DETECTION
+from sensorperf.parameters import CharacterizationParameters, PROCEDURE_AREA, PROCEDURE_DETECTION
 from sensorperf.stats.intervals import bootstrap_statistic, clopper_pearson, clopper_pearson_upper
+from sensorperf.stats.logistic import fit_logistic, likelihood_ratio_pvalue
 from sensorperf.stats.psychometric import (
     PsychometricFit, PsychometricFitParameters, best_fit, corrected_rate, fit_all_curves, fit_psychometric,
     fit_threshold_model, isotonic_threshold,
@@ -113,9 +137,24 @@ RULE_INCLUSIVE = "no_read_inclusive"
 RULES = (RULE_PRIMARY, RULE_INCLUSIVE)
 """The two detection rules of Step 2 (the second applies to cutouts only)."""
 SUMMARY_FILE_NAME = "D_detect_summary.csv"
+POOLED_FILE_NAME = "D_pooled_summary.csv"
+OVERLAP_FILE_NAME = "D_overlap_test.csv"
 DETAILS_FILE_NAME = "D_detect_details.json"
-D_SUBSERIES_EXCLUDED = (SUBSERIES_CONTINUOUS,)
-"""D sub-series that are not detection-curve trials (the continuous-angle variant varies Z, not the level)."""
+MERGE_D_PX_TOLERANCE = 5.0e-3
+"""(feature, station) pairs whose D_px agree within this relative tolerance are the same level of the pooled curve:
+neighboring features coincide in D_px after six stations (FEATURE_LADDER_RATIO = STATION_RATIO^6), up to the 1 mm
+rounding of the stations (about 0.1 percent)."""
+MIN_DISTINCT_LEVELS_FOR_FIT = 3
+"""A pooled psychometric fit needs at least this many distinct D_px levels with trials."""
+LOG_COLUMNS_REGRESSION = 2
+"""Covariates of the noise regression: ln D_px and ln sigma_tot."""
+MIN_REGRESSION_SPREAD = 1.0e-6
+"""The centered covariate matrix of the noise regression has rank below LOG_COLUMNS_REGRESSION when its singular values
+fall below this (ln D_px and ln sigma_tot then vary together, or one of them is constant)."""
+OVERLAP_COLUMNS = ("kind", "gap_mm", "field", "rule", "feature_small", "feature_large", "status", "shared_low_px",
+                   "shared_high_px", "points_small", "points_large", "mean_difference", "interval_lower",
+                   "interval_upper", "agrees", "resamples", "sigma_tot_small_mm", "sigma_tot_large_mm", "note")
+"""Columns of D_overlap_test.csv."""
 C_REUSE_SUBSERIES = (SUBSERIES_MAIN, SUBSERIES_JITTER)
 """C sub-series whose first frames may be reused as D trials (Section 8, Step 6)."""
 SOURCE_D = "D"
@@ -131,7 +170,7 @@ ALLOWED_FLAGS_FLOOR = 1
 """Independence: at least this many flagged tests are tolerated (multiple testing)."""
 SAMPLE_VARIANCE_GUARD = 1.0e-12
 """A binary sequence whose sum of squares is below this has no variance (never or always detected)."""
-BOOTSTRAP_STAT_NAMES = ("d50_mm", "d10_mm", "gamma", "tau_mm")
+BOOTSTRAP_STAT_NAMES = ("d50_px", "d10_px", "gamma", "tau_mm")
 """The quantities the bootstrap resamples, in order."""
 PSYCHOMETRIC_CURVE_POINTS = 200
 """Points of the fitted curves drawn in the figures."""
@@ -152,14 +191,20 @@ class DetectionOptions:
     """Settings of Analysis D that are not procedure parameters."""
 
     bootstrap_resamples: int | None = None
-    """Number of bootstrap resamples; None means BOOTSTRAP_RESAMPLES for a configuration with at least
-    ``full_bootstrap_min_poses`` poses and ``reduced_bootstrap_resamples`` otherwise."""
+    """Number of bootstrap resamples; None means BOOTSTRAP_RESAMPLES for a group with at least
+    ``full_bootstrap_min_poses`` poses per station and ``reduced_bootstrap_resamples`` otherwise."""
     reduced_bootstrap_resamples: int = 200
-    """Resamples used when a configuration has fewer than ``full_bootstrap_min_poses`` poses."""
+    """Resamples used when a group has fewer than ``full_bootstrap_min_poses`` poses per station."""
     full_bootstrap_min_poses: int = 30
-    """Poses (trials) a configuration needs for the full BOOTSTRAP_RESAMPLES."""
+    """Poses (trials) per station, on average over the stations of the group, needed for the full BOOTSTRAP_RESAMPLES."""
     min_trials_per_level: int = 20
-    """Fewer trials than this at the best-sampled level and the curve fit is not attempted ("too few trials")."""
+    """A (feature, station) pair enters the pooled curve fit only with at least this many trials; fewer at every pair
+    and the fit is not attempted ("too few trials")."""
+    min_pairs_for_fit: int = 4
+    """The pooled fit needs at least this many pairs with min_trials_per_level trials (and
+    MIN_DISTINCT_LEVELS_FOR_FIT distinct D_px)."""
+    overlap_options: OverlapOptions = OverlapOptions()
+    """Settings of the overlap (scaling) test."""
     bootstrap_seed: int = 20261005
     """Seed of the bootstrap generator."""
     include_reused: bool = True
@@ -172,7 +217,9 @@ class DetectionOptions:
 
 @dataclass
 class LevelSpec:
-    """One diameter level of a plate: its feature, the blank site of the same window size, and their diameters."""
+    """One feature of a plate (a detection level at each station): the feature, the blank site that serves its window
+    size, and their diameters (the blank site is as large as the largest search window; its window is cut to the
+    feature's size)."""
 
     target_id: str
     level_index: int | None
@@ -314,8 +361,8 @@ def _level_specs(target_features: Sequence[Feature], target_id: str, kind: str) 
 
 def frame_statistics(session: Session, record: FrameRecord, levels: Sequence[LevelSpec],
                      kind: str) -> dict[tuple[str, str], float]:
-    """Steps 2 for one frame: ``{(site_id, rule): S}`` for every level's feature and blank window that lies inside the
-    image. Reference planes are fitted to the frame itself away from the edges (the registered planes where too
+    """Steps 2 for one frame: ``{(site_id, rule): S}`` for every feature's own window and its blank site's window (cut to
+    the feature's size) that lies inside the image. Reference planes are fitted to the frame itself away from the edges (the registered planes where too
     few pixels). The no-read-inclusive statistic is computed for cutouts only."""
     params = session.params
     stack = load_stack([record])
@@ -334,7 +381,9 @@ def frame_statistics(session: Session, record: FrameRecord, levels: Sequence[Lev
         for site_id in (level.site_id, level.blank_id):
             if site_id is None:
                 continue
-            feature = target.feature(site_id)
+            # The window of a feature has radius D_px/2 + margin of its OWN diameter. A blank site is as large as the
+            # largest search window, so it is cut to the size of the feature it serves: same D_px, same window.
+            feature = replace(target.feature(site_id), diameter_mm=level.diameter_mm)
             if not _window_inside_image(geometry, feature, margin):
                 continue
             window = geometry.feature_window(feature, margin)
@@ -464,10 +513,14 @@ def _quiet():
     return np.errstate(over="ignore", invalid="ignore", divide="ignore")
 
 
-def _fit_parameters(params, curve: str | None = None) -> PsychometricFitParameters:
+def _fit_parameters(params, curve: str | None = None,
+                    warm_start: tuple[float, float, float] | None = None) -> PsychometricFitParameters:
+    """Fit settings from the procedure parameters; ``warm_start`` (alpha, beta, lapse) of the original fit makes a
+    bootstrap refit a single optimizer run."""
     if curve is None:
         return PsychometricFitParameters(lapse_rate_max=params.detection_lapse_rate_max)
-    return PsychometricFitParameters(lapse_rate_max=params.detection_lapse_rate_max, curve=curve)
+    return PsychometricFitParameters(lapse_rate_max=params.detection_lapse_rate_max, curve=curve,
+                                     warm_start=warm_start)
 
 
 def bracketed(corrected: np.ndarray, p_star: float) -> bool:
@@ -487,14 +540,16 @@ def threshold_status(corrected: np.ndarray, p_star: float) -> str:
     return "ok"
 
 
-def _fit_thresholds(levels, successes, trials, gamma, params, curve: str) -> tuple[float, float]:
-    """(D_50, D_10) in mm from one fitted curve family; NaN for a threshold the corrected proportions do not bracket."""
+def _fit_thresholds(levels, successes, trials, gamma, params, curve: str,
+                    warm_start: tuple[float, float, float] | None = None) -> tuple[float, float]:
+    """(D_50, D_10) in the units of ``levels`` from one fitted curve family; NaN for a threshold the corrected
+    proportions do not bracket."""
     keep = trials > 0
     corrected = np.asarray(corrected_rate(successes[keep] / trials[keep], gamma))
     reaches_half, reaches_tenth = bracketed(corrected, P_STAR_D50), bracketed(corrected, P_STAR_D10)
     if not (reaches_half or reaches_tenth):
         return NO_THRESHOLD, NO_THRESHOLD
-    fit = fit_psychometric(levels[keep], successes[keep], trials[keep], gamma, _fit_parameters(params, curve))
+    fit = fit_psychometric(levels[keep], successes[keep], trials[keep], gamma, _fit_parameters(params, curve, warm_start))
     return (fit.threshold(P_STAR_D50) if reaches_half else NO_THRESHOLD,
             fit.threshold(P_STAR_D10) if reaches_tenth else NO_THRESHOLD)
 
@@ -598,39 +653,45 @@ class DetectionResult:
     """Everything Analysis D produced."""
 
     rows: list[dict[str, Any]]
-    """One dict per configuration and rule (the SUMMARY_COLUMNS keys)."""
+    """One dict per configuration (kind, gap, station, field) and rule (the SUMMARY_COLUMNS keys); the thresholds are
+    those of the configuration's pooled group converted to mm at its station."""
     details: list[dict[str, Any]]
-    """Per configuration and rule: the level table, fits, bound table, independence, bootstrap summary."""
+    """Per configuration and rule: the feature table, independence, gamma, the minimums."""
+    pooled_rows: list[dict[str, Any]]
+    """One dict per (kind, gap, field, rule) group pooled over its stations (the POOLED_COLUMNS keys)."""
+    pooled_details: list[dict[str, Any]]
+    """Per group: the (feature, station) pairs, the fits, the D_0 tables, the bootstrap and the noise regression."""
+    overlap_rows: list[dict[str, Any]]
+    """The overlap (scaling) test of every pair of neighboring features of every group (OVERLAP_COLUMNS keys)."""
     configs: list[ConfigTrials]
     notes: list[str] = field(default_factory=list)
-    z_reference_mm: float = 750.0
-    gap_small_mm: float = 15.0
+    z_reference_mm: float = field(default_factory=lambda: CharacterizationParameters().z_reference_mm)
+    gap_small_mm: float = field(default_factory=lambda: CharacterizationParameters().gap_small_mm)
 
     def forward_model_terms(self) -> dict[str, Any]:
-        """Terms for forward_model_parameters.json: ``d50_px`` and ``d10_px`` of the cutouts under the primary rule
-        at the station nearest the mid station Z_REFERENCE_MM (the small gap, on-axis, when several exist). Values
-        that could not be estimated are omitted."""
-        rows = [r for r in self.rows if r["kind"] == FEATURE_CUTOUT and r["rule"] == RULE_PRIMARY and r["field"] == 0]
+        """Terms for forward_model_parameters.json: ``d50_px`` and ``d10_px`` of the cutouts under the primary rule,
+        from the pooled fit of the on-axis group of the small gap (D_px is the governing variable, so one value
+        serves every station). Values that could not be estimated are omitted."""
+        rows = [r for r in self.pooled_rows if r["kind"] == FEATURE_CUTOUT and r["rule"] == RULE_PRIMARY
+                and r["field"] == 0]
         if not rows:
             return {}
-        station = min({r["station_z_mm"] for r in rows}, key=lambda z: abs(z - self.z_reference_mm))
-        candidates = [r for r in rows if r["station_z_mm"] == station]
-        row = min(candidates, key=lambda r: abs((r["gap_mm"] or 0.0) - self.gap_small_mm))
-        terms = {}
-        for key in ("d50_px", "d10_px"):
-            if math.isfinite(row[key]):
-                terms[key] = float(row[key])
-        return terms
+        row = min(rows, key=lambda r: abs((r["gap_mm"] or 0.0) - self.gap_small_mm))
+        return {key: float(row[key]) for key in ("d50_px", "d10_px") if math.isfinite(row[key])}
 
 
 # ---------------------------------------------------------------------------
-# The analysis
+# Columns
 # ---------------------------------------------------------------------------
 def _minimum_columns() -> list[str]:
     """Names of the threshold columns that are reported in mm, px and mrad."""
     return ["d50", "d50_lower", "d50_upper", "d10", "d10_lower", "d10_upper", "d10_model_min", "d10_model_max",
             "d50_isotonic", "d10_isotonic", "d0_emp", "d0_emp_next", "d0_model", "d0_model_lower", "d0_model_upper",
             "d0_geometric", "d0_geometric_cameras"]
+
+
+POOLED_MINIMUMS = tuple(name for name in _minimum_columns() if not name.startswith("d0_geometric"))
+"""The minimums that come from the pooled fit (the geometric limits are per station and computed per configuration)."""
 
 
 def _summary_columns() -> list[str]:
@@ -644,19 +705,57 @@ def _summary_columns() -> list[str]:
 
 
 SUMMARY_COLUMNS = tuple(_summary_columns())
-"""Columns of D_detect_summary.csv: the specification's list (target, gap, Z, gamma and its interval, tau, best curve,
-D_50, D_10 with their intervals, the D_10 model range, the isotonic values, the D_0,emp bracket, model D_0 with its
-interval, the geometric D_0, independence flag), each minimum in mm, px and mrad, plus status and bookkeeping columns."""
+"""Columns of D_detect_summary.csv, one row per configuration: the specification's list (target, gap, Z, gamma of the
+station and its interval, tau, best curve, D_50, D_10 with their intervals, the D_10 model range, the isotonic values,
+the D_0,emp bracket, model D_0 with its interval, the geometric D_0, independence flag), each minimum in mm, px and
+mrad, plus status and bookkeeping columns. The minimums are those of the pooled group (D_px, constant over the
+stations) converted to mm at the configuration's station."""
+
+POOLED_COLUMNS = (
+    ("kind", "gap_mm", "field", "rule", "stations", "pairs", "trials", "gamma", "gamma_lower", "gamma_upper",
+     "gamma_blank_trials", "best_curve", "alpha_ln_px", "beta", "lapse_rate", "deviance", "d50_status", "d10_status",
+     "d0_model_status")
+    + tuple(f"{name}_px" for name in POOLED_MINIMUMS)
+    + ("bootstrap_resamples", "bootstrap_failures", "regression_status", "regression_observations",
+       "regression_b0", "regression_b_ln_dpx", "regression_se_ln_dpx", "regression_b_ln_sigma",
+       "regression_se_ln_sigma", "regression_p_noise", "regression_separated", "fit_note"))
+"""Columns of D_pooled_summary.csv, one row per (kind, gap, field, rule) group pooled over its stations: the pooled
+psychometric fit on ln D_px (D_50, D_10, D_0 in D_px, with the D_0 bracket [d0_emp, d0_emp_next]), the group's
+false-alarm rate, and the noise-covariate regression (logit p = b0 + b_ln_dpx ln D_px + b_ln_sigma ln sigma_tot(Z))."""
+
+
+# ---------------------------------------------------------------------------
+# The analysis
+# ---------------------------------------------------------------------------
+@dataclass
+class _ConfigRule:
+    """The per-configuration, per-rule intermediate (Steps 1, 3 and 8) that the pooled analysis consumes."""
+
+    config: ConfigTrials
+    rule: str
+    taus: np.ndarray
+    """Per-feature threshold tau (mm) of this station."""
+    successes: np.ndarray
+    trials: np.ndarray
+    """Detections and valid trials per feature at this station."""
+    gamma: float
+    """False-alarm rate of this station (blank-site detections / blank-site trials)."""
+    blank_hits: int
+    blank_trials: int
+    row: dict[str, Any]
+    detail: dict[str, Any]
+    geometric_mm: tuple[float, float]
+    """(D_0 geometric with the projector, cameras only) in mm at this station; NaN for disks."""
 
 
 def run_detection(session: Session, out_dir: Path, previous: Mapping[str, Any] | None,
                   options: DetectionOptions | None = None) -> DetectionResult | None:
-    """Analysis D (Section 13, Steps 1 to 10) on the procedure-"D" frames of the session, plus the first frame of
+    """Analysis D (Section 13, Steps 1 to 13 above) on the procedure-"D" frames of the session, plus the first frame of
     each C pose of a matching configuration as extra trials (flagged as reused). Returns None when the session has no
-    D frames. Nothing is written here; see ``write_outputs``."""
+    D frames. ``previous`` maps the letters of analyses already run to their results: A's sigma_tot per station is
+    the noise covariate. Nothing is written here; see ``write_outputs``."""
     options = DetectionOptions() if options is None else options
-    d_records = [r for r in select(session.records, procedure=PROCEDURE_DETECTION)
-                 if r.subseries not in D_SUBSERIES_EXCLUDED]
+    d_records = select(session.records, procedure=PROCEDURE_DETECTION)
     if not d_records:
         return None
     params = session.params
@@ -670,16 +769,36 @@ def run_detection(session: Session, out_dir: Path, previous: Mapping[str, Any] |
         sources += [(r, SOURCE_C) for r in first_frames(c_records)]
     configs = collect_trials(session, sources)
     stereo = StereoGeometry.from_sensor_geometry(session.geometry)
+    sigma_table = sigma_tot_by_station(previous)
+    if not sigma_table:
+        notes.append("Analysis A did not run (or has no main stations): the noise covariate sigma_tot(Z) is not "
+                     "available, so the logistic regression on ln sigma_tot is skipped")
+    analyzed = [_analyze_config_rule(session, config, rule, stereo, options)
+                for config in configs for rule in config.rules()]
+    if not analyzed:
+        notes.append("no array configuration with a back plate was found among the D frames")
     rows: list[dict[str, Any]] = []
     details: list[dict[str, Any]] = []
-    for config in configs:
-        for rule in config.rules():
-            row, detail = _analyze_config_rule(session, config, rule, stereo, options)
-            rows.append(row)
-            details.append(detail)
-    if not rows:
-        notes.append("no array configuration with a back plate was found among the D frames")
-    return DetectionResult(rows=rows, details=details, configs=configs, notes=notes,
+    pooled_rows: list[dict[str, Any]] = []
+    pooled_details: list[dict[str, Any]] = []
+    overlap_rows: list[dict[str, Any]] = []
+    groups: dict[tuple, list[_ConfigRule]] = {}
+    for member in analyzed:
+        key = (member.config.kind, member.config.gap_mm, member.config.field, member.rule)
+        groups.setdefault(key, []).append(member)
+    for members in groups.values():
+        members.sort(key=lambda m: m.config.station_z_mm)
+        pooled_row, pooled_detail, overlaps = _analyze_group(session, members, options, sigma_table)
+        pooled_rows.append(pooled_row)
+        pooled_details.append(pooled_detail)
+        overlap_rows += overlaps
+        for member in members:
+            _fill_config_minimums(session, member, pooled_row)
+    for member in analyzed:
+        rows.append(member.row)
+        details.append(member.detail)
+    return DetectionResult(rows=rows, details=details, pooled_rows=pooled_rows, pooled_details=pooled_details,
+                           overlap_rows=overlap_rows, configs=configs, notes=notes,
                            z_reference_mm=params.z_reference_mm, gap_small_mm=params.gap_small_mm)
 
 
@@ -692,17 +811,21 @@ def _units(session: Session, value_mm: float, station_z_mm: float) -> tuple[floa
             geometry.subtended_angle_mrad(value_mm, station_z_mm))
 
 
-def _bootstrap_count(config: ConfigTrials, options: DetectionOptions, params) -> int:
+def _bootstrap_count(poses: int, stations: int, options: DetectionOptions, params) -> int:
+    """Bootstrap resamples for a group with this many poses over this many stations: the full BOOTSTRAP_RESAMPLES when
+    the stations have at least ``full_bootstrap_min_poses`` poses on average, else the reduced count."""
     if options.bootstrap_resamples is not None:
         return options.bootstrap_resamples
-    if len(config.pose_keys) >= options.full_bootstrap_min_poses:
+    if poses >= options.full_bootstrap_min_poses * max(stations, 1):
         return params.bootstrap_resamples
     return options.reduced_bootstrap_resamples
 
 
 def _analyze_config_rule(session: Session, config: ConfigTrials, rule: str, stereo: StereoGeometry,
-                         options: DetectionOptions) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Steps 1 and 3 to 10 for one configuration and rule: the summary row and the detail record."""
+                         options: DetectionOptions) -> _ConfigRule:
+    """Steps 1, 3 and 8 for one configuration (one station) and rule: tau per feature, the outcomes, gamma of the
+    station from its blank sites, the independence check, the feature table and the geometric limit. The thresholds
+    of the summary row are filled in afterward from the pooled group (:func:`_fill_config_minimums`)."""
     params = session.params
     levels_mm = config.level_diameters_mm()
     s_feature, s_blank = config.s_feature[rule], config.s_blank[rule]
@@ -746,7 +869,7 @@ def _analyze_config_rule(session: Session, config: ConfigTrials, rule: str, ster
             "corrected": float(corrected[column]), "tau_mm": float(taus[column])})
     detail["levels"] = level_table
 
-    # Step 8: geometric limit for cutouts.
+    # Step 8: geometric limit for cutouts (per station, in mm).
     d0_geo = d0_geo_cameras = math.nan
     if config.kind == FEATURE_CUTOUT:
         plate = session.targets.get(config.target_ids[0], config.gap_mm)
@@ -754,124 +877,309 @@ def _analyze_config_rule(session: Session, config: ConfigTrials, rule: str, ster
         d0_geo = geometric_limit_diameter_mm(plate, config.station_z_mm, stereo, True, top, options.area_options)
         d0_geo_cameras = geometric_limit_diameter_mm(plate, config.station_z_mm, stereo, False, top,
                                                      options.area_options)
+    return _ConfigRule(config=config, rule=rule, taus=taus, successes=successes, trials=trials, gamma=gamma,
+                       blank_hits=blank_hits, blank_trials=blank_trials, row=row, detail=detail,
+                       geometric_mm=(d0_geo, d0_geo_cameras))
 
-    enough = trials.max() >= options.min_trials_per_level if trials.size else False
-    d50 = d10 = d50_lo = d50_hi = d10_lo = d10_hi = d10_min = d10_max = iso50 = iso10 = math.nan
-    d0 = {"d0_emp_mm": math.nan, "d0_emp_next_mm": math.nan, "levels": []}
+
+# ---------------------------------------------------------------------------
+# Pooling over the (feature, station) pairs of a group (Steps 4 to 7, 9, 12, 13)
+# ---------------------------------------------------------------------------
+def _cluster_levels(d_px: np.ndarray) -> np.ndarray:
+    """Cluster id (0, 1, ... in increasing D_px) of every entry: entries whose D_px lie within MERGE_D_PX_TOLERANCE
+    (relative) of the previous entry in sorted order are one level of the pooled curve."""
+    order = np.argsort(d_px, kind="stable")
+    ids = np.zeros(d_px.size, dtype=int)
+    cluster, previous = -1, math.nan
+    for index in order:
+        if not d_px[index] <= previous * (1.0 + MERGE_D_PX_TOLERANCE):          # also true for the first (NaN)
+            cluster += 1
+        ids[index] = cluster
+        previous = d_px[index]
+    return ids
+
+
+def _noise_regression(pairs: list[dict[str, Any]], sigma_table: Mapping[float, float]) -> dict[str, Any]:
+    """Step 13: logit p = b0 + b1 ln D_px + b2 ln sigma_tot(Z) on the pooled (feature, station) counts, against the
+    reduced model without the noise term (likelihood-ratio test of b2). ``status`` says why nothing was fitted."""
+    result: dict[str, Any] = {"status": "ok"}
+    sigma = [sigma_tot_at(sigma_table, p["station_z_mm"]) for p in pairs]
+    if not sigma_table or any(v is None or v <= 0.0 for v in sigma):
+        result["status"] = "no sigma_tot(Z) from Analysis A for every station"
+        return result
+    x = np.column_stack([np.log([p["d_px"] for p in pairs]), np.log(sigma)])
+    s = np.array([p["successes"] for p in pairs], dtype=float)
+    n = np.array([p["trials"] for p in pairs], dtype=float)
+    if np.linalg.matrix_rank(x - x.mean(axis=0), tol=MIN_REGRESSION_SPREAD) < LOG_COLUMNS_REGRESSION:
+        result["status"] = "ln D_px and ln sigma_tot are collinear (one feature or one station): not separable"
+        return result
+    full = fit_logistic(x, s, n)
+    reduced = fit_logistic(x[:, :1], s, n)
+    errors = full.standard_errors
+    result.update(observations=full.observations, b0=float(full.coefficients[0]),
+                  b_ln_dpx=float(full.coefficients[1]), se_ln_dpx=float(errors[1]),
+                  b_ln_sigma=float(full.coefficients[2]), se_ln_sigma=float(errors[2]),
+                  p_noise=likelihood_ratio_pvalue(full, reduced), deviance_full=full.deviance,
+                  deviance_reduced=reduced.deviance, converged=full.converged, separated=full.separated,
+                  reduced_b_ln_dpx=float(reduced.coefficients[1]))
+    if full.separated:
+        result["status"] = "the data separate detections from misses (a step): the slopes are not meaningful"
+    return result
+
+
+def _analyze_group(session: Session, members: list[_ConfigRule], options: DetectionOptions,
+                   sigma_table: Mapping[float, float]) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+    """Steps 4 to 7, 9, 12 and 13 for one (kind, gap, field, rule) group: the stations (``members``, sorted by
+    Z) pooled into one psychometric curve on ln D_px. Returns the pooled summary row, the detail record and the
+    overlap-test rows."""
+    params = session.params
+    fx = float(session.geometry.require("sensor_fx_px"))
+    first = members[0]
+    kind, gap, field_code, rule = first.config.kind, first.config.gap_mm, first.config.field, first.rule
+    # The (feature, station) pairs with trials: the detection levels.
+    pairs: list[dict[str, Any]] = []
+    for member_index, member in enumerate(members):
+        for column, level in enumerate(member.config.levels):
+            n = int(member.trials[column])
+            if n == 0:
+                continue
+            station = member.config.station_z_mm
+            pairs.append({"member": member_index, "column": column, "station_z_mm": station,
+                          "target_id": level.target_id, "site_id": level.site_id, "level_index": level.level_index,
+                          "d_mm": level.diameter_mm, "d_px": level.diameter_mm * fx / station,
+                          "successes": int(member.successes[column]), "trials": n, "gamma": member.gamma})
+    blank_hits = sum(m.blank_hits for m in members)
+    blank_trials = sum(m.blank_trials for m in members)
+    gamma = blank_hits / blank_trials if blank_trials else 0.0
+    gamma_lower, gamma_upper = (clopper_pearson(blank_hits, blank_trials, params.confidence_level)
+                                if blank_trials else (math.nan, math.nan))
+    total_poses = sum(len(m.config.pose_keys) for m in members)
+    row: dict[str, Any] = {
+        "kind": kind, "gap_mm": gap, "field": field_code, "rule": rule,
+        "stations": ",".join(f"{m.config.station_z_mm:g}" for m in members), "pairs": len(pairs),
+        "trials": sum(p["trials"] for p in pairs), "gamma": gamma, "gamma_lower": gamma_lower,
+        "gamma_upper": gamma_upper, "gamma_blank_trials": blank_trials, "best_curve": "", "alpha_ln_px": math.nan,
+        "beta": math.nan, "lapse_rate": math.nan, "deviance": math.nan, "d50_status": "too few trials",
+        "d10_status": "too few trials", "d0_model_status": "too few trials", "bootstrap_resamples": 0,
+        "bootstrap_failures": 0, "regression_status": "not attempted", "fit_note": ""}
+    for name in POOLED_MINIMUMS:
+        row[f"{name}_px"] = math.nan
+    detail: dict[str, Any] = {
+        "kind": kind, "gap_mm": gap, "field": field_code, "rule": rule, "gamma": gamma,
+        "gamma_interval": [gamma_lower, gamma_upper], "blank_detections": blank_hits, "blank_trials": blank_trials,
+        "pairs": [{k: v for k, v in p.items() if k not in ("member", "column")} for p in pairs],
+        "mm_per_px_at_station": {f"{m.config.station_z_mm:g}": m.config.station_z_mm / fx for m in members}}
+
+    # Pooled levels: pairs whose D_px coincide are one level (module docstring, Step 4).
+    d_px = np.array([p["d_px"] for p in pairs])
+    successes = np.array([p["successes"] for p in pairs], dtype=float)
+    trials = np.array([p["trials"] for p in pairs], dtype=float)
+    well_sampled = int(np.sum(trials >= options.min_trials_per_level))
+    clusters = _cluster_levels(d_px) if pairs else np.zeros(0, dtype=int)
+    n_levels = int(clusters.max()) + 1 if pairs else 0
+    level_px = np.array([math.exp(float(np.average(np.log(d_px[clusters == c]), weights=trials[clusters == c])))
+                         for c in range(n_levels)])
+    merged_successes = np.bincount(clusters, weights=successes, minlength=n_levels)
+    merged_trials = np.bincount(clusters, weights=trials, minlength=n_levels)
+    enough = well_sampled >= options.min_pairs_for_fit and n_levels >= MIN_DISTINCT_LEVELS_FOR_FIT
+
     model = None
     best_name = ""
-    row.update(d50_status="too few trials", d10_status="too few trials", d0_model_status="too few trials",
-               best_curve="", bootstrap_resamples=0, bootstrap_failures=0, fit_note="")
-    if keep.sum() and enough:
+    d0 = {"d0_emp_mm": math.nan, "d0_emp_next_mm": math.nan, "levels": []}
+    if enough:
+        raw = merged_successes / merged_trials
+        corrected = np.asarray(corrected_rate(raw, gamma))
         # Steps 4 and 5.
         with _quiet():
-            fits = fit_all_curves(levels_mm[keep], successes[keep], trials[keep], gamma, _fit_parameters(params))
+            fits = fit_all_curves(level_px, merged_successes, merged_trials, gamma, _fit_parameters(params))
         best = best_fit(fits)
         best_name = best.curve
-        row["best_curve"] = best_name
-        row["d50_status"] = threshold_status(corrected[keep], P_STAR_D50)
-        row["d10_status"] = threshold_status(corrected[keep], P_STAR_D10)
+        row.update(best_curve=best_name, alpha_ln_px=best.alpha, beta=best.beta, lapse_rate=best.lapse_rate,
+                   deviance=best.deviance, d50_status=threshold_status(corrected, P_STAR_D50),
+                   d10_status=threshold_status(corrected, P_STAR_D10))
         if row["d50_status"] == "ok":
-            d50 = best.threshold(P_STAR_D50)
+            row["d50_px"] = best.threshold(P_STAR_D50)
         if row["d10_status"] == "ok":
-            d10 = best.threshold(P_STAR_D10)
+            row["d10_px"] = best.threshold(P_STAR_D10)
             tails = [f.threshold(P_STAR_D10) for f in fits.values()]
-            d10_min, d10_max = float(min(tails)), float(max(tails))
-        proportions = corrected[keep]
-        iso50 = isotonic_threshold(levels_mm[keep], proportions, P_STAR_D50, trials[keep])
-        iso10 = isotonic_threshold(levels_mm[keep], proportions, P_STAR_D10, trials[keep])
-        detail["fits"] = {name: {"alpha": f.alpha, "beta": f.beta, "lapse_rate": f.lapse_rate,
-                                 "deviance": f.deviance, "converged": f.converged, "d50_mm": f.threshold(P_STAR_D50),
-                                 "d10_mm": f.threshold(P_STAR_D10)} for name, f in fits.items()}
-        detail["curve_mm"] = _curve_points(levels_mm[keep], best)
-        # Step 6.
-        d0 = empirical_d0(levels_mm, successes, trials, gamma, params.confidence_level,
+            row["d10_model_min_px"], row["d10_model_max_px"] = float(min(tails)), float(max(tails))
+        row["d50_isotonic_px"] = isotonic_threshold(level_px, corrected, P_STAR_D50, merged_trials)
+        row["d10_isotonic_px"] = isotonic_threshold(level_px, corrected, P_STAR_D10, merged_trials)
+        detail["fits"] = {name: {"alpha_ln_px": f.alpha, "beta": f.beta, "lapse_rate": f.lapse_rate,
+                                 "deviance": f.deviance, "converged": f.converged, "d50_px": f.threshold(P_STAR_D50),
+                                 "d10_px": f.threshold(P_STAR_D10)} for name, f in fits.items()}
+        detail["curve_px"] = _curve_points(level_px, best)
+        detail["levels_px"] = [{"d_px": float(x), "trials": int(n), "detections": int(k), "proportion": float(p),
+                                "corrected": float(c)}
+                               for x, n, k, p, c in zip(level_px, merged_trials, merged_successes, raw, corrected)]
+        # Step 6: the D_0 bracket in D_px.
+        d0 = empirical_d0(level_px, merged_successes, merged_trials, gamma, params.confidence_level,
                           params.detection_zero_probability_bound)
-        # Step 7.
+        row["d0_emp_px"], row["d0_emp_next_px"] = d0["d0_emp_mm"], d0["d0_emp_next_mm"]
+        # Step 7: the threshold model.
         try:
             with _quiet():
-                model = fit_threshold_model(levels_mm[keep], proportions, trials[keep], params.confidence_level)
+                model = fit_threshold_model(level_px, corrected, merged_trials, params.confidence_level)
             row["d0_model_status"] = "ok"
-            detail["threshold_model"] = {"d0_mm": model.d0, "scale_mm": model.scale, "shape": model.shape,
-                                         "d0_lower_mm": model.d0_lower, "d0_upper_mm": model.d0_upper,
+            row["d0_model_px"], row["d0_model_lower_px"], row["d0_model_upper_px"] = (
+                model.d0, model.d0_lower, model.d0_upper)
+            detail["threshold_model"] = {"d0_px": model.d0, "scale_px": model.scale, "shape": model.shape,
+                                         "d0_lower_px": model.d0_lower, "d0_upper_px": model.d0_upper,
                                          "deviance": model.deviance, "converged": model.converged,
-                                         "profile_d0_mm": model.profile_d0, "profile_statistic": model.profile_statistic}
+                                         "profile_d0_px": model.profile_d0,
+                                         "profile_statistic": model.profile_statistic}
         except ValueError as error:                      # every effective count is zero
             row["d0_model_status"] = "not estimable"
             detail["threshold_model"] = {"not_estimable": str(error)}
-        # Step 9: bootstrap over poses.
-        resamples = _bootstrap_count(config, options, params)
-        statistic = _make_bootstrap_statistic(s_feature, s_blank, levels_mm, params, best_name,
-                                              row["d50_status"] == "ok", row["d10_status"] == "ok")
-        rng = np.random.default_rng(options.bootstrap_seed)
-        started = time.time()
-        try:
-            boot = bootstrap_statistic(list(range(s_feature.shape[0])), statistic, resamples,
-                                       params.confidence_level, rng)
-            d50_lo, d10_lo, _, _ = (float(v) for v in boot.lower)
-            d50_hi, d10_hi, _, _ = (float(v) for v in boot.upper)
-            if row["d50_status"] != "ok":
-                d50_lo = d50_hi = math.nan
-            if row["d10_status"] != "ok":
-                d10_lo = d10_hi = math.nan
-            row["bootstrap_resamples"], row["bootstrap_failures"] = resamples, boot.failures
-            detail["bootstrap"] = {
-                "resamples": resamples, "failures": boot.failures, "seconds": time.time() - started,
-                "reduced": options.bootstrap_resamples is None and resamples != params.bootstrap_resamples,
-                "poses": s_feature.shape[0], "names": list(BOOTSTRAP_STAT_NAMES),
-                "lower": [float(v) for v in boot.lower], "upper": [float(v) for v in boot.upper],
-                "estimate": [float(v) for v in np.asarray(boot.estimate)]}
-        except ValueError as error:
-            row["fit_note"] = f"bootstrap failed: {error}"
-    elif not enough:
-        row["fit_note"] = (f"too few trials: at most {int(trials.max()) if trials.size else 0} per level "
-                           f"(minimum {options.min_trials_per_level}); curve fits not attempted")
-    detail["d0_empirical"] = d0
-    if model is not None:
-        row_d0_model, row_d0_lower, row_d0_upper = model.d0, model.d0_lower, model.d0_upper
+        _bootstrap_group(row, detail, members, level_px, clusters, pairs, best, params, options, total_poses)
     else:
-        row_d0_model = row_d0_lower = row_d0_upper = math.nan
+        row["fit_note"] = (f"too few trials: {well_sampled} (feature, station) pairs with at least "
+                           f"{options.min_trials_per_level} trials over {n_levels} distinct D_px "
+                           f"(need {options.min_pairs_for_fit} and {MIN_DISTINCT_LEVELS_FOR_FIT}); "
+                           "curve fits not attempted")
+    detail["d0_empirical"] = d0
 
-    values = {"d50": d50, "d50_lower": d50_lo, "d50_upper": d50_hi, "d10": d10, "d10_lower": d10_lo,
-              "d10_upper": d10_hi, "d10_model_min": d10_min, "d10_model_max": d10_max, "d50_isotonic": iso50,
-              "d10_isotonic": iso10, "d0_emp": d0["d0_emp_mm"], "d0_emp_next": d0["d0_emp_next_mm"],
-              "d0_model": row_d0_model, "d0_model_lower": row_d0_lower, "d0_model_upper": row_d0_upper,
-              "d0_geometric": d0_geo, "d0_geometric_cameras": d0_geo_cameras}
-    for name, value in values.items():
-        mm, px, mrad = _units(session, value, config.station_z_mm)
+    # Step 13: the noise covariate.
+    if pairs and enough:
+        regression = _noise_regression(pairs, sigma_table)
+    else:
+        regression = {"status": "not attempted (too few trials)"}
+    detail["noise_regression"] = regression
+    row["regression_status"] = regression["status"]
+    for key, name in (("observations", "regression_observations"), ("b0", "regression_b0"),
+                      ("b_ln_dpx", "regression_b_ln_dpx"), ("se_ln_dpx", "regression_se_ln_dpx"),
+                      ("b_ln_sigma", "regression_b_ln_sigma"), ("se_ln_sigma", "regression_se_ln_sigma"),
+                      ("p_noise", "regression_p_noise"), ("separated", "regression_separated")):
+        row[name] = regression.get(key)
+
+    # Step 12: the overlap (scaling) test between neighboring features.
+    overlaps: list[dict[str, Any]] = []
+    curves: dict[tuple, dict[str, list]] = {}
+    for p in pairs:
+        gamma_station = p["gamma"]
+        value = float(corrected_rate(p["successes"] / p["trials"], gamma_station))
+        error = float(binomial_standard_error(p["successes"], p["trials"])) / (1.0 - gamma_station)
+        entry = curves.setdefault((p["target_id"], p["site_id"]), {"d": [], "v": [], "e": [], "z": []})
+        entry["d"].append(p["d_px"])
+        entry["v"].append(value)
+        entry["e"].append(error)
+        entry["z"].append(p["station_z_mm"])
+    transfer = [TransferCurve(label=f"{target}:{site}", d_px=np.array(c["d"]), value=np.array(c["v"]),
+                              std_error=np.array(c["e"]), station_z_mm=np.array(c["z"]))
+                for (target, site), c in curves.items()]
+    for result in overlap_tests(transfer, params.confidence_level, params.bootstrap_resamples,
+                                options.overlap_options, sigma_table):
+        overlaps.append({"kind": kind, "gap_mm": gap, "field": field_code, "rule": rule, **result.as_row()})
+    detail["overlap_tests"] = overlaps
+    return row, detail, overlaps
+
+
+def _bootstrap_group(row: dict[str, Any], detail: dict[str, Any], members: list[_ConfigRule], level_px: np.ndarray,
+                     clusters: np.ndarray, pairs: list[dict[str, Any]], best: PsychometricFit, params,
+                     options: DetectionOptions, total_poses: int) -> None:
+    """Step 9: the stratified bootstrap over poses of the pooled D_50 and D_10 (in D_px), filling the interval columns
+    of ``row`` and the bootstrap record of ``detail``."""
+    lookup = {(p["member"], p["column"]): int(clusters[index]) for index, p in enumerate(pairs)}
+    groups = [(m, i) for m, member in enumerate(members) for i in range(len(member.config.pose_keys))]
+    strata = [m for m, _ in groups]
+    resamples = _bootstrap_count(total_poses, len(members), options, params)
+    statistic = _make_bootstrap_statistic(members, level_px, lookup, params, best, row["d50_status"] == "ok",
+                                          row["d10_status"] == "ok")
+    rng = np.random.default_rng(options.bootstrap_seed)
+    started = time.time()
+    try:
+        boot = bootstrap_statistic(groups, statistic, resamples, params.confidence_level, rng, strata=strata)
+    except ValueError as error:
+        row["fit_note"] = f"bootstrap failed: {error}"
+        return
+    lower, upper = np.asarray(boot.lower, dtype=float), np.asarray(boot.upper, dtype=float)
+    if row["d50_status"] == "ok":
+        row["d50_lower_px"], row["d50_upper_px"] = float(lower[0]), float(upper[0])
+    if row["d10_status"] == "ok":
+        row["d10_lower_px"], row["d10_upper_px"] = float(lower[1]), float(upper[1])
+    row["bootstrap_resamples"], row["bootstrap_failures"] = resamples, boot.failures
+    detail["bootstrap"] = {
+        "resamples": resamples, "failures": boot.failures, "seconds": time.time() - started,
+        "reduced": options.bootstrap_resamples is None and resamples != params.bootstrap_resamples,
+        "poses": total_poses, "stratified_by": "station", "names": list(BOOTSTRAP_STAT_NAMES),
+        "lower": [float(v) for v in lower], "upper": [float(v) for v in upper],
+        "estimate": [float(v) for v in np.asarray(boot.estimate)]}
+
+
+def _fill_config_minimums(session: Session, member: _ConfigRule, pooled_row: dict[str, Any]) -> None:
+    """Fill the threshold columns of a configuration's summary row from its pooled group: the pooled D_px values
+    converted to mm at the station (D_mm = D_px Z / f_x), plus the per-station geometric limit, and the statuses."""
+    row, detail = member.row, member.detail
+    station = member.config.station_z_mm
+    fx = float(session.geometry.require("sensor_fx_px"))
+    row.update(best_curve=pooled_row["best_curve"], d50_status=pooled_row["d50_status"],
+               d10_status=pooled_row["d10_status"], d0_model_status=pooled_row["d0_model_status"],
+               bootstrap_resamples=pooled_row["bootstrap_resamples"],
+               bootstrap_failures=pooled_row["bootstrap_failures"], fit_note=pooled_row["fit_note"])
+    values_mm = {name: (pooled_row[f"{name}_px"] * station / fx if math.isfinite(pooled_row[f"{name}_px"])
+                        else math.nan) for name in POOLED_MINIMUMS}
+    values_mm["d0_geometric"], values_mm["d0_geometric_cameras"] = member.geometric_mm
+    for name, value in values_mm.items():
+        mm, px, mrad = _units(session, value, station)
         row[f"{name}_mm"], row[f"{name}_px"], row[f"{name}_mrad"] = mm, px, mrad
     detail["minimums"] = {name: {"mm": row[f"{name}_mm"], "px": row[f"{name}_px"], "mrad": row[f"{name}_mrad"]}
-                          for name in values}
-    return row, detail
+                          for name in values_mm}
+    detail["pooled_group"] = {"kind": pooled_row["kind"], "gap_mm": pooled_row["gap_mm"],
+                              "field": pooled_row["field"], "rule": pooled_row["rule"]}
 
 
-def _curve_points(levels_mm: np.ndarray, fit: PsychometricFit) -> dict[str, Any]:
+def _curve_points(levels_px: np.ndarray, fit: PsychometricFit) -> dict[str, Any]:
     """The fitted raw-probability curve sampled over the tested range (for the figures and the details)."""
-    grid = np.geomspace(float(levels_mm.min()), float(levels_mm.max()), PSYCHOMETRIC_CURVE_POINTS)
-    return {"d_mm": grid, "psi": fit.probability(grid), "curve": fit.curve}
+    grid = np.geomspace(float(levels_px.min()), float(levels_px.max()), PSYCHOMETRIC_CURVE_POINTS)
+    return {"d_px": grid, "psi": fit.probability(grid), "curve": fit.curve}
 
 
-def _make_bootstrap_statistic(s_feature: np.ndarray, s_blank: np.ndarray, levels_mm: np.ndarray, params,
-                              curve: str, want_d50: bool, want_d10: bool):
-    """The bootstrap statistic of Step 9: given the drawn pose indices, recompute the per-level tau from the drawn
-    blank statistics, the detections, gamma and the counts, refit the (best) curve family and return
-    (D_50, D_10, gamma, median tau). A resample whose proportions do not bracket a threshold that the original data
-    bracket gives NaN (counted as a failure by the bootstrap). A threshold the original data do not bracket is not
-    resampled (its slot is 0.0 and its interval is reported as NaN by the caller)."""
+def _make_bootstrap_statistic(members: list[_ConfigRule], level_px: np.ndarray, lookup: dict[tuple[int, int], int],
+                              params, best: PsychometricFit, want_d50: bool, want_d10: bool):
+    """The bootstrap statistic of Step 9: given the drawn (station, pose) groups, recompute per station the per-feature
+    tau from the drawn blank statistics and the detections, pool them into the levels of the curve, take gamma from
+    the pooled blank sites, refit the (best) curve family and return (D_50, D_10, gamma, median tau), the D values in
+    D_px. A resample whose proportions do not bracket a threshold that the original data bracket gives NaN (counted
+    as a failure by the bootstrap). A threshold the original data do not bracket is not resampled (its slot is 0.0 and
+    its interval is reported as NaN by the caller). The refit starts from the original optimum ``best`` (one optimizer
+    run per resample)."""
     target = params.detection_false_alarm_target
+    rule = members[0].rule
+    warm_start = (best.alpha, best.beta, best.lapse_rate)
 
-    def statistic(drawn: Sequence[int]) -> np.ndarray:
-        index = np.asarray(drawn, dtype=int)
-        sf, sb = s_feature[index], s_blank[index]
-        taus = calibrate_tau(sb, target)
-        fd, bd, fv, bv = outcomes(sf, sb, taus)
-        successes, trials, gamma, _, _ = counts_from_outcomes(fd, bd, fv, bv)
+    def statistic(drawn: Sequence[tuple[int, int]]) -> np.ndarray:
+        per_member: list[list[int]] = [[] for _ in members]
+        for member_index, pose_index in drawn:
+            per_member[member_index].append(pose_index)
+        successes = np.zeros(level_px.size)
+        trials = np.zeros(level_px.size)
+        hits = blanks = 0
+        finite_taus: list[float] = []
+        for member_index, indices in enumerate(per_member):
+            if not indices:
+                continue
+            config = members[member_index].config
+            index = np.asarray(indices, dtype=int)
+            sf, sb = config.s_feature[rule][index], config.s_blank[rule][index]
+            taus = calibrate_tau(sb, target)
+            fd, bd, fv, bv = outcomes(sf, sb, taus)
+            level_successes, level_trials, _, h, b = counts_from_outcomes(fd, bd, fv, bv)
+            hits += h
+            blanks += b
+            finite_taus += [float(t) for t in taus[np.isfinite(taus)]]
+            for column in range(len(config.levels)):
+                cluster = lookup.get((member_index, column))
+                if cluster is not None:
+                    successes[cluster] += level_successes[column]
+                    trials[cluster] += level_trials[column]
+        gamma = hits / blanks if blanks else 0.0
+        keep = trials > 0
         with _quiet():
-            d50, d10 = _fit_thresholds(levels_mm, successes, trials, gamma, params, curve)
+            d50, d10 = _fit_thresholds(level_px[keep], successes[keep], trials[keep], gamma, params, best.curve,
+                                       warm_start)
         d50 = d50 if want_d50 else 0.0
         d10 = d10 if want_d10 else 0.0
-        finite_taus = taus[np.isfinite(taus)]
-        return np.array([d50, d10, gamma, float(np.median(finite_taus)) if finite_taus.size else math.nan])
+        return np.array([d50, d10, gamma, float(np.median(finite_taus)) if finite_taus else math.nan])
 
     return statistic
 
@@ -880,68 +1188,77 @@ def _make_bootstrap_statistic(s_feature: np.ndarray, s_blank: np.ndarray, levels
 # Outputs (Step 11)
 # ---------------------------------------------------------------------------
 def write_outputs(result: DetectionResult, out_dir: Path) -> list[Path]:
-    """Write D_detect_summary.csv, D_detect_details.json and the figures into ``out_dir``; returns the paths."""
+    """Write D_detect_summary.csv, D_pooled_summary.csv, D_overlap_test.csv, D_detect_details.json and the figures
+    into ``out_dir``; returns the paths."""
     out_dir = Path(out_dir)
-    written = [write_csv_rows(out_dir / SUMMARY_FILE_NAME, result.rows, SUMMARY_COLUMNS)]
-    document = {"notes": result.notes, "configurations": result.details}
+    written = [write_csv_rows(out_dir / SUMMARY_FILE_NAME, result.rows, SUMMARY_COLUMNS),
+               write_csv_rows(out_dir / POOLED_FILE_NAME, result.pooled_rows, POOLED_COLUMNS),
+               write_csv_rows(out_dir / OVERLAP_FILE_NAME, result.overlap_rows, OVERLAP_COLUMNS)]
+    document = {"notes": result.notes, "configurations": result.details, "pooled": result.pooled_details}
     written.append(write_json(out_dir / DETAILS_FILE_NAME, document))
     written += _figures_psychometric(result, out_dir)
-    written += _figure_theta(result, out_dir)
+    written += _figure_minimum_vs_z(result, out_dir)
     return written
 
 
 def _figures_psychometric(result: DetectionResult, out_dir: Path) -> list[Path]:
-    """Step 11: per configuration the raw detection fractions with Clopper-Pearson error bars against D_px, the fitted
-    curve of each rule, and the three minimums marked (D_50 solid, D_10 dashed, D_0,emp dotted)."""
+    """Step 11: per (kind, gap, field) the pooled detection fractions of all (feature, station) pairs with
+    Clopper-Pearson error bars against D_px (one color per feature, one marker per station is too many: the stations
+    are the points of a feature's curve), the fitted curve of each rule, and the minimums marked (D_50 solid, D_10
+    dashed, D_0,emp dotted, D_0 model dash-dot)."""
     written: list[Path] = []
-    keys = sorted({(d["kind"], d["gap_mm"], d["station_z_mm"], d["field"]) for d in result.details},
-                  key=lambda k: (k[0], k[1], k[2], k[3]))
+    keys = sorted({(d["kind"], d["gap_mm"], d["field"]) for d in result.pooled_details},
+                  key=lambda k: (k[0], k[1] or 0.0, k[2]))
     rule_colors = {RULE_PRIMARY: OKABE_ITO_BLUE, RULE_INCLUSIVE: OKABE_ITO_VERMILLION}
-    for kind, gap, station, field_code in keys:
-        members = [(d, r) for d, r in zip(result.details, result.rows)
-                   if (d["kind"], d["gap_mm"], d["station_z_mm"], d["field"]) == (kind, gap, station, field_code)]
-        figure, axis = new_figure(6.5, 4.5)
+    confidence = CharacterizationParameters().confidence_level
+    for kind, gap, field_code in keys:
+        members = [(d, r) for d, r in zip(result.pooled_details, result.pooled_rows)
+                   if (d["kind"], d["gap_mm"], d["field"]) == (kind, gap, field_code)]
+        figure, axis = new_figure(6.8, 4.6)
         for detail, row in members:
             rule = detail["rule"]
-            table = [t for t in detail["levels"] if t["trials"] > 0]
-            if not table:
-                continue
-            x = np.array([t["d_px"] for t in table])
-            p = np.array([t["proportion"] for t in table])
-            lower = np.array([t["ci_lower"] for t in table])
-            upper = np.array([t["ci_upper"] for t in table])
             color = rule_colors[rule]
             shift = RULE_PLOT_SHIFT if rule == RULE_INCLUSIVE else 1.0     # keeps coincident points visible
-            axis.errorbar(x * shift, p, yerr=[np.maximum(p - lower, 0.0), np.maximum(upper - p, 0.0)],
-                          fmt=KIND_MARKERS[kind], color=color, capsize=2, label=f"{rule.replace('_', ' ')} rule")
-            curve = detail.get("curve_mm")
+            for level in sorted({p["level_index"] for p in detail["pairs"]}):
+                table = [p for p in detail["pairs"] if p["level_index"] == level]
+                x = np.array([p["d_px"] for p in table])
+                k = np.array([p["successes"] for p in table])
+                n = np.array([p["trials"] for p in table])
+                p_hat = k / n
+                bounds = np.array([clopper_pearson(int(a), int(b), confidence) for a, b in zip(k, n)])
+                marker = FEATURE_MARKERS[level % len(FEATURE_MARKERS)]
+                axis.errorbar(x * shift, p_hat, yerr=[np.maximum(p_hat - bounds[:, 0], 0.0),
+                                                      np.maximum(bounds[:, 1] - p_hat, 0.0)],
+                              fmt=marker, color=color, capsize=2, markersize=4,
+                              label=f"{rule.replace('_', ' ')} rule, feature {level}")
+            curve = detail.get("curve_px")
             if curve is not None:
-                px = np.asarray(curve["d_mm"]) * detail["px_per_mm"]
-                axis.plot(px, curve["psi"], color=color, linewidth=1.2)
+                axis.plot(curve["d_px"], curve["psi"], color=color, linewidth=1.2)
             for name, style in (("d50", "-"), ("d10", "--"), ("d0_emp", ":"), ("d0_model", "-.")):
                 value = row[f"{name}_px"]
                 if math.isfinite(value) and value > 0.0:
                     axis.axvline(value, color=color, linestyle=style, linewidth=0.9)
-            geometric = row["d0_geometric_px"]
-            if rule == RULE_PRIMARY and math.isfinite(geometric) and geometric > 0.0:
-                axis.axvline(geometric, color=OKABE_ITO_BLACK, linestyle=(0, (6, 3)), linewidth=0.7)
         axis.axhline(0.0, color=OKABE_ITO_BLACK, linewidth=0.4)
         log_axis(axis)
         axis.set_ylim(-0.05, 1.05)
-        axis.set_xlabel("feature diameter D_px = D f_x / Z (px)")
+        axis.set_xlabel("feature diameter D_px = D f_x / Z (px), all stations pooled")
         axis.set_ylabel("detection fraction (error bars: 95% Clopper-Pearson)")
-        axis.set_title(f"{kind}s, G = {gap:g} mm, Z = {station:g} mm"
-                       + (f", field {field_code}" if field_code else "") + "\nsolid D_50, dashed D_10, dotted D_0 empirical, dash-dot D_0 model, black long dashes geometric limit",
-                       fontsize=8)
-        axis.legend(fontsize=8)
+        axis.set_title(f"{kind}s, G = {gap:g} mm" + (f", field {field_code}" if field_code else "")
+                       + "\nsolid D_50, dashed D_10, dotted D_0 empirical, dash-dot D_0 model", fontsize=8)
+        axis.legend(fontsize=6, ncol=2)
         axis.grid(True, linewidth=0.3, which="both")
-        written += save_figure(figure, out_dir / f"D_psychometric_{kind}_G{gap:g}_Z{station:g}_F{field_code}")
+        written += save_figure(figure, out_dir / f"D_psychometric_{kind}_G{gap:g}_F{field_code}")
     return written
 
 
-def _figure_theta(result: DetectionResult, out_dir: Path) -> list[Path]:
-    """Step 10: theta (mrad) of the 50 percent, 10 percent and 0 percent (empirical) minimums against Z, one panel per
-    kind and rule, one line per gap."""
+FEATURE_MARKERS = ("o", "s", "^", "D", "v")
+"""Markers cycled over the features of a plate in the pooled psychometric figure."""
+
+
+def _figure_minimum_vs_z(result: DetectionResult, out_dir: Path) -> list[Path]:
+    """Step 10: the minimum diameter in mm (D_50, D_10 and the empirical D_0) against Z, one panel per kind and rule,
+    one line style per gap, with the feature diameters of the plate as faint horizontal lines and, for cutouts, the
+    geometric limit. A pooled minimum is constant in D_px, so in mm it rises in proportion to Z."""
     panels = sorted({(r["kind"], r["rule"]) for r in result.rows})
     if not panels:
         return []
@@ -950,22 +1267,33 @@ def _figure_theta(result: DetectionResult, out_dir: Path) -> list[Path]:
     axes = figure.subplots(1, len(panels), squeeze=False, sharey=True)[0]
     styles = (("d50", "o", OKABE_ITO_BLUE, "50%"), ("d10", "s", OKABE_ITO_ORANGE, "10%"),
               ("d0_emp", "^", OKABE_ITO_VERMILLION, "0% (empirical)"))
-    drawn = False
     for axis, (kind, rule) in zip(axes, panels):
         rows = [r for r in result.rows if r["kind"] == kind and r["rule"] == rule and r["field"] == 0]
-        for gap in sorted({r["gap_mm"] for r in rows}):
+        gaps = sorted({r["gap_mm"] for r in rows})
+        for gap in gaps:
             gap_rows = sorted((r for r in rows if r["gap_mm"] == gap), key=lambda r: r["station_z_mm"])
+            linestyle = "-" if gap == gaps[0] else ":"
             for name, marker, color, label in styles:
-                points = [(r["station_z_mm"], r[f"{name}_mrad"]) for r in gap_rows if math.isfinite(r[f"{name}_mrad"])]
+                points = [(r["station_z_mm"], r[f"{name}_mm"]) for r in gap_rows if math.isfinite(r[f"{name}_mm"])]
                 if points:
-                    drawn = True
-                    axis.plot(*zip(*points), marker=marker, color=color, linestyle="-" if gap == min(
-                        r["gap_mm"] for r in rows) else ":", label=f"{label}, G = {gap:g} mm")
+                    axis.plot(*zip(*points), marker=marker, color=color, linestyle=linestyle,
+                              label=f"{label}, G = {gap:g} mm")
+        geometric = [(r["station_z_mm"], r["d0_geometric_mm"]) for r in sorted(
+            rows, key=lambda r: r["station_z_mm"]) if math.isfinite(r["d0_geometric_mm"]) and r["gap_mm"] == gaps[0]]
+        if geometric and rule == RULE_PRIMARY:
+            axis.plot(*zip(*geometric), color=OKABE_ITO_BLACK, linestyle=(0, (6, 3)), linewidth=0.8,
+                      label="geometric limit")
+        for config in result.configs:
+            if config.kind == kind:
+                for diameter in config.level_diameters_mm():
+                    axis.axhline(diameter, color=OKABE_ITO_BLACK, linewidth=0.3, alpha=0.4)
+                break
+        log_axis(axis, "x")
+        log_axis(axis, "y")
         axis.set_xlabel("station Z (mm)")
-        axis.set_title(f"{kind}s, {rule.replace('_', ' ')} rule", fontsize=9)
-        axis.grid(True, linewidth=0.3)
-        if drawn:
-            axis.legend(fontsize=7)
-    axes[0].set_ylabel("subtended angle theta = D / Z (mrad)")
+        axis.set_title(f"{kind}s, {rule.replace('_', ' ')} rule (faint lines: feature diameters)", fontsize=8)
+        axis.grid(True, linewidth=0.3, which="both")
+        axis.legend(fontsize=6)
+    axes[0].set_ylabel("minimum detectable diameter (mm)")
     figure.tight_layout()
-    return save_figure(figure, out_dir / "D_theta_vs_z")
+    return save_figure(figure, out_dir / "D_minimum_vs_z")

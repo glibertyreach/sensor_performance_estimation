@@ -45,8 +45,10 @@ How the steps are implemented
     6  Feature scale (C arrays): per feature and frame the majority outcome of the pixels inside the true outline
        (the C classes: back read h < 0.5, front read, no-read). For a cutout, back = correct and front = fill-in; for
        a disk, front = correct and back = erased. Fractions over the poses against D_px, with the spread across
-       poses. The two detection rules of Analysis D (detection.collect_trials on the first frame of each C pose)
-       are evaluated per diameter and their difference is reported.
+       poses. The profiles are against D_px = D f_x / Z, pooled over the features of a plate and over all stations
+       (the table keeps the feature identity and the station as columns; the figure draws one curve per feature). The
+       two detection rules of Analysis D (detection.collect_trials on the first frame of each C pose)
+       are evaluated per feature and station and their difference is reported.
     7  Breakdowns: every group of the CSV is one cell of the breakdown by source (B straight edges or C circular
        features), target (polarity: raised T3a/T4 or window T3b/T5), orientation, Z and G. Confidence intervals
        by bootstrap over poses of the per-pose bin counts (BOOTSTRAP_RESAMPLES). Rows with target_id "all" pool
@@ -87,7 +89,7 @@ from sensorperf.io.manifest import (
     SUBSERIES_JITTER, SUBSERIES_MAIN, SUBSERIES_NOMINAL, FrameRecord, group_by_pose, select,
 )
 from sensorperf.io.session import Session
-from sensorperf.parameters import FIELD_POSITION_CENTER, PROCEDURE_AREA, PROCEDURE_EDGES
+from sensorperf.parameters import CharacterizationParameters, FIELD_POSITION_CENTER, PROCEDURE_AREA, PROCEDURE_EDGES
 from sensorperf.stats.intervals import bootstrap_statistic
 
 # ---------------------------------------------------------------------------
@@ -478,7 +480,7 @@ class BoundaryBiasResult:
     details: dict[str, Any]
     """Profiles, feature-scale curves, cross-checks, sigma sources (E_boundary_details.json)."""
     notes: list[str] = field(default_factory=list)
-    z_reference_mm: float = 750.0
+    z_reference_mm: float = field(default_factory=lambda: CharacterizationParameters().z_reference_mm)
 
     def forward_model_terms(self) -> dict[str, Any]:
         """Terms for forward_model_parameters.json: ``w_fab_px``, ``w_drop_px``, ``pi_near`` and ``beta_read``,
@@ -838,7 +840,10 @@ def _figure_vs_z(result: BoundaryBiasResult, out_dir: Path) -> list[Path]:
 
 
 def _figure_feature_scale(result: BoundaryBiasResult, out_dir: Path) -> list[Path]:
-    """Step 8: P(correct), P(fill-in or erased) and P(no-read) against D_px for the cutouts and the disks."""
+    """Step 8: P(correct), P(fill-in or erased) and P(no-read) against D_px for the cutouts and the disks, pooled over
+    all stations of the smaller gap: the colors are the outcomes, the markers and line styles are the features of
+    the plate, and the points of a feature are its stations (so a feature's curve spans two octaves of D_px and
+    neighboring features overlap)."""
     table = result.details.get("feature_scale", [])
     if not table:
         return []
@@ -846,24 +851,26 @@ def _figure_feature_scale(result: BoundaryBiasResult, out_dir: Path) -> list[Pat
     figure, axes = new_figure(5.2 * len(kinds), 4.2)
     figure.clf()
     axes = figure.subplots(1, len(kinds), squeeze=False, sharey=True)[0]
-    styles = (("p_correct", OKABE_ITO_BLUE, "o", "correct"), ("p_wrong_surface", OKABE_ITO_VERMILLION, "s", None),
-              ("p_no_read", OKABE_ITO_BLACK, "^", "no-read"))
+    styles = (("p_correct", OKABE_ITO_BLUE, "correct"), ("p_wrong_surface", OKABE_ITO_VERMILLION, None),
+              ("p_no_read", OKABE_ITO_BLACK, "no-read"))
+    markers = ("o", "s", "^", "D", "v")
+    linestyles = ("-", "--", ":", "-.")
+    smaller_gap = min(r["gap_mm"] for r in table)
     for axis, kind in zip(axes, kinds):
         wrong = "fill-in (front read)" if kind == FEATURE_CUTOUT else "erased (back read)"
-        stations = sorted({r["station_z_mm"] for r in table if r["kind"] == kind})
-        for station in stations:
-            members = sorted((r for r in table if r["kind"] == kind and r["station_z_mm"] == station),
-                             key=lambda r: r["d_px"])
-            linestyle = "-" if station == stations[0] else "--"
-            for key, color, marker, label in styles:
-                axis.plot([r["d_px"] for r in members], [r[key] for r in members], color=color, marker=marker,
-                          linestyle=linestyle, markersize=4, label=f"{label or wrong}, Z = {station:g} mm")
+        members = [r for r in table if r["kind"] == kind and r["gap_mm"] == smaller_gap]
+        for position, level in enumerate(sorted({r["level_index"] for r in members})):
+            points = sorted((r for r in members if r["level_index"] == level), key=lambda r: r["d_px"])
+            for key, color, label in styles:
+                axis.plot([r["d_px"] for r in points], [r[key] for r in points], color=color,
+                          marker=markers[position % len(markers)], linestyle=linestyles[position % len(linestyles)],
+                          markersize=4, label=f"{label or wrong}, feature {level}")
         log_axis(axis)
         axis.set_ylim(-0.05, 1.05)
-        axis.set_xlabel("feature diameter D_px (px)")
-        axis.set_title(f"{kind}s", fontsize=9)
+        axis.set_xlabel("feature diameter D_px (px), all stations pooled")
+        axis.set_title(f"{kind}s, G = {smaller_gap:g} mm", fontsize=9)
         axis.grid(True, linewidth=0.3, which="both")
-        axis.legend(fontsize=6)
+        axis.legend(fontsize=6, ncol=2)
     axes[0].set_ylabel("fraction of frames (majority outcome inside the outline)")
     figure.tight_layout()
     return save_figure(figure, out_dir / "E_feature_scale_vs_dpx")

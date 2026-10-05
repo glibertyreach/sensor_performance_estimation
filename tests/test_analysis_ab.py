@@ -335,9 +335,8 @@ def test_b_step6_polarities_agree(result_b):
 def test_b_step5_esfs_agree(result_b):
     """Section 11.1, Step 5: the robot-stepped and the slanted-edge ESF agree within one bin (0.25 px: the s_50 of both
     and the RMS difference of h after aligning, expressed as an equivalent lateral shift). All eight edges of the reference
-    station (750 mm) agree; at 1000 mm the square is only 27 px wide, the slanted fit has 15 crossings and the single-pose
-    estimate is noisier, so only the overall fraction is required. At the reference station every edge must agree
-    within one bin or, failing that, within ESF_LOOSE_SHIFT_PX (the single-pose slanted estimate on a 160 x 120
+    station (800 mm) agree; the single-pose slanted estimate at 566 mm is noisier, so only the overall fraction is
+    required there. At the reference station every edge must agree within one bin or, failing that, within ESF_LOOSE_SHIFT_PX (the single-pose slanted estimate on a 160 x 120
     image has only a few dozen crossings, so an occasional edge lands just outside one bin)."""
     reference = result_b.at_station(result_b.reference_station_mm)
     assert len(reference) == 8
@@ -488,14 +487,14 @@ def test_z_staircase_notes_steps_below_the_robot_repeatability(session, result_z
 def test_z_step4_patch_size_lowers_delta_50(result_z):
     """Section 11.2, Step 4: delta_50 of the 20 x 20 patch is smaller than that of a single pixel (averaging), the threshold
     tau falls the same way, and the intervals contain the estimates."""
-    one = result_z.patch(750.0, 1)
-    five = result_z.patch(750.0, 5)
-    twenty = result_z.patch(750.0, 20)
+    one = result_z.patch(800.0, 1)
+    five = result_z.patch(800.0, 5)
+    twenty = result_z.patch(800.0, 20)
     assert twenty.delta_50_mm < five.delta_50_mm < one.delta_50_mm
     assert twenty.tau_mm < one.tau_mm
     for patch in (one, five, twenty):
         assert patch.delta_50_lower_mm <= patch.delta_50_mm <= patch.delta_50_upper_mm
-    exponent = result_z.scaling[750.0]["exponent_of_delta_50_vs_patch_side"]
+    exponent = result_z.scaling[800.0]["exponent_of_delta_50_vs_patch_side"]
     assert -1.0 < exponent < 0.0              # noise correlated over the block scale: slower than 1 / side
 
 
@@ -531,7 +530,7 @@ def test_z_outputs(result_z, analysis_dir):
         for extension in ("png", "svg"):
             assert (analysis_dir / f"{stem}.{extension}").stat().st_size > 0
     terms = result_z.forward_model_terms()
-    assert "750" in terms["depth_quantum_mm"] and "750" in terms["delta_50_1px_mm"]
+    assert "800" in terms["depth_quantum_mm"] and "800" in terms["delta_50_1px_mm"]
 
 
 # ---------------------------------------------------------------------------
@@ -544,4 +543,4 @@ def test_cli_analyze_a_b_z(session_dir, truth):
     document = json.loads((session_dir / "analysis" / FORWARD_MODEL_FILE_NAME).read_text())
     terms = document["terms"]
     assert abs(terms["sigma_d_px"] / truth["disparity_noise_px"] - 1.0) < SIGMA_D_TOLERANCE
-    assert terms["rise_h_px"] > 0 and "750" in terms["depth_quantum_mm"]
+    assert terms["rise_h_px"] > 0 and "800" in terms["depth_quantum_mm"]

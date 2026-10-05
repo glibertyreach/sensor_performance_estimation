@@ -35,9 +35,15 @@ How the steps are implemented (the step numbers are cited in the code)
        plane; a cell counts when its center is visible from the left camera, the right camera and (second
        version) the projector (TwoPlaneTarget.visible_from). A_geo = A_true x (visible cells / cells), so the
        grid cannot make A_geo exceed A_true. Disks: A_geo = A_true.
-    8  Transfer curves: ratio_true = A_sensed / A_true and ratio_geo = A_sensed / A_geo against D_px, with the
-       mean over all frames, the standard deviation of the pose means (phase effect) and the root-mean-square
-       within-pose standard deviation (temporal effect).
+    8  Transfer curves: ratio_true = A_sensed / A_true and ratio_geo = A_sensed / A_geo against D_px = D f_x / Z, with
+       the mean over all frames, the standard deviation of the pose means (phase effect) and the root-mean-square
+       within-pose standard deviation (temporal effect). The curves are POOLED over the features of a plate and over
+       all stations (the summary rows carry the feature identity in ``site_id`` and ``level_index``; the figures
+       draw one curve per feature). SCALING (OVERLAP) TEST (redesign note, Section 5): where two neighboring
+       features overlap in D_px, their curves are compared (analysis.overlap): the mean difference of the curves over
+       the shared D_px range and whether zero lies inside its bootstrap interval, per (kind, gap) and per ratio
+       (A_sensed / A_true, and A_sensed / A_geo of the projector version for cutouts). Agreement supports D_px as the
+       governing variable; disagreement is attributed to sigma_tot(Z) (from ``previous["A"]``) and reported.
     9  Edge bias b = (D_s - D) / 2 with D_s = 2 sqrt(A_sensed / pi), in mm and px. b is fitted against Z
        (b = c0 + c1 Z) using the features in the LARGEST THIRD of the plate's ladder whose D_px is at least
        AreaOptions.bias_fit_min_d_px (well above D_50, where b should not depend on D).
@@ -54,8 +60,8 @@ How the steps are implemented (the step numbers are cited in the code)
     11 Field sub-series (subseries "field") against the on-axis transfer curves of the same plate and gap;
        open-background cutouts (subseries "open", no back plate): no back plane exists, so only A_noread is
        defined, compared with A_true (fill-in by front-plate values shows as A_noread < A_true).
-    12 Outputs: C_area_summary.csv, C_area_details.json, figures (transfer curves, b versus Z, phase spread
-       versus D_px, predicted versus measured).
+    12 Outputs: C_area_summary.csv, C_area_details.json, C_overlap_test.csv, figures (transfer curves with the
+       overlap ranges shaded, b versus Z, phase spread versus D_px, predicted versus measured).
 
 Shared helpers other modules import from here: the geometric visible area and the geometric limit diameter
 (``geometric_visible_area_mm2``, ``geometric_limit_diameter_mm``, used by Analysis D, Step 8) and the Okabe-Ito
@@ -88,8 +94,11 @@ from sensorperf.io.manifest import (
     SUBSERIES_FIELD, SUBSERIES_JITTER, SUBSERIES_MAIN, SUBSERIES_OPEN, FrameRecord, group_by_configuration,
     group_by_pose, select,
 )
+from sensorperf.analysis.overlap import (
+    OverlapOptions, OverlapResult, TransferCurve, overlap_tests, sigma_tot_by_station,
+)
 from sensorperf.io.session import Session
-from sensorperf.parameters import FIELD_POSITION_CENTER, PROCEDURE_AREA
+from sensorperf.parameters import CharacterizationParameters, FIELD_POSITION_CENTER, PROCEDURE_AREA
 
 # ---------------------------------------------------------------------------
 # Palette (Okabe-Ito, colorblind safe) shared by the C, D and E figures
@@ -116,6 +125,15 @@ stay distinguishable without color)."""
 # ---------------------------------------------------------------------------
 SUMMARY_FILE_NAME = "C_area_summary.csv"
 DETAILS_FILE_NAME = "C_area_details.json"
+OVERLAP_FILE_NAME = "C_overlap_test.csv"
+OVERLAP_COLUMNS = ("kind", "gap_mm", "quantity", "feature_small", "feature_large", "status", "shared_low_px",
+                   "shared_high_px", "points_small", "points_large", "mean_difference", "interval_lower",
+                   "interval_upper", "agrees", "resamples", "sigma_tot_small_mm", "sigma_tot_large_mm", "note")
+"""Columns of C_overlap_test.csv: one row per (kind, gap, ratio) and pair of neighboring features."""
+OVERLAP_QUANTITIES = (("ratio_true", "A_sensed / A_true", "a_true_mm2"),
+                      ("ratio_geo_projector", "A_sensed / A_geo (cameras + projector)", "a_geo_projector_mm2"))
+"""(row key of the curve value, its label, row key of the denominator area) of the transfer curves that get the
+overlap test."""
 SUMMARY_COLUMNS = (
     "target_id", "kind", "gap_mm", "station_z_mm", "field", "subseries", "site_id", "level_index", "diameter_mm",
     "d_px", "a_true_mm2", "a_geo_cameras_mm2", "a_geo_projector_mm2", "a_sensed_mean_mm2",
@@ -215,8 +233,8 @@ class AreaResult:
     """Contents of C_area_details.json (b-versus-Z fits, kernel comparison, field and open comparisons)."""
     options: AreaOptions
     notes: list[str] = field(default_factory=list)
-    z_reference_mm: float = 750.0
-    """The mid station (Z_REFERENCE_MM) used by forward_model_terms."""
+    z_reference_mm: float = field(default_factory=lambda: CharacterizationParameters().z_reference_mm)
+    """The reference station (Z_REFERENCE_MM) used by forward_model_terms."""
 
     def forward_model_terms(self) -> dict[str, Any]:
         """Terms for forward_model_parameters.json: ``edge_bias_px`` (the growth of the front material at the
@@ -744,6 +762,47 @@ def _bias_fits(rows: list[dict[str, Any]], options: AreaOptions, geometry_fx: fl
     return fits
 
 
+def _transfer_curves(rows: list[dict[str, Any]], key: str, denominator_key: str) -> list[TransferCurve]:
+    """The curves of one (kind, gap) group of main rows, one per feature (target and site): the value ``key`` against
+    D_px over the stations, with the standard error of the mean of the pose means,
+    phase_std / sqrt(poses) / denominator (NaN when there is a single pose)."""
+    curves = []
+    for (target_id, site_id), members in _group(rows, ("target_id", "site_id")).items():
+        usable = [r for r in members if math.isfinite(r[key])]
+        if not usable:
+            continue
+        error = []
+        for r in usable:
+            area = r[denominator_key]
+            spread = r["a_sensed_phase_std_mm2"]
+            error.append(spread / math.sqrt(r["poses"]) / area
+                         if (math.isfinite(spread) and math.isfinite(area) and area > 0.0) else math.nan)
+        curves.append(TransferCurve(label=f"{target_id}:{site_id}", d_px=np.array([r["d_px"] for r in usable]),
+                                    value=np.array([r[key] for r in usable]), std_error=np.array(error),
+                                    station_z_mm=np.array([r["station_z_mm"] for r in usable])))
+    return curves
+
+
+def _overlap_section(rows: list[dict[str, Any]], params, previous: Mapping[str, Any] | None,
+                     options: OverlapOptions) -> list[dict[str, Any]]:
+    """Redesign note, Section 5: the scaling test between neighboring features, per (kind, gap) of the main on-axis
+    rows and per transfer ratio. Returns one dict per tested pair (OVERLAP_COLUMNS keys)."""
+    main = [r for r in rows if r["subseries"] in MAIN_SUBSERIES and r["field"] == FIELD_POSITION_CENTER
+            and r["gap_mm"] is not None]
+    sigma_tot = sigma_tot_by_station(previous)
+    out: list[dict[str, Any]] = []
+    for (kind, gap), group in _group(main, ("kind", "gap_mm")).items():
+        for key, label, denominator in OVERLAP_QUANTITIES:
+            if key == "ratio_geo_projector" and kind != FEATURE_CUTOUT:
+                continue                                    # A_geo = A_true for a disk: the same curve twice
+            results: list[OverlapResult] = overlap_tests(_transfer_curves(group, key, denominator),
+                                                         params.confidence_level, params.bootstrap_resamples,
+                                                         options, sigma_tot)
+            for result in results:
+                out.append({"kind": kind, "gap_mm": gap, "quantity": label, **result.as_row()})
+    return out
+
+
 def _group(rows: list[dict[str, Any]], keys: tuple[str, ...]) -> dict[Any, list[dict[str, Any]]]:
     """Rows grouped by the values of ``keys`` (a single key gives a bare value, several give a tuple)."""
     groups: dict[Any, list[dict[str, Any]]] = {}
@@ -757,7 +816,8 @@ def _group(rows: list[dict[str, Any]], keys: tuple[str, ...]) -> dict[Any, list[
 # The analysis
 # ---------------------------------------------------------------------------
 def run_area(session: Session, out_dir: Path, previous: Mapping[str, Any] | None,
-             options: AreaOptions | None = None) -> AreaResult | None:
+             options: AreaOptions | None = None, overlap_options: OverlapOptions = OverlapOptions()
+             ) -> AreaResult | None:
     """Analysis C (Section 12, Steps 1 to 11) on the procedure-"C" frames of the session. Returns None when
     there are none. ``previous`` maps the letters of analyses already run to their results; B's rise distances and
     edge offset are used in Step 10 when present. Nothing is written here; see ``write_outputs``."""
@@ -816,6 +876,7 @@ def run_area(session: Session, out_dir: Path, previous: Mapping[str, Any] | None
                                 "it needs the left camera, the right camera and the projector, without it the two "
                                 "cameras; which version tracks the data better is in 'geo_version_comparison'."),
         "geo_version_comparison": _geo_version_comparison(rows, options),
+        "overlap_tests": _overlap_section(rows, params, previous, overlap_options),
         "notes": notes,
     }
     if kernel is None:
@@ -939,7 +1000,8 @@ def write_outputs(result: AreaResult, out_dir: Path) -> list[Path]:
     """Write C_area_summary.csv, C_area_details.json and the figures into ``out_dir``; returns the paths."""
     out_dir = Path(out_dir)
     written = [write_csv_rows(out_dir / SUMMARY_FILE_NAME, result.rows, SUMMARY_COLUMNS),
-               write_json(out_dir / DETAILS_FILE_NAME, result.details)]
+               write_json(out_dir / DETAILS_FILE_NAME, result.details),
+               write_csv_rows(out_dir / OVERLAP_FILE_NAME, result.details.get("overlap_tests", []), OVERLAP_COLUMNS)]
     written += _figure_transfer(result, out_dir, "ratio_true", "A_sensed / A_true", "C_transfer_true")
     written += _figure_transfer(result, out_dir, "ratio_geo_projector", "A_sensed / A_geo (cameras + projector)",
                                 "C_transfer_geo")
@@ -965,20 +1027,31 @@ def _main_rows(result: AreaResult) -> list[dict[str, Any]]:
             and r["gap_mm"] is not None]
 
 
+def _feature_colors(rows: list[dict[str, Any]]) -> dict[Any, str]:
+    """A color per feature identity (level index), cycled over the palette, so a feature keeps its color in every
+    panel and figure."""
+    levels = sorted({r["level_index"] for r in rows if r["level_index"] is not None})
+    return {level: STATION_COLORS[index % len(STATION_COLORS)] for index, level in enumerate(levels)}
+
+
 def _figure_transfer(result: AreaResult, out_dir: Path, key: str, label: str, stem: str) -> list[Path]:
-    """Step 8: transfer curves, one figure per gap with one panel per station, disks and cutouts on the same
-    axes (circles and solid lines for disks, squares and dashed lines for cutouts), error bars = phase spread."""
+    """Step 8: transfer curves against D_px, pooled over all stations: one figure per gap with one panel per kind
+    (disks left, cutouts right), one curve per feature (color = feature, the points of a feature are its stations),
+    error bars = phase spread, and the D_px ranges shared by neighboring features (the overlap test) shaded."""
     written: list[Path] = []
     rows = _main_rows(result)
+    overlaps = result.details.get("overlap_tests", [])
+    quantity_label = {k: text for k, text, _ in OVERLAP_QUANTITIES}[key]
     for gap in sorted({r["gap_mm"] for r in rows}):
         gap_rows = [r for r in rows if r["gap_mm"] == gap]
-        stations = sorted({r["station_z_mm"] for r in gap_rows})
-        figure, axes = new_figure(4.2 * len(stations), 4.0)
+        kinds = [k for k in (FEATURE_DISK, FEATURE_CUTOUT) if any(r["kind"] == k for r in gap_rows)]
+        figure, axes = new_figure(5.2 * len(kinds), 4.2)
         figure.clf()
-        axes = figure.subplots(1, len(stations), squeeze=False, sharey=True)[0]
-        for axis, station in zip(axes, stations):
-            for kind in (FEATURE_DISK, FEATURE_CUTOUT):
-                points = sorted((r for r in gap_rows if r["station_z_mm"] == station and r["kind"] == kind
+        axes = figure.subplots(1, len(kinds), squeeze=False, sharey=True)[0]
+        colors = _feature_colors(gap_rows)
+        for axis, kind in zip(axes, kinds):
+            for level, color in colors.items():
+                points = sorted((r for r in gap_rows if r["kind"] == kind and r["level_index"] == level
                                  and math.isfinite(r[key])), key=lambda r: r["d_px"])
                 if not points:
                     continue
@@ -988,13 +1061,18 @@ def _figure_transfer(result: AreaResult, out_dir: Path, key: str, label: str, st
                 err = [r["a_sensed_phase_std_mm2"] / d if (math.isfinite(r["a_sensed_phase_std_mm2"])
                                                            and math.isfinite(d) and d > 0) else 0.0
                        for r, d in zip(points, denominator)]
-                axis.errorbar(x, y, yerr=err, color=KIND_COLORS[kind], marker=KIND_MARKERS[kind],
-                              linestyle=KIND_LINESTYLES[kind], capsize=2, label=f"{kind}s")
+                axis.errorbar(x, y, yerr=err, color=color, marker=KIND_MARKERS[kind],
+                              linestyle=KIND_LINESTYLES[kind], capsize=2, label=f"feature {level}")
+            for entry in overlaps:                          # the shared D_px ranges of the scaling test
+                if ((entry["kind"], entry["gap_mm"], entry["quantity"]) == (kind, gap, quantity_label)
+                        and math.isfinite(entry["shared_low_px"])):
+                    axis.axvspan(entry["shared_low_px"], entry["shared_high_px"], color=OKABE_ITO_BLACK, alpha=0.06)
             axis.axhline(1.0, color=OKABE_ITO_BLACK, linewidth=0.6)
             log_axis(axis)
             axis.set_xlabel("feature diameter D_px = D f_x / Z (px)")
-            axis.set_title(f"Z = {station:g} mm, G = {gap:g} mm")
-            axis.grid(True, linewidth=0.3)
+            axis.set_title(f"{kind}s, G = {gap:g} mm (all stations; shaded: shared D_px range of neighbors)",
+                           fontsize=8)
+            axis.grid(True, linewidth=0.3, which="both")
         axes[0].set_ylabel(label)
         axes[0].legend(fontsize=8)
         figure.tight_layout()
@@ -1035,14 +1113,14 @@ def _figure_phase_spread(result: AreaResult, out_dir: Path) -> list[Path]:
     if not rows:
         return []
     figure, axis = new_figure(6.5, 4.2)
-    stations = sorted({r["station_z_mm"] for r in rows})
+    colors = _feature_colors(rows)
     for kind in (FEATURE_DISK, FEATURE_CUTOUT):
-        for index, station in enumerate(stations):
-            points = [r for r in rows if r["kind"] == kind and r["station_z_mm"] == station]
-            axis.scatter([r["d_px"] for r in points],
-                         [r["a_sensed_phase_std_mm2"] / r["a_sensed_mean_mm2"] for r in points],
-                         color=STATION_COLORS[index % len(STATION_COLORS)], marker=KIND_MARKERS[kind], s=22,
-                         label=f"{kind}s, Z = {station:g} mm")
+        for level, color in colors.items():
+            points = [r for r in rows if r["kind"] == kind and r["level_index"] == level]
+            if points:
+                axis.scatter([r["d_px"] for r in points],
+                             [r["a_sensed_phase_std_mm2"] / r["a_sensed_mean_mm2"] for r in points],
+                             color=color, marker=KIND_MARKERS[kind], s=22, label=f"{kind}s, feature {level}")
     log_axis(axis, "x")
     log_axis(axis, "y")
     axis.set_xlabel("feature diameter D_px (px)")

@@ -1,8 +1,8 @@
 """
 Tests of the acquisition-side tools: the station planner (Sections 4 to 9), the
 pose log -> manifest builder (Section 9), the registration command line
-(Section 4, Steps 6 and 7), and the quick-look check with the D pilot detection
-counts (Section 8, Step 1; Section 13, Step 2).
+(Section 4, Steps 6 and 7), and the quick-look check with the D pilot post check
+(Section 8, Step 1; Section 13, Step 2).
 
 Every test names the step of the procedure it exercises and its acceptance
 criterion. Everything runs on the indicative sensor geometry; the check tests
@@ -24,11 +24,10 @@ from scipy.spatial.transform import Rotation
 
 from sensorperf.acquisition import check as check_module
 from sensorperf.acquisition.check import (
-    FLAG_FRONT_OFFSET, FLAG_FRONT_TILT, FLAG_LOW_VALID, check_session, interpolate_d50,
-    pilot_detection_counts, zero_detection_diameter,
+    FLAG_FRONT_OFFSET, FLAG_FRONT_TILT, FLAG_LOW_VALID, check_session, pilot_post_check,
 )
 from sensorperf.acquisition.plan import (
-    FILTERS_OFF_POSE_INDEX_BASE, PLAN_CSV_NAME, PLAN_FIGURE_NAME, PLAN_SUMMARY_NAME, PlanDiagnostics,
+    DOCUMENT_ESTIMATE_FRAMES, DOCUMENT_ESTIMATE_HOURS, DOCUMENT_ESTIMATE_POSES, FILTERS_OFF_POSE_INDEX_BASE, PLAN_CSV_NAME, PLAN_FIGURE_NAME, PLAN_SUMMARY_NAME, PlanDiagnostics,
     PlannedCapture, SERIES_ORDER, TIER_A_DISPARITY_QUANTUM_PX, budget_total, capture_budget, capture_duration_s,
     camera_of, fit_violation_px, format_budget_table, insert_sentinels, jitter_offset_mm, place_in_field,
     plan_detection_series, plan_edge_series, plan_full_session, plan_noise_series, plan_registration,
@@ -50,7 +49,7 @@ from sensorperf.io.matcloud import write_matcloud
 from sensorperf.io.session import PARAMETERS_FILE_NAME, SENSOR_CONFIG_FILE_NAME, Session, SensorConfig
 from sensorperf.parameters import (
     CharacterizationParameters, FIELD_POSITION_CODES, PROCEDURE_AREA, PROCEDURE_DETECTION, PROCEDURE_EDGES,
-    PROCEDURE_NOISE, PROCEDURE_REGISTRATION, PROCEDURE_SENTINEL, SensorGeometry, TARGET_DISKS_LARGE,
+    PROCEDURE_NOISE, PROCEDURE_REGISTRATION, PROCEDURE_SENTINEL, SensorGeometry, TARGET_DISKS,
     TARGET_NOISE_PLATE,
 )
 
@@ -64,16 +63,8 @@ SMALL_PARAMS = dataclasses.replace(
     frames_per_zstep_pose=3, z_staircase_frames=2, frames_per_noise_station=4, frames_per_tilt_pose=2)
 """Reduced parameters for the tests that write files (few poses, few frames)."""
 
-DOCUMENT_POSES = 6590
-DOCUMENT_FRAMES = 45710
-DOCUMENT_HOURS = 6.8
-"""The Section 9 estimate: 6,590 poses, 45,710 frames, 6.8 h."""
-BUDGET_TOLERANCE = 0.03
-"""Relative tolerance of the comparison with the document's totals, with the document's accounting of D (one array
-per kind, see test_budget_matches_the_document). The document gives its totals to three or four digits as estimates;
-the plan differs from the accounting that reproduces them by a few dozen poses (the staircase end points, the 0
-degree tilt poses captured about both axes, the sentinels), under 1 percent, so 3 percent leaves a margin without
-hiding a missing series."""
+HOURS_TOLERANCE = 0.05
+"""Absolute tolerance (hours) of the comparison of the stored budget estimate with the budget formula."""
 JITTER_TOLERANCE_MM = 1.0e-9
 """Numerical slack when comparing a logged offset with the half span."""
 POSE_TOLERANCE = 1.0e-9
@@ -81,14 +72,14 @@ POSE_TOLERANCE = 1.0e-9
 
 SCALE_DOWN = 4.0
 """Image size and intrinsics are divided by this for the synthetic check stacks (160 x 120 px)."""
-CHECK_STATION_MM = 750.0
+CHECK_STATION_MM = PARAMS.z_reference_mm
 CHECK_FRAMES = 3
 DISPLACEMENT_MM = 5.0
 """A plane displaced by this much from the registered one must be flagged (the thresholds are 3 mm)."""
 TILT_DEG = 6.0
 """A plane tilted by this much from the registered one must be flagged (the threshold is 2 degrees)."""
 PILOT_POSES = 10
-"""C poses of the synthetic pilot test."""
+"""C poses of the synthetic post-check test."""
 
 
 @pytest.fixture(scope="module")
@@ -136,9 +127,9 @@ def test_optional_variants_keep_keys_unique():
     off = [c for c in plan if c.subseries == "filters_off"]
     assert len(off) == 55 + 24 and all(c.pose_index >= FILTERS_OFF_POSE_INDEX_BASE for c in off)
     open_poses = [c for c in plan if c.subseries == "open"]
-    assert len(open_poses) == 2 * PARAMS.phase_jitter_poses_area
+    assert len(open_poses) == PARAMS.phase_jitter_poses_area
     assert all(c.gap_mm is None and c.station_z_mm == PARAMS.z_reference_mm for c in open_poses)
-    assert {c.target_id for c in open_poses} == {"T5-S", "T5-L"}
+    assert {c.target_id for c in open_poses} == {"T5"}
 
 
 def test_plan_is_reproducible_from_the_master_seed():
@@ -152,13 +143,16 @@ def test_plan_is_reproducible_from_the_master_seed():
 
 
 def test_registration_poses_span_the_volume():
-    """Section 4 Step 6: REGISTRATION_POSES poses of REGISTRATION_FRAMES frames spanning Z_MIN to Z_MAX, with tilts
-    within REGISTRATION_TILT_RANGE_DEG about H and V."""
+    """Section 4 Step 6 and redesign note Section 3: REGISTRATION_POSES poses of REGISTRATION_FRAMES frames of the noise
+    plate T2 (no pattern plate any more) spanning Z_MIN = 400 to Z_MAX = 1600 mm, with tilts within
+    REGISTRATION_TILT_RANGE_DEG about H and V."""
     poses = plan_registration(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED))
     assert len(poses) == PARAMS.registration_poses
-    assert all(c.frames == PARAMS.frames_per_registration_pose and c.target_id == "T1" for c in poses)
+    assert all(c.frames == PARAMS.frames_per_registration_pose and c.target_id == TARGET_NOISE_PLATE
+               for c in poses)
     depths = [c.notes["depth_mm"] for c in poses]
     assert min(depths) == pytest.approx(PARAMS.z_min_mm) and max(depths) == pytest.approx(PARAMS.z_max_mm)
+    assert (PARAMS.z_min_mm, PARAMS.z_max_mm) == (400.0, 1600.0)
     for c in poses:
         assert abs(c.notes["tilt_h_deg"]) <= PARAMS.registration_tilt_range_deg
         assert abs(c.notes["tilt_v_deg"]) <= PARAMS.registration_tilt_range_deg
@@ -166,12 +160,14 @@ def test_registration_poses_span_the_volume():
 
 
 def test_noise_station_order_is_a_permutation_of_the_station_list(full_plan):
-    """Section 5 Steps 1 and 2: the 11 Z stations x 5 field positions are all visited once, in the order of the
-    logged seed; tilt sub-series (24 poses) and repeat-mount check follow."""
+    """Section 5 Steps 1 and 2 and redesign note Section 1: the nine ladder stations plus the two legacy depths (700 and
+    1000 mm), 11 Z stations x 5 field positions, are all visited once, in the order of the logged seed; tilt sub-series
+    (24 poses at the three reduced stations) and repeat-mount check follow."""
     plan, _ = full_plan
     main = [c for c in plan if c.procedure == PROCEDURE_NOISE and c.subseries == "main"]
     stations = [(z, code) for z in PARAMS.noise_stations_mm() for code in FIELD_POSITION_CODES]
     assert len(main) == len(stations) == 55
+    assert {c.station_z_mm for c in main} == set(PARAMS.z_stations_mm()) | set(PARAMS.legacy_metric_depths_mm)
     assert sorted((c.station_z_mm, c.field) for c in main) == sorted(stations)
     assert [(c.station_z_mm, c.field) for c in main] != sorted(stations)
     seeds = {c.seed for c in main}
@@ -180,8 +176,8 @@ def test_noise_station_order_is_a_permutation_of_the_station_list(full_plan):
     assert [(c.station_z_mm, c.field) for c in main] == [stations[int(i)] for i in permutation]
     assert all(c.frames == PARAMS.frames_per_noise_station for c in main)
     tilt = [c for c in plan if c.procedure == PROCEDURE_NOISE and c.subseries == "tilt"]
-    assert len(tilt) == len(PARAMS.z_reduced_stations_mm) * 2 * len(PARAMS.tilt_angles_deg)
-    assert Counter((c.tilt_axis, c.tilt_deg) for c in tilt)[("V", 15.0)] == len(PARAMS.z_reduced_stations_mm)
+    assert len(tilt) == len(PARAMS.z_reduced_stations_mm()) * 2 * len(PARAMS.tilt_angles_deg)
+    assert Counter((c.tilt_axis, c.tilt_deg) for c in tilt)[("V", 15.0)] == len(PARAMS.z_reduced_stations_mm())
     assert all(c.frames == PARAMS.frames_per_tilt_pose and c.field == 0 for c in tilt)
     remount = [c for c in plan if c.subseries == "remount"]
     assert len(remount) == 1 and remount[0].station_z_mm == PARAMS.z_reference_mm and remount[0].field == 0
@@ -203,7 +199,7 @@ def test_field_positions_are_pulled_inward_until_the_target_fits():
     assert fit_violation_px(camera, plate, fronto_parallel_pose(far.h_mm, far.v_mm, 1000.0), margin) == 0.0
     assert fit_violation_px(camera, plate, fronto_parallel_pose(far.requested_h_mm, far.requested_v_mm, 1000.0),
                             margin) > 0.0
-    center = place_in_field(PARAMS, GEOMETRY, plate, 750.0, (0.0, 0.0), margin)
+    center = place_in_field(PARAMS, GEOMETRY, plate, 800.0, (0.0, 0.0), margin)
     assert (center.h_mm, center.v_mm, center.fraction_kept) == (0.0, 0.0, 1.0)
     # The adjustments are recorded for the summary.
     main = plan_noise_series(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), with_sentinels=False)
@@ -262,7 +258,9 @@ def test_jitter_offsets_are_uniform_within_the_span_and_logged(full_plan):
 
 
 def test_series_counts_follow_the_procedure(full_plan):
-    """Sections 6.1, 6.2, 7 and 8: pose counts per configuration."""
+    """Sections 6.1, 6.2, 7 and 8 and redesign note Sections 1 and 2: pose counts per configuration. B uses the five
+    shape stations, C and D all nine ladder stations of the two plates T4 and T5, D has 300 poses per configuration at
+    the three farthest stations and 60 elsewhere."""
     plan, _ = full_plan
 
     def count(procedure, **match):
@@ -270,21 +268,30 @@ def test_series_counts_follow_the_procedure(full_plan):
         return sum(1 for c in plan if c.procedure == procedure
                    and all(getattr(c, k) == v for k, v in match.items()))
 
-    n_z = len(PARAMS.z_shape_stations_mm)
-    assert count(PROCEDURE_EDGES) == 2 * 2 * n_z * (1 + PARAMS.phase_jitter_poses_edge)
-    assert count(PROCEDURE_EDGES, subseries="nominal") == 2 * 2 * n_z
-    assert count(PROCEDURE_AREA, subseries="jitter") == 4 * 2 * n_z * PARAMS.phase_jitter_poses_area
-    assert count(PROCEDURE_AREA, subseries=SUBSERIES_FIELD) == 4 * 4 * PARAMS.field_subseries_poses_area
-    assert count(PROCEDURE_AREA, target_id="T4-S", gap_mm=15.0, station_z_mm=750.0, subseries=SUBSERIES_JITTER) == 30
-    assert count(PROCEDURE_DETECTION, subseries="jitter") == 4 * 2 * n_z * PARAMS.detection_trials_per_level
-    # Section 8 Step 4: every configuration at the reduced stations has DETECTION_ZERO_TRIALS poses in all.
-    for z in PARAMS.z_reduced_stations_mm:
-        assert count(PROCEDURE_DETECTION, target_id="T5-L", gap_mm=60.0, station_z_mm=z) == PARAMS.detection_zero_trials
-    assert count(PROCEDURE_DETECTION, target_id="T5-L", gap_mm=60.0, station_z_mm=625.0) == PARAMS.detection_trials_per_level
+    n_shape = len(PARAMS.z_shape_stations_mm())
+    n_all = len(PARAMS.z_stations_mm())
+    assert (n_shape, n_all) == (5, 9)
+    assert count(PROCEDURE_EDGES) == 2 * 2 * n_shape * (1 + PARAMS.phase_jitter_poses_edge)
+    assert count(PROCEDURE_EDGES, subseries="nominal") == 2 * 2 * n_shape
+    assert {c.station_z_mm for c in plan if c.procedure == PROCEDURE_EDGES} == set(PARAMS.z_shape_stations_mm())
+    assert count(PROCEDURE_AREA, subseries="jitter") == 2 * 2 * n_all * PARAMS.phase_jitter_poses_area
+    assert count(PROCEDURE_AREA, subseries=SUBSERIES_FIELD) == 2 * 4 * PARAMS.field_subseries_poses_area
+    assert count(PROCEDURE_AREA, target_id="T4", gap_mm=15.0, station_z_mm=800.0, subseries=SUBSERIES_JITTER) == 30
+    assert {c.station_z_mm for c in plan if c.procedure == PROCEDURE_AREA} == set(PARAMS.z_stations_mm())
+    assert {c.station_z_mm for c in plan if c.procedure == PROCEDURE_AREA and c.subseries == SUBSERIES_FIELD} \
+        == {PARAMS.z_reference_mm}
+    assert count(PROCEDURE_DETECTION, subseries="jitter") == 2 * 2 * n_all * PARAMS.detection_trials_per_level
+    # The extended trials: DETECTION_ZERO_TRIALS in all at the three farthest stations, DETECTION_TRIALS_PER_LEVEL elsewhere.
+    zero = PARAMS.detection_zero_stations_mm()
+    assert zero == (1131.0, 1345.0, 1600.0)
+    for z in PARAMS.z_stations_mm():
+        expected = PARAMS.detection_zero_trials if z in zero else PARAMS.detection_trials_per_level
+        assert count(PROCEDURE_DETECTION, target_id="T5", gap_mm=60.0, station_z_mm=z) == expected
     assert all(c.frames == PARAMS.frames_per_detection_trial and c.level_index is None
                for c in plan if c.procedure == PROCEDURE_DETECTION)
-    # Both the small and the large array of each kind are planned.
-    assert {c.target_id for c in plan if c.procedure == PROCEDURE_DETECTION} == {"T4-S", "T4-L", "T5-S", "T5-L"}
+    # One disk plate and one cutout plate, both gaps; no pilot, level selection or continuous-angle sub-series remains.
+    assert {c.target_id for c in plan if c.procedure == PROCEDURE_DETECTION} == {"T4", "T5"}
+    assert {c.subseries for c in plan if c.procedure == PROCEDURE_DETECTION} == {"jitter", "extended"}
 
 
 def test_zstep_ladder_alternates_with_the_right_displacement():
@@ -293,8 +300,8 @@ def test_zstep_ladder_alternates_with_the_right_displacement():
     steps of dZ_q / Z_STAIRCASE_SUBDIVISION."""
     plan = plan_zstep_series(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED))
     ladder = [c for c in plan if c.subseries == "ladder"]
-    assert len(ladder) == len(PARAMS.z_reduced_stations_mm) * len(PARAMS.z_step_ladder_mm) * PARAMS.z_step_repeats * 2
-    for z0 in PARAMS.z_reduced_stations_mm:
+    assert len(ladder) == len(PARAMS.z_reduced_stations_mm()) * len(PARAMS.z_step_ladder_mm) * PARAMS.z_step_repeats * 2
+    for z0 in PARAMS.z_reduced_stations_mm():
         for delta in PARAMS.z_step_ladder_mm:
             visits = [c for c in ladder if c.station_z_mm == z0 and c.step_mm == delta]
             assert [c.visit for c in visits] == [VISIT_A, VISIT_B] * PARAMS.z_step_repeats
@@ -305,8 +312,8 @@ def test_zstep_ladder_alternates_with_the_right_displacement():
                 assert c.frames == PARAMS.frames_per_zstep_pose and c.field == 0
     staircase = [c for c in plan if c.subseries == "staircase"]
     steps = int(round(PARAMS.z_staircase_quanta * PARAMS.z_staircase_subdivision))
-    assert len(staircase) == len(PARAMS.z_reduced_stations_mm) * (steps + 1)
-    for z0 in PARAMS.z_reduced_stations_mm:
+    assert len(staircase) == len(PARAMS.z_reduced_stations_mm()) * (steps + 1)
+    for z0 in PARAMS.z_reduced_stations_mm():
         quantum = GEOMETRY.depth_quantum_mm(TIER_A_DISPARITY_QUANTUM_PX, z0)
         sweep = [c for c in staircase if c.station_z_mm == z0]
         displacement = np.array([c.step_mm for c in sweep])
@@ -315,7 +322,7 @@ def test_zstep_ladder_alternates_with_the_right_displacement():
         assert all(c.frames == PARAMS.z_staircase_frames for c in sweep)
     # A measured quantum replaces the Tier-A one.
     fixed = plan_zstep_series(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), expected_quantum_mm=2.0)
-    last = [c for c in fixed if c.subseries == "staircase" and c.station_z_mm == 500.0][-1]
+    last = [c for c in fixed if c.subseries == "staircase" and c.station_z_mm == PARAMS.z_min_mm][-1]
     assert last.step_mm == pytest.approx(6.0)
 
 
@@ -330,48 +337,41 @@ def test_zstep_visits_are_approached_from_below():
     assert "approach: every visit from below" in text and "at least 2 decimals" in text
 
 
-def test_budget_matches_the_document(full_plan, capsys):
-    """Section 9: poses, frames and robot hours per series ("10 frames/s and 3 s per move plus settle"). The formula
-    reproduces the document's 6.8 h from its own 6,590 poses and 45,710 frames. The plan's totals are compared with the
-    document's within BUDGET_TOLERANCE using the document's accounting of series D, which the 6,590 evidently
-    counts as one plate per kind ({disk, cutout} x 2 gaps x 5 stations, Section 8 Step 3, plus the extended series);
-    this plan plans both the small and the large array of each kind, so its D series is exactly twice as large."""
+def test_budget_totals_are_the_stored_estimate(full_plan, capsys):
+    """Section 9 and redesign note Section 6: poses, frames and robot hours per series ("10 frames/s and 3 s per move
+    plus settle"), recomputed from the parameters. The stored DOCUMENT_ESTIMATE_* constants are the totals of the default
+    plan (so plan_summary.txt compares a plan with them), and the per-series structure follows from the parameters."""
     plan, _ = full_plan
     rows = capture_budget(plan, GEOMETRY.frame_rate_hz, PARAMS.move_and_settle_time_s)
     total = budget_total(rows)
     print()
     print(format_budget_table(rows))
-    print(f"document: {DOCUMENT_POSES} poses, {DOCUMENT_FRAMES} frames, {DOCUMENT_HOURS} h; plan: {total.poses} poses, "
-          f"{total.frames} frames, {total.robot_hours:.2f} h")
-    # The formula on the document's own numbers.
-    hours = (DOCUMENT_POSES * PARAMS.move_and_settle_time_s + DOCUMENT_FRAMES / GEOMETRY.frame_rate_hz) / 3600.0
-    assert hours == pytest.approx(DOCUMENT_HOURS, abs=0.05)
+    print(f"stored estimate: {DOCUMENT_ESTIMATE_POSES} poses, {DOCUMENT_ESTIMATE_FRAMES} frames, "
+          f"{DOCUMENT_ESTIMATE_HOURS} h; plan: {total.poses} poses, {total.frames} frames, {total.robot_hours:.2f} h")
+    assert (total.poses, total.frames) == (DOCUMENT_ESTIMATE_POSES, DOCUMENT_ESTIMATE_FRAMES)
+    assert total.robot_hours == pytest.approx(DOCUMENT_ESTIMATE_HOURS, abs=HOURS_TOLERANCE)
+    # The formula on the stored numbers.
+    hours = (DOCUMENT_ESTIMATE_POSES * PARAMS.move_and_settle_time_s
+             + DOCUMENT_ESTIMATE_FRAMES / GEOMETRY.frame_rate_hz) / 3600.0
+    assert hours == pytest.approx(DOCUMENT_ESTIMATE_HOURS, abs=HOURS_TOLERANCE)
     # A hand-checkable plan: 2 poses of 10 frames and 1 pose of 30 frames at 10 frames/s and 3 s each.
     toy = [dataclasses.replace(plan[0], procedure="A", frames=10), dataclasses.replace(plan[0], procedure="A", frames=10),
            dataclasses.replace(plan[0], procedure="C", frames=30)]
     toy_rows = {r.procedure: r for r in capture_budget(toy, 10.0, 3.0)}
     assert toy_rows["A"].robot_hours == pytest.approx((2 * 3.0 + 20 / 10.0) / 3600.0)
     assert (toy_rows["C"].poses, toy_rows["C"].frames) == (1, 30)
-    # Per-series structure.
+    # Per-series structure from the parameters.
     by_series = {r.procedure: r for r in rows}
     assert (by_series["R"].poses, by_series["R"].frames) == (PARAMS.registration_poses,
                                                              PARAMS.registration_poses * PARAMS.frames_per_registration_pose)
-    d = by_series["D"]
-    one_array_d_poses = 2 * 2 * (len(PARAMS.z_shape_stations_mm) - 3) * PARAMS.detection_trials_per_level \
-        + 2 * 2 * 3 * PARAMS.detection_zero_trials
-    assert d.poses == 2 * one_array_d_poses
-    document_accounting_poses = total.poses - d.poses + one_array_d_poses
-    document_accounting_frames = total.frames - d.frames + one_array_d_poses * PARAMS.frames_per_detection_trial
-    document_accounting_hours = (document_accounting_poses * PARAMS.move_and_settle_time_s
-                                 + document_accounting_frames / GEOMETRY.frame_rate_hz) / 3600.0
-    print(f"document accounting (one plate per kind in D): {document_accounting_poses} poses "
-          f"({document_accounting_poses / DOCUMENT_POSES:.3f} x), {document_accounting_frames} frames "
-          f"({document_accounting_frames / DOCUMENT_FRAMES:.3f} x), {document_accounting_hours:.2f} h "
-          f"({document_accounting_hours / DOCUMENT_HOURS:.3f} x)")
-    assert document_accounting_poses == pytest.approx(DOCUMENT_POSES, rel=BUDGET_TOLERANCE)
-    assert document_accounting_frames == pytest.approx(DOCUMENT_FRAMES, rel=BUDGET_TOLERANCE)
-    assert document_accounting_hours == pytest.approx(DOCUMENT_HOURS, rel=BUDGET_TOLERANCE)
-    assert 1.4 < total.poses / DOCUMENT_POSES < 1.8                 # the factor-two D series explains the rest
+    n_all = len(PARAMS.z_stations_mm())
+    n_zero = PARAMS.detection_zero_station_count
+    d_poses = 2 * 2 * ((n_all - n_zero) * PARAMS.detection_trials_per_level + n_zero * PARAMS.detection_zero_trials)
+    assert by_series["D"].poses == d_poses
+    c_poses = 2 * 2 * n_all * PARAMS.phase_jitter_poses_area + 2 * 4 * PARAMS.field_subseries_poses_area
+    assert by_series["C"].poses == c_poses
+    assert by_series["A"].poses == 5 * len(PARAMS.noise_stations_mm()) + 2 * len(PARAMS.tilt_angles_deg) \
+        * len(PARAMS.z_reduced_stations_mm()) + 1
 
 
 def test_write_plan_round_trip(tmp_path: Path):
@@ -415,23 +415,26 @@ def test_write_plan_round_trip(tmp_path: Path):
 
 
 def test_plan_stations_cli(tmp_path: Path, capsys):
-    """The plan_stations command line writes the plan, targets.json and parameters.json, accepts a series subset and
-    pilot values, and reports a bad input with exit code 2."""
+    """The plan_stations command line writes the plan, targets.json and parameters.json, accepts a series subset, prints
+    the nine-station ladder and the budget with the stored estimate, and reports a bad input with exit code 2."""
     registration = random_registration()
     registration.save(tmp_path / "registration.json")
     out = tmp_path / "plan"
     code = plan_cli.main(["--out", str(out), "--seed", "3", "--series", "A", "Z", "D", "--no-extended",
-                          "--registration", str(tmp_path / "registration.json"), "--pilot-d50-mm", "T4-S@15=1.2",
-                          "--pilot-d0-mm", "0.5"])
+                          "--registration", str(tmp_path / "registration.json")])
     assert code == 0
     for name in (PLAN_CSV_NAME, PLAN_SUMMARY_NAME, "targets.json", PARAMETERS_FILE_NAME):
         assert (out / name).exists()
     plan = read_plan_csv(out / PLAN_CSV_NAME)
     assert {c.procedure for c in plan} == {"A", "Z", "D", "S"}
-    assert sum(1 for c in plan if c.procedure == "D") == 4 * 2 * 5 * PARAMS.detection_trials_per_level
-    assert "INDICATIVE" in capsys.readouterr().err
+    assert sum(1 for c in plan if c.procedure == "D") == 2 * 2 * 9 * PARAMS.detection_trials_per_level
+    captured = capsys.readouterr()
+    assert "INDICATIVE" in captured.err
+    assert "Station ladder (9 stations" in captured.out and "400, 476, 566, 673, 800, 951, 1131, 1345, 1600" in captured.out
+    assert "Document estimate" in captured.out
     assert plan_cli.main(["--out", str(out), "--series", "Q"]) == 2
-    assert plan_cli.main(["--out", str(out), "--pilot-d50-mm", "abc"]) == 2
+    with pytest.raises(SystemExit):                       # the pilot options of the former level selection are gone
+        plan_cli.main(["--out", str(out), "--pilot-d50-mm", "1"])
 
 
 # ---------------------------------------------------------------------------
@@ -645,7 +648,8 @@ def test_register_cli_round_trip_exact_and_noisy(tmp_path: Path, capsys):
     rng = np.random.default_rng(11)
     x_true, y_true, exact = synthetic_observations(tmp_path / "exact.csv", rng, 0.0, 0.0)
     out = tmp_path / "registration.json"
-    assert register_cli.main(["--observations", str(tmp_path / "exact.csv"), "--out", str(out)]) == 0
+    assert register_cli.main(["--observations", str(tmp_path / "exact.csv"), "--method", "fiducial",
+                              "--out", str(out)]) == 0
     solved = Registration.load(out)
     assert solved.residual_rms_mm < EXACT_RESIDUAL_MM and solved.accepted and solved.pose_count == OBSERVATION_POSES
     assert solved.camera_to_base.difference_from(y_true)[0] < 1e-5
@@ -653,28 +657,33 @@ def test_register_cli_round_trip_exact_and_noisy(tmp_path: Path, capsys):
     assert "ACCEPTED" in capsys.readouterr().out
     # Noisy: the residual is the noise level (about sqrt(3) x 0.05 mm) and the registration is still good.
     synthetic_observations(tmp_path / "noisy.csv", np.random.default_rng(12), OBSERVATION_NOISE_MM, OBSERVATION_NOISE_DEG)
-    assert register_cli.main(["--observations", str(tmp_path / "noisy.csv"), "--out", str(out)]) == 0
+    assert register_cli.main(["--observations", str(tmp_path / "noisy.csv"), "--method", "fiducial",
+                              "--out", str(out)]) == 0
     noisy = Registration.load(out)
     assert 0.5 * OBSERVATION_NOISE_MM < noisy.residual_rms_mm < NOISY_RESIDUAL_LIMIT_MM
     assert noisy.camera_to_base.difference_from(y_true)[0] < NOISY_RESIDUAL_LIMIT_MM
     # The same noisy observations with a tighter acceptance limit are solved but not accepted.
-    assert register_cli.main(["--observations", str(tmp_path / "noisy.csv"), "--out", str(out), "--accept-mm",
-                              "0.001"]) == 1
+    assert register_cli.main(["--observations", str(tmp_path / "noisy.csv"), "--method", "fiducial", "--out",
+                              str(out), "--accept-mm", "0.001"]) == 1
     assert Registration.load(out).accepted is False
     synthetic_observations(tmp_path / "heavy.csv", np.random.default_rng(13), HEAVY_NOISE_MM, 0.0)
-    assert register_cli.main(["--observations", str(tmp_path / "heavy.csv"), "--out", str(out)]) == 1
-    # Depth planes only (Step 6, second bullet): the plane residual of exact observations is zero.
+    assert register_cli.main(["--observations", str(tmp_path / "heavy.csv"), "--method", "fiducial",
+                              "--out", str(out)]) == 1
+    # Depth planes only (Step 6, second bullet; the default since T1 is gone): the plane residual of exact observations
+    # is zero, with or without naming the method.
     synthetic_observations(tmp_path / "planes.csv", np.random.default_rng(14), 0.0, 0.0, columns="plane")
     assert register_cli.main(["--observations", str(tmp_path / "planes.csv"), "--method", "planes", "--out",
                               str(out)]) == 0
     assert Registration.load(out).residual_rms_mm < 1.0e-4
+    assert register_cli.main(["--observations", str(tmp_path / "planes.csv"), "--out", str(out)]) == 0
+    assert Registration.load(out).method == "depth_planes"
     # Input errors.
     assert register_cli.main(["--observations", str(tmp_path / "missing.csv")]) == 2
     assert register_cli.main(["--observations", str(tmp_path / "planes.csv"), "--method", "fiducial"]) == 2
 
 
 # ---------------------------------------------------------------------------
-# Quick-look check and pilot counts (Section 8 Step 1; Section 13 Step 2)
+# Quick-look check and the D pilot post check (Section 8 Step 1; Section 13 Step 2)
 # ---------------------------------------------------------------------------
 def scaled_geometry() -> SensorGeometry:
     """The indicative geometry at 160 x 120 px: intrinsics divided by SCALE_DOWN, same field of view."""
@@ -698,8 +707,8 @@ def write_depth_frame(path: Path, geometry: SensorGeometry, depth: np.ndarray) -
 
 def plane_session(tmp_path: Path, plane_offset_mm: float = 0.0, plane_tilt_deg: float = 0.0,
                   read_nothing: bool = False) -> Session:
-    """A session of one pose: T2 fronto-parallel at 750 mm (registered), and a flat plane read over the whole image at
-    750 mm + plane_offset_mm, tilted about the image V axis by plane_tilt_deg."""
+    """A session of one pose: T2 fronto-parallel at Z_REFERENCE_MM (registered), and a flat plane read over the whole image at
+    Z_REFERENCE_MM + plane_offset_mm, tilted about the image V axis by plane_tilt_deg."""
     geometry = scaled_geometry()
     camera = camera_of(geometry)
     normal = np.array([np.sin(np.radians(plane_tilt_deg)), 0.0, -np.cos(np.radians(plane_tilt_deg))])
@@ -709,7 +718,7 @@ def plane_session(tmp_path: Path, plane_offset_mm: float = 0.0, plane_tilt_deg: 
     pose = fronto_parallel_pose(0.0, 0.0, CHECK_STATION_MM)
     records = []
     for frame in range(CHECK_FRAMES):
-        path = tmp_path / f"A_T2_G0_Z0750_F0_P000_f{frame:02d}.mc"
+        path = tmp_path / f"A_T2_G0_Z0800_F0_P000_f{frame:02d}.mc"
         write_depth_frame(path, geometry, depth)
         records.append(FrameRecord(path=path, procedure="A", target_id="T2", gap_mm=None, station_z_mm=CHECK_STATION_MM,
                                    field=0, pose_index=0, frame_index=frame, robot_pose=RigidTransform.identity(),
@@ -719,7 +728,7 @@ def plane_session(tmp_path: Path, plane_offset_mm: float = 0.0, plane_tilt_deg: 
 
 
 def test_check_session_passes_a_flat_plane_and_flags_a_displaced_one(tmp_path: Path):
-    """Section 4 Step 8 / quick look: a flat plane at 750 mm (160 x 120 px stack, intrinsics / 4) matches the registered
+    """Section 4 Step 8 / quick look: a flat plane at Z_REFERENCE_MM (160 x 120 px stack, intrinsics / 4) matches the registered
     T2 and flags nothing; the same plane displaced by 5 mm, tilted by 6 degrees, or not read at all is flagged."""
     (tmp_path / "ok").mkdir()
     ok = check_session(plane_session(tmp_path / "ok"))
@@ -769,22 +778,22 @@ def test_check_captures_cli_exit_codes(tmp_path: Path, capsys):
 
 
 def pilot_session(tmp_path: Path) -> Session:
-    """Section 8 Step 1: ten C poses of the large disk array T4-L at G = 15 mm and Z = 750 mm with random lateral
+    """Section 8 Step 1: ten C poses of the disk plate T4 at G = 15 mm and Z = Z_REFERENCE_MM with random lateral
     offsets, rendered noise-free at 160 x 120 px by ray casting the registered geometry (front disks at their depth, the
     back plate behind them, nothing elsewhere)."""
     geometry = scaled_geometry()
     camera = camera_of(geometry)
     targets = make_standard_target_set(PARAMS, GEOMETRY)
-    target = targets.get(TARGET_DISKS_LARGE).with_gap(PARAMS.gap_small_mm)
+    target = targets.get(TARGET_DISKS).with_gap(PARAMS.gap_small_mm)
     records = []
     for index in range(PILOT_POSES):
         offset = jitter_offset_mm(100 + index, PARAMS, geometry, CHECK_STATION_MM)
         pose = fronto_parallel_pose(offset[0], offset[1], CHECK_STATION_MM)
         hit = target.intersect_rays(pose, np.zeros(3), camera.ray_directions())
         depth = hit.point_camera[..., 2]                      # NaN where no surface is hit
-        path = tmp_path / f"C_T4L_G15_Z0750_F0_P{index:03d}_f00.mc"
+        path = tmp_path / f"C_T4_G15_Z0800_F0_P{index:03d}_f00.mc"
         write_depth_frame(path, geometry, depth)
-        records.append(FrameRecord(path=path, procedure="C", target_id="T4-L", gap_mm=PARAMS.gap_small_mm,
+        records.append(FrameRecord(path=path, procedure="C", target_id="T4", gap_mm=PARAMS.gap_small_mm,
                                    station_z_mm=CHECK_STATION_MM, field=0, pose_index=index, frame_index=0,
                                    robot_pose=RigidTransform.identity(), target_pose_camera=pose,
                                    subseries=SUBSERIES_JITTER))
@@ -792,42 +801,28 @@ def pilot_session(tmp_path: Path) -> Session:
                    registration=None, targets=targets, records=records)
 
 
-def test_pilot_detection_counts_find_the_small_diameters_undetected(tmp_path: Path, capsys):
-    """Section 8 Step 1 / Section 13 Step 2: with disks of 3.5 to 56 mm on a 160 x 120 px stack (p = 4.4 mm), the
-    smallest levels are never detected and the largest always are; the detection fraction is nondecreasing in
-    practice, D_0 lies below D_50, D_50 is a diameter between two levels, and the post sites (0.5 mm) are not
-    detected. The check of the same stack flags nothing."""
+def test_pilot_post_check_finds_bare_posts_undetected(tmp_path: Path, capsys):
+    """Section 8 Step 1 / Section 13 Step 2 and redesign note Section 2: the D pilot keeps only the post check. On a
+    noise-free 160 x 120 px stack of the disk plate T4 the threshold set by the blank sites is zero, and the post-only
+    site (0.5 mm, not rendered) is never detected. The pilot D_50 / D_0 level selection no longer exists. The quick-look
+    check of the same stack flags nothing."""
     session = pilot_session(tmp_path)
-    results = pilot_detection_counts(session, PARAMS, session.geometry, CHECK_STATION_MM)
-    result = results[("T4-L", PARAMS.gap_small_mm)]
+    results = pilot_post_check(session, PARAMS, session.geometry)                  # default station: Z_REFERENCE_MM
+    result = results[("T4", PARAMS.gap_small_mm)]
+    assert result.station_z_mm == PARAMS.z_reference_mm
     assert result.poses == PILOT_POSES and result.tau_mm is not None and result.tau_mm < 1.0e-2
-    assert result.fractions[0] == 0.0 and result.fractions[-1] == 1.0
-    assert result.d0_mm is not None and result.d50_mm is not None and result.d0_mm < result.d50_mm
-    assert result.diameters_mm[0] < result.d50_mm < result.diameters_mm[-1]
-    assert result.post_fraction == 0.0 and result.post_trials > 0
-    footprint = session.geometry.pixel_footprint_mm(CHECK_STATION_MM)
-    assert 0.5 * footprint < result.d50_mm < 6.0 * footprint
-    assert results == pilot_detection_counts(session, PARAMS, session.geometry, CHECK_STATION_MM)      # deterministic
-    assert pilot_detection_counts(session, PARAMS, session.geometry, 500.0) == {}
-    assert pilot_detection_counts(session, PARAMS, session.geometry, CHECK_STATION_MM, subseries=("field",)) == {}
+    assert result.blank_pixels > 0
+    assert result.post_trials == PILOT_POSES * PARAMS.post_sites_per_plate and result.post_fraction == 0.0
+    assert not hasattr(check_module, "interpolate_d50") and not hasattr(check_module, "pilot_detection_counts")
+    assert results == pilot_post_check(session, PARAMS, session.geometry, CHECK_STATION_MM)           # deterministic
+    assert pilot_post_check(session, PARAMS, session.geometry, 500.0) == {}
+    assert pilot_post_check(session, PARAMS, session.geometry, CHECK_STATION_MM, subseries=("field",)) == {}
     assert not check_session(session).flagged
     # The command line prints the same numbers.
     write_session_folder(tmp_path, session)
-    assert check_cli.main(["--session", str(tmp_path), "--pilot", "750"]) == 0
-    assert "pilot D_50" in capsys.readouterr().out
+    assert check_cli.main(["--session", str(tmp_path), "--pilot", "800"]) == 0
+    assert "post-site detection fraction = 0.00" in capsys.readouterr().out
     assert check_cli.main(["--session", str(tmp_path), "--pilot", "500"]) == 2
-
-
-def test_pilot_summary_numbers():
-    """Section 13 Step 2: the 0.5 crossing is interpolated linearly in ln D, and D_0 is the largest diameter below the
-    first detection."""
-    diameters = [1.0, 2.0, 4.0, 8.0]
-    assert interpolate_d50(diameters, [0.0, 0.25, 0.75, 1.0]) == pytest.approx(np.sqrt(2.0 * 4.0))
-    assert interpolate_d50(diameters, [0.0, 0.0, 0.0, 0.4]) is None           # never reaches 0.5
-    assert interpolate_d50(diameters, [0.6, 0.7, 0.9, 1.0]) is None           # already above at the smallest level
-    assert zero_detection_diameter(diameters, [0, 0, 3, 9]) == 2.0
-    assert zero_detection_diameter(diameters, [1, 0, 3, 9]) is None
-    assert zero_detection_diameter(diameters, [0, 0, 0, 0]) == 8.0
     assert check_module.EXIT_FLAGGED == 1
 
 
@@ -853,20 +848,24 @@ def test_plan_png_is_skipped_with_a_warning_without_matplotlib(tmp_path: Path, m
     assert PLAN_FIGURE_NAME in (tmp_path / PLAN_SUMMARY_NAME).read_text()
 
 
-def test_detection_plan_warns_when_few_levels_lie_below_the_pilot_d0():
-    """Section 8 Step 2: with a pilot D_0 that only one ladder level of T4-S lies below, the plan warns that the zero
-    point will have too few levels; with a D_0 above three levels it does not. The pilot values only change the
-    summary, never the poses."""
+def test_detection_plan_has_no_pilot_level_selection():
+    """Section 8 and redesign note Section 2: the D plan takes no pilot D_50 / D_0 (the levels are the fixed (feature,
+    station) pairs), and ``extended=False`` leaves DETECTION_TRIALS_PER_LEVEL poses at every configuration, all
+    in sub-series "jitter"."""
     diagnostics = PlanDiagnostics()
-    ladder = PARAMS.diameter_ladder_mm(GEOMETRY)
-    base = plan_detection_series(SMALL_PARAMS, GEOMETRY, np.random.default_rng(2), extended=False)
-    few = plan_detection_series(SMALL_PARAMS, GEOMETRY, np.random.default_rng(2),
-                                {("T4-S", 15.0): 1.0}, {("T4-S", 15.0): 0.5 * (ladder[0] + ladder[1])}, False,
-                                diagnostics=diagnostics)
-    assert any("only 1 ladder level(s) of T4-S" in w for w in diagnostics.warnings)
-    assert any("pilot T4-S" in n or "D pilot T4-S" in n for n in diagnostics.notes)
-    assert [c.pose_key() for c in few] == [c.pose_key() for c in base]
-    ok = PlanDiagnostics()
-    plan_detection_series(SMALL_PARAMS, GEOMETRY, np.random.default_rng(2), None, {("T4-S", 15.0): 0.5 * (ladder[3] + ladder[4])},
-                          False, diagnostics=ok)
-    assert not ok.warnings
+    base = plan_detection_series(SMALL_PARAMS, GEOMETRY, np.random.default_rng(2), extended=False,
+                                 diagnostics=diagnostics)
+    assert len(base) == 2 * 2 * 9 * SMALL_PARAMS.detection_trials_per_level
+    assert {c.subseries for c in base} == {"jitter"} and not any("pilot" in n for n in diagnostics.notes)
+    with_zero = plan_detection_series(SMALL_PARAMS, GEOMETRY, np.random.default_rng(2))
+    assert len(with_zero) == len(base) + 2 * 2 * SMALL_PARAMS.detection_zero_station_count * (
+        SMALL_PARAMS.detection_zero_trials - SMALL_PARAMS.detection_trials_per_level)
+    import inspect
+    assert "pilot_d50_mm" not in inspect.signature(plan_detection_series).parameters
+    assert "pilot_d50_mm" not in inspect.signature(plan_full_session).parameters
+
+
+def test_registration_cli_defaults_to_the_plane_only_solve(tmp_path: Path):
+    """Redesign note Section 3: with no pattern plate the command line registers by plane correspondence
+    (solve_from_planes) unless told otherwise."""
+    assert register_cli.build_parser().get_default("method") == register_cli.METHOD_PLANES
