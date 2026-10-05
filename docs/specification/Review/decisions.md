@@ -477,8 +477,12 @@ found by that pass, logged as follow-ups for Neil rather than edited silently:
 - F4 (staircase threshold): Section 6.2 says the optional staircase is useful where the quantum is at least about
   1 mm; Neil's rule allows it from 0.1 mm. Both hold (allowed from 0.1 mm, well resolved from about 1 mm); the
   procedure uses 0.1 mm. The measured quantum is passed to the planner through the parameters override.
-- F5 (code, in progress): the sentinel mount-reference flag becomes a manifest column as Section 9 lists it; the
-  optional staircase and lateral sweep get four-digit pose indices as Section 9 states.
+- F5 (code, done, commit 7249923): the sentinel mount-reference flag is a manifest column as Section 9 lists it; the
+  optional staircase (P2000+) and lateral sweep (P3000+) carry four-digit pose indices as Section 9 states; the Tier-A
+  quantum is an overridable parameter so the ramp's measured quantum reaches the optional staircase.
+- F6 (code follow-up): with --filters-off the main-budget totals read 7,196 poses and 42,580 frames because the
+  repeat's two sentinels fall on the budget clock; the repeat itself is outside the budget. The sentinels of an
+  optional set should be counted with that set.
 
 ## C11 — Section 10 Analysis A, noise vs Z (opened 2026-10-05)
 
