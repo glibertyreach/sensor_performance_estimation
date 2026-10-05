@@ -665,6 +665,35 @@ def test_build_manifest_from_a_per_frame_log(tmp_path: Path):
     assert len(load_manifest(root / "manifest.csv")) == len(records)
 
 
+def test_manifest_carries_the_achieved_field_fraction(tmp_path: Path):
+    """Section 5, Step 1: the achieved fraction of the requested field offset travels from the plan notes (poses.csv) through
+    the pose-log manifest builder into the manifest column ``field_fraction_achieved`` (string metadata) and back through
+    ``load_manifest``; poses without it (tilt) have no such column value, and Analysis A reads it as a number."""
+    from sensorperf.analysis.noise import _metadata_float
+    from sensorperf.io.manifest import load_manifest
+    registration = random_registration()
+    plan = [c for c in plan_noise_series(SMALL_PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), with_sentinels=False)
+            if c.subseries == "main"][:6] + [c for c in plan_noise_series(
+                SMALL_PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), with_sentinels=False) if c.subseries == "tilt"][:2]
+    for position, capture in enumerate(plan):
+        capture.order = position
+    assert any(c.notes[FIELD_FRACTION_ACHIEVED_KEY] < 1.0 for c in plan if c.subseries == "main")
+    root = tmp_path / "session"
+    write_empty_captures(root, plan)
+    write_plan(tmp_path / "plan", plan, None, SMALL_PARAMS, GEOMETRY)
+    per_frame_log(tmp_path / "pose_log.csv", plan, registration)
+    records = build_manifest(tmp_path / "pose_log.csv", root, tmp_path / "plan" / PLAN_CSV_NAME, registration, strict=True)
+    write_manifest_csv(root / "manifest.csv", records)
+    by_key = {c.pose_key(): c for c in plan}
+    for record in load_manifest(root / "manifest.csv"):
+        planned = by_key[record.pose_key()]
+        if planned.subseries == "main":
+            assert _metadata_float(record, FIELD_FRACTION_ACHIEVED_KEY) == planned.notes[FIELD_FRACTION_ACHIEVED_KEY]
+        else:
+            assert FIELD_FRACTION_ACHIEVED_KEY not in record.metadata
+            assert np.isnan(_metadata_float(record, FIELD_FRACTION_ACHIEVED_KEY))
+
+
 def test_build_manifest_warns_when_the_series_z_log_is_rounded(tmp_path: Path):
     """Section 11 (pose log): the read-back pose is the step truth of series Z, so a log whose z_mm values all have fewer
     than two decimals draws a warning that names the problem; the same log with full resolution does not."""

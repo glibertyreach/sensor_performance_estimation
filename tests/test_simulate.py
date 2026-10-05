@@ -21,7 +21,7 @@ from sensorperf.geometry.targets import (
     make_standard_target_set,
 )
 from sensorperf.io.capture_set import load_stack
-from sensorperf.io.manifest import SUBSERIES_JITTER, SUBSERIES_MAIN, SUBSERIES_SENTINEL
+from sensorperf.io.manifest import FIELD_FRACTION_ACHIEVED_KEY, SUBSERIES_JITTER, SUBSERIES_MAIN, SUBSERIES_SENTINEL
 from sensorperf.io.matcloud import read_matcloud
 from sensorperf.io.session import SERIES_DIRS, Session
 from sensorperf.parameters import (
@@ -286,7 +286,8 @@ def _tiny_plan(params, geometry) -> list[PlannedCapture]:
         PlannedCapture(PROCEDURE_SENTINEL, TARGET_NOISE_PLATE, None, STATION_MM, 0, 0, 3, SUBSERIES_SENTINEL,
                        fronto_parallel_pose(0.0, 0.0, STATION_MM), seed=1, order=1),
         PlannedCapture(PROCEDURE_NOISE, TARGET_NOISE_PLATE, None, STATION_MM, 0, 0, 4, SUBSERIES_MAIN,
-                       fronto_parallel_pose(0.0, 0.0, STATION_MM), seed=2, order=0),
+                       fronto_parallel_pose(0.0, 0.0, STATION_MM), seed=2, order=0,
+                       notes={FIELD_FRACTION_ACHIEVED_KEY: 0.5}),
         PlannedCapture(PROCEDURE_EDGES, TARGET_RAISED_SQUARE, params.gap_small_mm, STATION_MM, 0, 0, 2,
                        SUBSERIES_JITTER, fronto_parallel_pose(offset_h, offset_v, STATION_MM), seed=3,
                        offset_h_mm=offset_h, offset_v_mm=offset_v, order=2),
@@ -326,6 +327,8 @@ def test_write_synthetic_session_round_trip(tmp_path, params, geometry, model):
     assert stack.depth.shape == (4, geometry.image_height_px, geometry.image_width_px)
     # The manifest's target pose is registration.target_to_camera(read-back), not the planned pose.
     record = noise_records[0]
+    assert record.metadata == {FIELD_FRACTION_ACHIEVED_KEY: "0.5"}          # the plan's field fraction reaches the manifest
+    assert all(not r.metadata for r in session.records if r.procedure != PROCEDURE_NOISE)
     realized = session.registration.target_to_camera(record.robot_pose)
     translation_error, rotation_error = realized.difference_from(record.target_pose_camera)
     assert translation_error < 1.0e-6 and rotation_error < 1.0e-6

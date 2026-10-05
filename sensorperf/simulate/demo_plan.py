@@ -17,7 +17,8 @@ needed to exercise every analysis once. It follows the same rules the real plann
 
 The demonstration plan covers
     R  registration: T2 (the noise plate; plane-only solve) at several tilted poses spread over the volume
-    A  noise: T2 at three stations (center field), two tilt poses, and a drift sentinel at each end
+    A  noise: T2 at three stations (center field), two tilt poses, and a T2 drift sentinel before and after
+       (the plan ends with a sentinel on the target mounted there)
     B  edges: T3a and T3b at two shape stations (566 and 800 mm), one nominal pose and four jitter poses each, small gap
     Z  Z-step: T2 at one station, a ladder of three step sizes with two ABAB cycles each, and a
        short staircase

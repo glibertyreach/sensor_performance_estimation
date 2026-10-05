@@ -260,12 +260,12 @@ class PlannedCapture:
     def file_name(frame) -> str              # io.manifest.format_file_name
 
 def plan_registration(params, geometry, rng) -> list[PlannedCapture]        # Section 4, Step 6: T2, poses span Z_MIN..Z_MAX
-def plan_noise_series(params, geometry, rng, filters_off=False) -> list     # Section 5: 9 ladder stations + the legacy depths (shuffled), tilt at the reduced stations, remount; sentinels by the budget clock
+def plan_noise_series(params, geometry, rng, filters_off=False) -> list     # Section 5: 9 ladder stations x 5 field positions + the 2 legacy depths at the center (47, shuffled), feasible tilts at the reduced stations, remount; sentinels by the budget clock
 def plan_edge_series(params, geometry, rng) -> list                          # Section 6.1: T3a, T3b x gaps x stations: nominal + jitter poses
 def plan_zstep_series(params, geometry, rng, expected_quantum_mm: Callable[[float], float]) -> list   # Section 6.2: ladder ABAB + staircase
 def plan_area_series(params, geometry, rng, open_background=False) -> list   # Section 7: arrays x gaps x stations, field sub-series, open variant
 def plan_detection_series(params, geometry, rng, extended=True) -> list     # Section 8: T4, T5 x gaps x all 9 stations; zero trials at the 3 farthest
-def insert_sentinels(plan, params, geometry, seconds_per_frame, move_settle_s) -> list   # a sentinel every DRIFT_SENTINEL_INTERVAL_MIN of estimated clock
+def insert_sentinels(plan, params, geometry, seconds_per_frame, move_settle_s) -> list   # sentinels on the MOUNTED target: at the series boundaries and every DRIFT_SENTINEL_INTERVAL_MIN of estimated clock
 def capture_budget(plan, frame_rate_hz, move_settle_s) -> BudgetRow list     # Section 9 table: poses, frames, robot hours per series
 def write_plan(path_dir, plan, registration | None) -> poses.csv (+ robot flange poses when a registration is given), plan_summary.txt, plan.png
 ```
@@ -355,7 +355,8 @@ docstring; the planner, the target set, the simulator and the analyses read them
 `z_stations_mm()` = 400, 476, 566, 673, 800, 951, 1131, 1345, 1600 (nine, rounded to 1 mm, both ends included). Subsets by
 stride: `z_shape_stations_mm()` (`z_shape_station_stride` = 2) = 400, 566, 800, 1131, 1600 for B-HV;
 `z_reduced_stations_mm()` (`z_reduced_station_stride` = 4) = 400, 800, 1600 for B-Z and the A tilt sub-series.
-`noise_stations_mm()` = the ladder plus `legacy_metric_depths_mm` (700, 1000) for A. C and D use all nine stations;
+`noise_stations_mm()` = the ladder plus `legacy_metric_depths_mm` (700, 1000) for A; the ladder stations are captured at the
+five field positions, the two legacy extra stations (`legacy_extra_stations_mm()`) at the center only. C and D use all nine stations;
 `detection_zero_stations_mm()` = the `detection_zero_station_count` = 3 farthest stations (1131, 1345, 1600), where
 D takes `detection_zero_trials` = 300 trials per (feature, station) instead of `detection_trials_per_level` = 60.
 `z_reference_mm` = 800 (a station) serves the warm-up check, sentinels, re-mount check, the C field sub-series, the
@@ -394,14 +395,47 @@ features, `blank_sites_per_plate` (3) blank sites and, for disks, `post_sites_pe
 hand-eye solve (`solve_from_planes`): camera_to_base is observable; the in-plane position of T2 on the flange and its
 rotation about its normal are not and are not needed. The registration pose planner spans Z_MIN to Z_MAX on T2.
 
-**Plan and budget** (`acquisition/plan.py`). A at all stations plus the legacy depths (five field positions, 100 frames);
-tilt at the reduced stations; B-HV at the shape stations; B-Z at the reduced stations; C for {T4, T5} x {G small, G large}
-at all nine stations, the field sub-series and the open-background variant at Z_REFERENCE; D at all nine stations (60
-trials per (feature, station), 300 at the three farthest). `plan_summary.txt` prints the station ladder and its subsets,
-the budget and the comparison with `DOCUMENT_ESTIMATE_*`, which are the totals of the default plan: 7,292 poses, 44,140
-frames, 7.30 h (10 frames/s, 3 s per move plus settle).
+**Plan and budget** (`acquisition/plan.py`). A at the nine ladder stations x five field positions plus the two legacy depths
+at the center only (9 x 5 + 2 = 47 main poses, 100 frames), tilt at the reduced stations where feasible, then the re-mount
+check; B-HV at the shape stations; B-Z at the reduced stations; C for {T4, T5} x {G small, G large} at all nine stations, the
+field sub-series and the open-background variant at Z_REFERENCE; D at all nine stations (60 trials per (feature, station),
+300 at the three farthest). `plan_summary.txt` prints the station ladder and its subsets, the budget and the comparison with
+`DOCUMENT_ESTIMATE_*`, which are the totals of the default plan (`plan_stations --seed 1`): 7,278 poses, 43,000 frames,
+7.26 h (10 frames/s, 3 s per move plus settle). Per series (poses / frames / hours): registration 30 / 300 / 0.03, A 64 /
+5,600 / 0.21, B-HV 520 / 15,600 / 0.87, B-Z 453 / 4,530 / 0.50, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentinels
+11 / 330 / 0.02.
+- *Tilt feasibility* (`tilt_is_feasible`, `tilt_near_edge_mm`). The A tilt sub-series runs at the reduced stations, and a tilt
+  is planned only where the plate's near edge stays at or beyond `z_min_mm`: Z - h sin(tilt) >= Z_MIN, h the half extent of
+  the plate across the tilt axis (200 mm for the 400 x 400 mm plate). Infeasible tilts are skipped and listed with the reason
+  under "Skipped poses" in `plan_summary.txt` (`PlanDiagnostics.skipped`); a sweep left with no real tilt (only the zero angle)
+  is skipped as a whole. With the 400 mm plate every tilt at 400 mm is skipped (15, 30 and 45 deg bring the edge to 348, 300
+  and 259 mm), leaving 800 and 1600 mm: 2 axes x 4 angles x 2 stations = 16 tilt poses instead of 24.
+- *Legacy depths at the center only* (`legacy_extra_stations_mm`). The legacy metrics are center-box metrics, so 700 and
+  1000 mm are single center poses, not five-position stations (55 main poses before, 47 now).
+- *Drift sentinels on the mounted target* (`insert_sentinels`). A sentinel is captured on the front plane of the target that
+  is mounted at that point of the plan (the target of the surrounding series, with the gap as mounted), centered at
+  `z_reference_mm`, `sentinel_frames` frames; the pose row carries that `target_id` and `gap_mm` and a note
+  (`notes["sentinel_note"]`, `sentinel_target`, `sentinel_gap_mm`, `mount_reference`). No target is re-mounted for a sentinel
+  (the plan summary reports "0 sentinel re-mounts", and warns if it were not so). Sentinels are placed before the first pose
+  after the registration (T2, with A first), after the last pose of each series (T2 after A and after B-Z, so the T2
+  sentinels bracket A; T3b, T5 and T5 after B-HV, C and D), and whenever `drift_sentinel_interval_min` of estimated clock has
+  passed. The first sentinel after each mount (a change of `target_id`) is that target's reference
+  (`mount_reference` True). The 11 sentinels of the default plan are T2 x 3, T3b x 1, T4 x 2, T5 x 5.
+- *Achieved field fraction and fit margin.* A pose placed at a field position is pulled inward until the plate fits
+  (`place_in_field`); the fraction of the requested offset it keeps is the "kept N%" of the summary and is also written to the
+  pose row's notes JSON as `field_fraction_achieved` (1 when the request fits). The margin of the fit is
+  `boundary_band_half_width_px` (the ROI shrink of Analysis A), plus half `phase_jitter_span_px` for the jittered series; it
+  is the only margin the planner uses, and the summary prints it. The manifest builders (`pose_log.build_manifest`,
+  `simulate.session`) copy the fraction into the manifest column `field_fraction_achieved` (extra string metadata column of
+  `io/manifest.py`).
 
 **Analyses.**
+- A: sentinels are grouped by mounted target and mount (`noise.mount_epochs`: a mount is a change of `target_id` between
+  non-sentinel captures) and each group's drift (`TargetDrift`: offsets, rate, drift over its span) is computed relative to its
+  first sentinel after the mount; all groups are in `DriftResult.targets` and the details JSON. The bias correction of A uses
+  the T2 sentinels of the mount of A (`used_for_a_correction`), its drift allowance uses the span of A and those sentinels, and
+  a mount with a single sentinel has only its reference (no rate). `A_noise_summary.csv` has a `field_fraction_achieved`
+  column per pose (station and field), read from the manifest metadata and NaN when the manifest does not provide it.
 - C: transfer curves A_sensed/A_true and A_sensed/A_geo against D_px pooled over features and stations (the summary rows
   keep `site_id` / `level_index`; figures draw one curve per feature). The overlap (scaling) test of `analysis/overlap.py`
   compares neighboring features over their shared D_px range: per (kind, gap, ratio) and pair the mean difference of the two
@@ -426,8 +460,8 @@ rendered (the disk reads as back plate, the cutout as front plate). `indicative_
 disparity noise, the quantum and this size by the pixel divisor of the `--quick` geometry. The demo plan covers the shape
 stations for C and D (T4 and T5), so the three features of a plate overlap in D_px.
 
-**Status after the redesign.** 128 tests pass (`python3 -m pytest -q`, about 250 s on a loaded 4-core container). The
-standard demo plan renders 357 poses / 632 frames at 160 x 120 (`--quick`, 9 s) and 363 poses / 2,260 frames at 640 x 480
-(about 8 min); the full-size session analyzes with a pooled cutout D_50 of about 9.6 px (inside the 8 to 12 px of the
+**Status after the redesign.** 142 tests pass (`python3 -m pytest -q`, about 240 s on a loaded 4-core container). The
+standard demo plan renders 358 poses / 638 frames at 160 x 120 (`--quick`, 8 s) and 364 poses / 2,290 frames at 640 x 480
+(about 8 min; the 640 x 480 figures follow from the plan, the session was not re-rendered); the full-size session analyzes with a pooled cutout D_50 of about 9.6 px (inside the 8 to 12 px of the
 synthetic matcher) and writes `forward_model_parameters.json` with `d50_px` and `d10_px`. Not yet adapted: the build
 scripts of the technician procedure (`docs/procedures`) and the specification still quote the removed constants.
