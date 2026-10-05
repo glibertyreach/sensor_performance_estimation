@@ -360,6 +360,14 @@ Neil's comments: (pending)
   capture cost; a systematic fine sweep (0.1 px steps over 2 px, in H and in V, at the reference station) is an
   optional second pass that resolves the shape of the periodic bias better. Proposal carried to C12 (Analysis B).
 
+C07 executed (2026-10-05; document rev 86 to 88, recorded here after the fact): R1 ladder rungs as quanta multiples
+(Z_STEP_LADDER_QUANTA 0.25 to 8) floored at ROBOT_MIN_RESOLVABLE_MOVE_MM = 0.1 mm; R2 approach direction stated in
+the Part I lead and the read-back pose as the edge truth in Section 11; R3 measured slant and gap in the as-built
+record; R4 plan-tool check of the square's size; P1 the ramp sub-series in 6.2 Step 3 (RAMP_QUANTA = 4,
+FRAMES_PER_RAMP_POSE = 50) with the staircase as the optional second pass (Z_STAIRCASE_* kept, marked optional);
+Section 2, 9, 10 and 11.2 follow; plain style applied. Code landed 2026-10-05 (commit 0ac4a29): 9 ramp poses,
+budget 7,194 / 42,520 / 7.18.
+
 ## C08 — Section 7 Acquisition C, disk and cutout area series (opened 2026-10-05)
 
 Reviewer findings (proposals; nothing executed until Neil closes the chunk):
@@ -451,6 +459,26 @@ poses, 42,520 frames, 7.18 h), gate invariants updated, gate PASS with scope ['9
   shift recorded in the pose notes). Section 6.2 does not mention this; proposal: one sentence in 6.2, Step 3
   (closed chunk C07; to be declared as intended when executed). Also noted by the code: the far edge of the ramp
   at 1600 mm lies 12 mm beyond Z_MAX, and the 49.6 mm rung reaches 1650 mm.
+
+C10 addendum (2026-10-05): the storage sentence of Section 9 said "about 44,000 frames"; now "the 42,520 frames of
+the table" (rev 94, gate PASS, scope ['9']). The technician procedure (docs/procedures, baseline 2026-10-05_12) and
+the code (commits ad5ebdc and later) now carry C06 to C10. Inconsistencies between the specification and the code
+found by that pass, logged as follow-ups for Neil rather than edited silently:
+- F1 (sentinels at series boundaries): Section 5 says T2 sentinels bracket each series; the code captures the
+  boundary sentinel on the target that is mounted at the time (T2 before and after A and after B-Z; T3b after B;
+  T5 after C and after D), so no extra T2 mount is needed. Recommendation: align the specification to the code,
+  with T2 at the session's start and end and wherever it is mounted anyway, because every target's drift chain is
+  continuous within its mount and the session-level chain is carried by T2 at A and B-Z.
+- F2 (approach direction): the Part I lead says every pose is approached from below in Z and from −H and −V; the
+  planner records the approach only for B-Z (from below) and the lateral sweep (alternating). The robot program
+  applies the rule; a code follow-up could record the approach for every pose.
+- F3 (coverage margin): Section 5, Step 1 states the 8 px margin only; the planner adds half the phase-jitter span
+  for the jittered series. Proposal: add that clause to Section 5, Step 1 (closed chunk; declare as intended).
+- F4 (staircase threshold): Section 6.2 says the optional staircase is useful where the quantum is at least about
+  1 mm; Neil's rule allows it from 0.1 mm. Both hold (allowed from 0.1 mm, well resolved from about 1 mm); the
+  procedure uses 0.1 mm. The measured quantum is passed to the planner through the parameters override.
+- F5 (code, in progress): the sentinel mount-reference flag becomes a manifest column as Section 9 lists it; the
+  optional staircase and lateral sweep get four-digit pose indices as Section 9 states.
 
 ## C11 — Section 10 Analysis A, noise vs Z (opened 2026-10-05)
 
