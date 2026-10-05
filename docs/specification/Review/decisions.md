@@ -298,3 +298,29 @@ Steps 1–6; R6 Part I lead paragraph defining station, field position, pose and
 labor with the technician procedure; Section 5 rewritten against those terms in a plain-language style (values in
 prose, the parameter name once in parentheses) as a sample for the P2 style decision. Code: planner changes
 delegated (sentinel target, tilt rule, legacy center, achieved fraction); the Section 9 budget row for A follows.
+
+## C07 — Section 6 Acquisition B, edge-target and Z-step series (opened 2026-10-05)
+
+Reviewer findings (proposals; nothing executed until the person closes the chunk):
+- C07-R1 (serious, design): the Z-step ladder is fixed in millimeters (0.1 to 4 mm) while the expected depth
+  quantum grows as Z²: at the indicative geometry (q = 0.125 px, k = f_x·B ≈ 51,600 px·mm) δZ_q is 0.39 mm at
+  400 mm, 1.55 mm at 800 mm and 6.2 mm at 1600 mm. At 1600 mm the whole ladder lies below one quantum, so δ_50
+  cannot be bracketed there; at 400 mm the 0.1 mm rung is a quarter quantum. Proposal: define the rungs as multiples
+  of the expected quantum at Z₀ (for example 0.25, 0.5, 1, 2, 4, 8 × δZ_q, the Tier-A q until A measures it, as
+  the staircase already does), with a floor of 2 × ROBOT_REPEATABILITY_MM so the truth ratio never exceeds 50 %;
+  the plan tool computes the millimeter rungs per station. Budget unchanged (6 rungs).
+- C07-R2 (serious, consistency): the edge series says nothing about the approach direction, although the person
+  asked earlier whether the approach discipline should cover every series; lateral backlash shifts the true edge
+  relative to the commanded pose. Because the read-back pose is logged and Section 11 projects the true edge from
+  the registered read-back pose, the shift is harmless only if that is what Section 11 uses. Proposal: state in the
+  Part I lead that every pose of every series is approached along the same direction (from below in Z, from −H and
+  −V laterally), and in Section 11, Step 3 that the true edge line is projected from the read-back pose carried
+  through the registration, never from the commanded pose.
+- C07-R3: the slant EDGE_SLANT_DEG and the as-built gap of each spacer set must be measured, not nominal; the
+  as-built record of Section 3.3 lists neither. Proposal: add both to the as-built record and say so in 6.1, Step 1.
+- C07-R4 (low): 6.1, Step 2 "centered" at 1600 mm gives a 69 px square with 8 px bands and 8 px jitter, which is
+  enough; say that the plan tool checks the square's size against the band and jitter at every shape station.
+- C07-P2 (style, pending): this section is the densest in parameter names; it is the next candidate for the
+  plain-language style once the person decides.
+
+Person's comments: (pending)
