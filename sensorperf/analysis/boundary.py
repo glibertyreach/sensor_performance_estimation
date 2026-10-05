@@ -290,23 +290,32 @@ def outcome_profiles(vec: np.ndarray, bins: BinSpec) -> dict[str, np.ndarray]:
 # Step 2: sigma_tot
 # ---------------------------------------------------------------------------
 def _sigma_from_a(previous: Mapping[str, Any] | None, station_z_mm: float) -> float | None:
-    """sigma_tot (mm) at the station nearest ``station_z_mm`` from Analysis A's result when it offers rows with
-    ``station_z_mm`` and ``sigma_tot_mm`` (looked up in its ``rows``, ``summary_rows`` or ``summary`` attributes,
-    on-axis main rows preferred); None when A did not run or has no such rows."""
+    """sigma_tot (mm) at the station nearest ``station_z_mm`` from Analysis A's result: its ``rows`` (StationNoise
+    dataclasses of sensorperf.analysis.noise; dict rows are accepted too) with ``station_z_mm`` and ``sigma_tot_mm``,
+    on-axis main rows preferred. None when A did not run or has no such rows."""
     result = None if previous is None else previous.get("A")
     if result is None:
         return None
+
+    def value(row: Any, name: str, default: Any = None) -> Any:
+        return row.get(name, default) if isinstance(row, Mapping) else getattr(row, name, default)
+
     for attribute in ("summary_rows", "rows", "summary"):
         rows = getattr(result, attribute, None)
         if not isinstance(rows, (list, tuple)):
             continue
-        usable = [r for r in rows if isinstance(r, Mapping) and r.get("sigma_tot_mm") is not None
-                  and r.get("station_z_mm") is not None and math.isfinite(float(r["sigma_tot_mm"]))
-                  and r.get("field", FIELD_POSITION_CENTER) in (FIELD_POSITION_CENTER, None)
-                  and r.get("subseries", "main") in ("main", None, "")]
+        usable = []
+        for row in rows:
+            sigma, station = value(row, "sigma_tot_mm"), value(row, "station_z_mm")
+            if sigma is None or station is None or not math.isfinite(float(sigma)):
+                continue
+            if value(row, "field", FIELD_POSITION_CENTER) not in (FIELD_POSITION_CENTER, None):
+                continue
+            if value(row, "subseries", "main") not in ("main", None, ""):
+                continue
+            usable.append((abs(float(station) - station_z_mm), float(sigma)))
         if usable:
-            best = min(usable, key=lambda r: abs(float(r["station_z_mm"]) - station_z_mm))
-            return float(best["sigma_tot_mm"])
+            return min(usable)[1]
     return None
 
 
