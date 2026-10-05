@@ -4,13 +4,13 @@ fig_zstep.png -- the order of visits of the B-Z (depth step) series, at one Z0.
 Left panel: the step ladder. For each step size delta of Z_STEP_LADDER_MM the target alternates
 between Z0 (visit A) and Z0 + delta (visit B) for Z_STEP_REPEATS cycles (A, B, A, B, ...). The
 vertical axis is the commanded offset from Z0 on a symmetric-log scale (the rungs span more than
-two decades); the horizontal axis is the visit number. Every visit gets a dial-indicator reading
-(circle), logged with FRAMES_PER_ZSTEP_POSE frames: the analysis uses the reading, not the commanded
-step, as the truth.
+two decades); the horizontal axis is the visit number. Every visit is captured with
+FRAMES_PER_ZSTEP_POSE frames; the analysis takes the truth of each step from the read-back robot pose,
+not from the commanded step.
 
 Right panel: the fine staircase. The target is swept from Z0 to Z0 + Z_STAIRCASE_QUANTA expected
-depth quanta in steps of one quantum / Z_STAIRCASE_SUBDIVISION, with Z_STAIRCASE_FRAMES frames per step
-and the indicator logged at each. The expected quantum is q Z^2 / k with the indicative disparity
+depth quanta in steps of one quantum / Z_STAIRCASE_SUBDIVISION, with Z_STAIRCASE_FRAMES frames per step.
+The expected quantum is q Z^2 / k with the indicative disparity
 quantum of the Tier-A simulator (the measured q of analysis A replaces it once it exists).
 
     python3 docs/procedures/figures/make_fig_zstep.py      (from the repository root)
@@ -72,7 +72,6 @@ def draw_ladder(ax) -> int:
         xs = [v[0] for v in mine]
         ys = [v[1] for v in mine]
         ax.step(xs, ys, where="post", color=color, lw=1.0)
-        ax.plot(xs, ys, linestyle="none", marker="o", ms=2.6, mfc="white", mec=color, mew=0.7)
         ax.text(xs[0] + 0.4, max(ys) * 1.35 + 0.004, f"{delta:g}", fontsize=7, color=color, va="bottom")
     ax.set_yscale("symlog", linthresh=SYMLOG_LINTHRESH_MM)
     ax.set_ylim(-0.004, PARAMS.z_step_ladder_mm[-1] * 3.0)
@@ -81,7 +80,7 @@ def draw_ladder(ax) -> int:
     ax.set_ylabel("commanded offset from Z0 (mm, symmetric-log scale)", fontsize=9)
     ax.set_title(f"(a) step ladder: {len(PARAMS.z_step_ladder_mm)} step sizes (labels, mm), {PARAMS.z_step_repeats} ABAB cycles each",
                  fontsize=9.5)
-    ax.text(0.99, 0.03, f"every visit: {PARAMS.frames_per_zstep_pose} frames and one dial-indicator reading (circle)",
+    ax.text(0.99, 0.03, f"every visit: {PARAMS.frames_per_zstep_pose} frames",
             transform=ax.transAxes, ha="right", fontsize=7.5, color=GRAY)
     ax.grid(axis="y", color="#e5e5e5", lw=0.5)
     return len(PARAMS.z_step_ladder_mm)
@@ -95,7 +94,6 @@ def draw_staircase(ax) -> None:
     offsets = [index * step for index in range(count)]
     visit = list(range(count))
     ax.step(visit, offsets, where="post", color=BLUE, lw=1.2)
-    ax.plot(visit, offsets, linestyle="none", marker="o", ms=4.0, mfc="white", mec=BLUE, mew=1.0)
     for k in range(int(PARAMS.z_staircase_quanta) + 1):
         ax.axhline(k * quantum, color=GRAY, lw=0.6, linestyle=":")
         ax.text(count - 0.5, k * quantum, f"{k} quantum" if k == 1 else (f"{k} quanta" if k else "Z0"), fontsize=7,
@@ -105,7 +103,7 @@ def draw_staircase(ax) -> None:
     ax.set_title(f"(b) fine staircase at Z0 = {z0:g} mm",
                  fontsize=9.5)
     ax.text(0.02, 0.88, f"steps of one expected quantum / {PARAMS.z_staircase_subdivision};\nexpected quantum q Z^2 / k = {quantum:.2f} mm (indicative q);\n"
-            f"{PARAMS.z_staircase_frames} frames and one indicator reading (circle) per step",
+            f"{PARAMS.z_staircase_frames} frames per step",
             transform=ax.transAxes, fontsize=7.5, va="top", color=GRAY)
 
 

@@ -110,11 +110,11 @@ MANIFEST_COLUMNS = (
     ("file", "procedure", "target_id", "gap_mm", "station_z_mm", "field", "pose_index", "frame_index",
      "seed", "offset_h_mm", "offset_v_mm")
     + ROBOT_POSE_COLUMNS + TARGET_POSE_COLUMNS
-    + ("indicator_mm", "timestamp", "sensor_temp_c", "air_temp_c", "ambient_ir", "sensor_config_id",
+    + ("timestamp", "sensor_temp_c", "air_temp_c", "ambient_ir", "sensor_config_id",
        "subseries", "tilt_axis", "tilt_deg", "step_mm", "visit", "level_index"))
 """All manifest columns in order. Any further column is kept as string metadata."""
 
-OPTIONAL_FLOAT_COLUMNS = ("gap_mm", "indicator_mm", "sensor_temp_c", "air_temp_c", "ambient_ir", "step_mm",
+OPTIONAL_FLOAT_COLUMNS = ("gap_mm", "sensor_temp_c", "air_temp_c", "ambient_ir", "step_mm",
                           "tilt_deg")
 """Float columns that may be empty."""
 
@@ -205,7 +205,6 @@ class FrameRecord:
     seed: int | None = None
     offset_h_mm: float = 0.0
     offset_v_mm: float = 0.0
-    indicator_mm: float | None = None
     timestamp: str = ""
     sensor_temp_c: float | None = None
     air_temp_c: float | None = None
@@ -312,7 +311,7 @@ def record_to_row(record: FrameRecord, manifest_dir: Path) -> list[str]:
         "gap_mm": record.gap_mm, "station_z_mm": record.station_z_mm, "field": record.field,
         "pose_index": record.pose_index, "frame_index": record.frame_index, "seed": record.seed,
         "offset_h_mm": record.offset_h_mm, "offset_v_mm": record.offset_v_mm,
-        "indicator_mm": record.indicator_mm, "timestamp": record.timestamp,
+        "timestamp": record.timestamp,
         "sensor_temp_c": record.sensor_temp_c, "air_temp_c": record.air_temp_c, "ambient_ir": record.ambient_ir,
         "sensor_config_id": record.sensor_config_id, "subseries": record.subseries,
         "tilt_axis": record.tilt_axis, "tilt_deg": record.tilt_deg, "step_mm": record.step_mm,
@@ -371,7 +370,6 @@ def load_manifest(path: str | Path) -> list[FrameRecord]:
                 seed=_optional_int(row.get("seed"), "seed", index),
                 offset_h_mm=_optional_float(row.get("offset_h_mm"), "offset_h_mm", index) or 0.0,
                 offset_v_mm=_optional_float(row.get("offset_v_mm"), "offset_v_mm", index) or 0.0,
-                indicator_mm=_optional_float(row.get("indicator_mm"), "indicator_mm", index),
                 timestamp=(row.get("timestamp") or "").strip(),
                 sensor_temp_c=_optional_float(row.get("sensor_temp_c"), "sensor_temp_c", index),
                 air_temp_c=_optional_float(row.get("air_temp_c"), "air_temp_c", index),

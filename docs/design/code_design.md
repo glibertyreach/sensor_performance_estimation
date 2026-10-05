@@ -101,6 +101,24 @@ docs/procedures/performance_test_procedure.md (+ figures/, build/, Review/)
   truth target pose; `Registration.flange_to_base_for(target_to_camera)` the
   pose to command. `registration.json` holds `camera_to_base` and
   `target_to_flange` as row-major 4 x 4 matrices.
+- **Z-step truth** (Analysis B-Z): the ground truth of a depth step is the
+  read-back robot pose carried into the camera frame through the registration
+  (the manifest's `target_pose_camera`). The true displacement between two
+  visits is the difference of the registered front-plane depth along the
+  optical axis; for the fronto-parallel plate of series Z this is the z
+  component of the target pose. The truth is a DIFFERENCE of registered target
+  poses between visits, so the registration's translation cancels and its
+  rotation error enters only through the cosine of the angle error
+  (negligible): only the robot's relative motion accuracy matters. The
+  commanded `step_mm` is the label of the rung, never the truth. Rungs whose
+  true step is below `robot_repeatability_mm` are flagged
+  (`truth_reliable` False): reported, kept in the detection curve, excluded from
+  the gain regression; a delta_50 below the smallest reliable rung is reported
+  as an upper bound (`delta_50_is_bound`). The robot's own read-back scatter
+  (`robot_readback_repeatability_mm`, from the A -> A visit pairs) is reported
+  per station. Series Z is approached from below
+  (`z_step_approach_overshoot_mm`) and its pose log needs x_mm, y_mm, z_mm with
+  at least three decimals (`build_manifest` warns otherwise).
 - **Manifest** (`io/manifest.py`): one `FrameRecord` per frame with the Section
   9 columns; `pose_key()` groups frames of a pose, `configuration_key()` groups
   poses of one (procedure, target, gap, station, field, sub-series). Lateral
@@ -256,7 +274,7 @@ Section 7, Step 1; Section 8, Step 3) in the way each section says.
 ### acquisition/pose_log.py
 ```python
 # The robot writes one row per captured frame (or per pose, with the frame count): columns
-#   file (or pose fields), x_mm, y_mm, z_mm, rotation_type, r1..r9, timestamp, indicator_mm, sensor_temp_c, air_temp_c, ambient_ir
+#   file (or pose fields), x_mm, y_mm, z_mm, rotation_type, r1..r9, timestamp, sensor_temp_c, air_temp_c, ambient_ir
 # rotation_type as in the calibration repository's make_manifest (none, quaternion_wxyz, quaternion_xyzw,
 # euler_zyx_deg, euler_xyz_deg, fixed_xyz_deg, rotvec_deg, matrix); reuse that conversion table verbatim.
 def build_manifest(pose_log_csv, captures_dir, plan_csv, registration: Registration, sensor_config_id) -> list[FrameRecord]
@@ -317,3 +335,5 @@ inward to the largest offset that fits (a plate may cover the whole image
 across an axis); the D shuffle is applied within each target mounting; the
 legacy repeatability metrics follow testZRepeatabilityBrownBoard.py's
 definitions (ddof 0, boxes skipped when outside the image).
+
+Design change (2026-10-05): the dial indicator on the target adapter, the first version's step truth of series Z, is removed; the read-back robot pose through the registration is the step truth (Section 4).

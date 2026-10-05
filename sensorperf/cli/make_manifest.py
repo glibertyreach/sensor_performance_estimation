@@ -21,7 +21,7 @@ Inputs
     --pose-log PATH   CSV, one row per frame (a ``file`` column) or one row per
                       pose (the Section 9 identity columns and ``frames``). Robot
                       pose columns x_mm, y_mm, z_mm, rotation_type, r1..r9;
-                      optional timestamp, indicator_mm, sensor_temp_c, air_temp_c,
+                      optional timestamp, sensor_temp_c, air_temp_c,
                       ambient_ir. rotation_type is one of none, quaternion_wxyz,
                       quaternion_xyzw, euler_zyx_deg, euler_xyz_deg, fixed_xyz_deg,
                       rotvec_deg, matrix (the table of sensorperf.acquisition.pose_log,

@@ -32,7 +32,7 @@ from sensorperf.acquisition.plan import (
     PlannedCapture, SERIES_ORDER, TIER_A_DISPARITY_QUANTUM_PX, budget_total, capture_budget, capture_duration_s,
     camera_of, fit_violation_px, format_budget_table, insert_sentinels, jitter_offset_mm, place_in_field,
     plan_detection_series, plan_edge_series, plan_full_session, plan_noise_series, plan_registration,
-    plan_zstep_series, read_plan_csv, write_plan,
+    plan_zstep_series, read_plan_csv, write_plan, APPROACH_FROM_BELOW, MIN_POSE_LOG_DECIMALS,
 )
 from sensorperf.acquisition.pose_log import PoseLogError, build_manifest, build_manifest_with_report
 from sensorperf.cli import check_captures as check_cli
@@ -319,6 +319,17 @@ def test_zstep_ladder_alternates_with_the_right_displacement():
     assert last.step_mm == pytest.approx(6.0)
 
 
+def test_zstep_visits_are_approached_from_below():
+    """Section 8, series Z: every visit of the ladder and of the staircase carries the note that it is approached from
+    below, with the overshoot of ``z_step_approach_overshoot_mm``, and plan_summary.txt says so."""
+    plan = plan_zstep_series(SMALL_PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED))
+    assert plan and all(c.notes["approach"] == APPROACH_FROM_BELOW == "from below" for c in plan)
+    assert all(c.notes["approach_overshoot_mm"] == SMALL_PARAMS.z_step_approach_overshoot_mm == 2.0 for c in plan)
+    from sensorperf.acquisition.plan import plan_summary_text
+    text = plan_summary_text(plan, SMALL_PARAMS, GEOMETRY)
+    assert "approach: every visit from below" in text and "at least 3 decimals" in text
+
+
 def test_budget_matches_the_document(full_plan, capsys):
     """Section 9: poses, frames and robot hours per series ("10 frames/s and 3 s per move plus settle"). The formula
     reproduces the document's 6.9 h from its own 6,710 poses and 46,910 frames. The plan's totals are compared with the
@@ -446,13 +457,12 @@ def per_frame_log(path: Path, plan: list[PlannedCapture], registration: Registra
     commanded flange pose, shifted by ``noise_mm`` along x when asked."""
     with path.open("w", newline="") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["file", "x_mm", "y_mm", "z_mm", "rotation_type", "r1", "r2", "r3", "r4", "timestamp",
-                         "indicator_mm"])
+        writer.writerow(["file", "x_mm", "y_mm", "z_mm", "rotation_type", "r1", "r2", "r3", "r4", "timestamp"])
         for c in plan:
             flange = registration.flange_to_base_for(c.target_to_camera)
             for f in range(c.frames):
                 writer.writerow([c.file_name(f), *(flange.translation + [noise_mm, 0.0, 0.0]), "quaternion_wxyz",
-                                 *quaternion_wxyz(flange.rotation), f"2026-10-05T10:00:{f:02d}", 1.25 + f])
+                                 *quaternion_wxyz(flange.rotation), f"2026-10-05T10:00:{f:02d}"])
 
 
 def test_build_manifest_from_a_per_frame_log(tmp_path: Path):
@@ -480,7 +490,6 @@ def test_build_manifest_from_a_per_frame_log(tmp_path: Path):
                (planned.subseries, planned.seed, planned.visit, planned.step_mm, planned.tilt_axis)
         assert (record.offset_h_mm, record.offset_v_mm) == (planned.offset_h_mm, planned.offset_v_mm)
         assert record.sensor_config_id == "cfgA" and record.timestamp.startswith("2026-10-05")
-        assert record.indicator_mm == pytest.approx(1.25 + record.frame_index)
         assert record.path.name == planned.file_name(record.frame_index)
     assert [(r.pose_key(), r.frame_index) for r in records] == \
            [(c.pose_key(), f) for c in plan for f in range(c.frames)]
@@ -488,6 +497,29 @@ def test_build_manifest_from_a_per_frame_log(tmp_path: Path):
     write_manifest_csv(root / "manifest.csv", records)
     from sensorperf.io.manifest import load_manifest
     assert len(load_manifest(root / "manifest.csv")) == len(records)
+
+
+def test_build_manifest_warns_when_the_series_z_log_is_rounded(tmp_path: Path):
+    """Section 11 (pose log): the read-back pose is the step truth of series Z, so a log whose z_mm values all have fewer
+    than three decimals draws a warning that names the problem; the same log with full resolution does not."""
+    registration = random_registration()
+    plan = plan_zstep_series(SMALL_PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED))[:8]
+    root = tmp_path / "session"
+    write_empty_captures(root, plan)
+    write_plan(tmp_path / "plan", plan, None, SMALL_PARAMS, GEOMETRY)
+    per_frame_log(tmp_path / "full.csv", plan, registration)
+    _, messages = build_manifest_with_report(tmp_path / "full.csv", root, tmp_path / "plan" / PLAN_CSV_NAME, registration)
+    assert not any("pose log resolution" in w for w in messages.warnings)
+    with (tmp_path / "full.csv").open(newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    for row in rows:
+        row["z_mm"] = f"{float(row['z_mm']):.{MIN_POSE_LOG_DECIMALS - 2}f}"          # 0.1 mm rounding
+    with (tmp_path / "rounded.csv").open("w", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    _, messages = build_manifest_with_report(tmp_path / "rounded.csv", root, tmp_path / "plan" / PLAN_CSV_NAME, registration)
+    assert any("pose log resolution" in w and "fewer than 3 decimals" in w for w in messages.warnings)
 
 
 def test_build_manifest_from_a_per_pose_log_and_unmatched_items(tmp_path: Path):

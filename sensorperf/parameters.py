@@ -249,6 +249,14 @@ class CharacterizationParameters:
     # Z-step test
     z_step_ladder_mm: tuple[float, ...] = (0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0, 4.0)
     """Commanded step sizes of the B-Z ladder."""
+    robot_repeatability_mm: float = 0.05
+    """Position repeatability of the robot (ISO 9283), the equipment requirement of Section 3.1; a commanded Z step
+    smaller than this has a step truth no better than the robot itself, so such ladder rungs are reported but flagged."""
+    z_step_approach_overshoot_mm: float = 2.0
+    """Every visit of series Z is approached from the same direction so that the backlash and compliance of the robot
+    joints (a different elastic and frictional state after a move in the opposite direction) do not enter the A / B
+    difference: the robot first moves this far below the pose (to a smaller Z, nearer the sensor) and then moves up onto
+    the pose, in the direction of increasing Z."""
     z_step_repeats: int = 10
     """ABAB cycles for each step size."""
     z_staircase_subdivision: int = 10

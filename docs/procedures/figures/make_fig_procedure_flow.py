@@ -67,7 +67,7 @@ CAPTURES = [
     ("R", f"R  registration\nT1 at {PARAMS.registration_poses} poses"),
     ("A", f"A  noise plate\nT2, {len(PARAMS.noise_stations_mm())} Z x {len(FIELD_POSITION_CODES)} field pos."),
     ("B-HV", "B-HV  edges\nT3a, T3b, 2 gaps"),
-    ("B-Z", "B-Z  depth steps\nT2 + dial indicator"),
+    ("B-Z", "B-Z  depth steps\nT2"),
     ("C", "C  area arrays\nT4, T5, 2 gaps"),
     ("D", f"D  detection trials\nT4, T5, {PARAMS.frames_per_detection_trial} frame per pose"),
 ]

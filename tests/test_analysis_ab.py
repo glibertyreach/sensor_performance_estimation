@@ -14,6 +14,7 @@ import csv
 import json
 import math
 import re
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -22,7 +23,8 @@ import pytest
 from sensorperf.analysis import noise, resolution_depth, resolution_lateral
 from sensorperf.cli import analyze as analyze_cli
 from sensorperf.cli import simulate as simulate_cli
-from sensorperf.io.manifest import SUBSERIES_MAIN
+from sensorperf.geometry.transforms import RigidTransform
+from sensorperf.io.manifest import SUBSERIES_MAIN, VISIT_B
 from sensorperf.io.session import FORWARD_MODEL_FILE_NAME, SESSION_LOG_FILE_NAME, Session
 
 SIMULATION_SEED = 1
@@ -61,6 +63,8 @@ S50_TOLERANCE_PX = 0.5
 """Test B, Step 8: allowed difference between the measured mean s_50 and the analytic value."""
 GAIN_RANGE = (0.8, 1.2)
 """Test Z, Step 2: range of the gain."""
+ROBOT_REPEATABILITY_MM = simulate_cli.DEMO_ROBOT_REPEATABILITY_MM
+"""Per-axis scatter of the read-back pose in the quick session."""
 QUANTUM_FACTOR = 2.0
 """Test Z, Step 5: the staircase quantum is within this factor of q Z^2 / k."""
 
@@ -373,13 +377,112 @@ def test_b_step13_outputs(result_b, analysis_dir):
 # Analysis B-Z
 # ---------------------------------------------------------------------------
 def test_z_step2_gain(result_z):
-    """Section 11.2, Step 2: the gain of the sensed step against the true (commanded: the synthetic session has no indicator
-    readings) step is between 0.8 and 1.2 for every patch size, with an intercept far below the smallest ladder step used."""
+    """Section 11.2, Step 2: the gain of the sensed step against the true step (the read-back pose difference) is between
+    0.8 and 1.2 for every patch size, with an intercept far below the smallest ladder step used. The demonstration
+    ladder (0.2, 1, 4 mm) is above the robot repeatability, so no rung is flagged."""
     assert len(result_z.patches) == 3
     for patch in result_z.patches:
         assert GAIN_RANGE[0] < patch.gain < GAIN_RANGE[1], patch.patch_px
         assert abs(patch.intercept_mm) < 0.5
-    assert any("commanded" in note for note in result_z.notes)
+        assert patch.flagged_rungs == 0 and all(patch.rung_reliable) and all(patch.pair_reliable)
+    assert not any("flagged" in note for note in result_z.notes)
+
+
+def _shift_b_visits(session, shift_mm):
+    """A copy of the session whose B-visit records carry a target pose shifted by ``shift_mm`` along the optical axis
+    (as if the robot had read back a slightly different Z); the images are untouched."""
+    records = []
+    for record in session.records:
+        if record.visit == VISIT_B:
+            pose = RigidTransform(record.target_pose_camera.rotation, record.target_pose_camera.translation
+                                  + np.array([0.0, 0.0, shift_mm]))
+            record = replace(record, target_pose_camera=pose)
+        records.append(record)
+    return replace(session, records=records)
+
+
+def test_z_truth_is_the_read_back_pose(session, tmp_path):
+    """Section 11.2, Step 1: the true step of a pair is the difference of the registered front-plane depth (the z of the
+    manifest's target pose), not the commanded step_mm: shifting the B-visit poses by 0.01 mm shifts every true step by
+    0.01 mm while the commanded labels stay; the truth source is recorded."""
+    shift = 0.01
+    shifted = resolution_depth.run_depth_resolution(_shift_b_visits(session, shift), tmp_path, {})
+    plain = resolution_depth.run_depth_resolution(session, tmp_path, {})
+    for moved, original in zip(shifted.patches, plain.patches):
+        assert moved.pair_true_mm == pytest.approx([t + shift for t in original.pair_true_mm], abs=1e-9)
+        assert moved.rung_labels_mm == original.rung_labels_mm
+    assert plain.staircases[0].truth_source == resolution_depth.TRUTH_SOURCE == \
+        "read-back robot pose through the registration"
+    assert plain.staircases[0].true_z_mm == sorted(plain.staircases[0].true_z_mm)
+
+
+def test_z_rungs_below_the_robot_repeatability_are_flagged(session, tmp_path):
+    """Section 11.2, Step 2: with the robot repeatability set above the smallest demonstration rung (0.2 mm < 0.3 mm) that
+    rung gets truth_reliable False, is excluded from the gain regression, stays in the detection curve, and the note
+    and the CSV files say so; the larger rungs stay reliable."""
+    flagged_session = replace(session, params=replace(session.params, robot_repeatability_mm=0.3))
+    result = resolution_depth.run_depth_resolution(flagged_session, tmp_path, {})
+    resolution_depth.write_outputs(result, tmp_path)
+    for patch in result.patches:
+        assert patch.flagged_rungs == 1
+        assert patch.rung_labels_mm == pytest.approx([0.2, 1.0, 4.0])
+        assert patch.rung_reliable == [False, True, True]
+        assert len(patch.steps_mm) == 3 and len(patch.detections) == 3          # kept in the detection curve
+        assert "1 of 3 ladder rungs flagged" in patch.note
+        keep = np.array(patch.pair_reliable)
+        expected = np.polyfit(np.array(patch.pair_true_mm)[keep], np.array(patch.pair_delta_mm)[keep], 1)[0]
+        assert patch.gain == pytest.approx(expected)
+    assert any("flagged" in note for note in result.notes)
+    summary = _read_csv(tmp_path / resolution_depth.SUMMARY_CSV_NAME)
+    assert {row["truth_reliable"] for row in summary} == {"False"}
+    assert {row["truth_source"] for row in summary} == {"read-back robot pose through the registration"}
+    rungs = _read_csv(tmp_path / resolution_depth.RUNGS_CSV_NAME)
+    assert [(float(r["step_mm"]), r["truth_reliable"]) for r in rungs if r["patch_px"] == "1"] == \
+        [(0.2, "False"), (1.0, "True"), (4.0, "True")]
+
+
+def test_z_robot_readback_scatter_is_reported(result_z, session, tmp_path):
+    """Section 11.2 (truth from the read-back pose): the scatter of one visit's read-back Z, from the A -> A pairs, is
+    within a factor 2 of the simulator's robot repeatability (0.05 mm per axis in the demonstration session); the
+    station flag agrees with the number, and the mean read-back minus commanded step of the A -> B pairs is small."""
+    for patch in result_z.patches:
+        assert ROBOT_REPEATABILITY_MM / 2.0 < patch.robot_readback_repeatability_mm < ROBOT_REPEATABILITY_MM * 2.0
+        # The demonstration robot scatters at exactly the specified repeatability, so the flag may go either way; it
+        # must agree with the number.
+        assert patch.robot_scatter_exceeds_spec == (patch.robot_readback_repeatability_mm > session.params.robot_repeatability_mm)
+        assert abs(patch.readback_minus_commanded_mm) < 4.0 * ROBOT_REPEATABILITY_MM
+    flagged = replace(session, params=replace(session.params, robot_repeatability_mm=0.01))
+    again = resolution_depth.run_depth_resolution(flagged, tmp_path, {})
+    assert all(p.robot_scatter_exceeds_spec for p in again.patches)
+    assert any("exceeds its repeatability" in note for note in again.notes)
+
+
+def test_z_delta_50_below_the_smallest_reliable_rung_is_a_bound(session, tmp_path):
+    """Section 11.2, Step 4: when the fitted delta_50 falls below the smallest rung with a reliable truth, the result is
+    that rung, flagged as a bound, with the note, no interval, and it stays out of the forward-model terms."""
+    bound_session = replace(session, params=replace(session.params, robot_repeatability_mm=0.5))
+    result = resolution_depth.run_depth_resolution(bound_session, tmp_path, {})
+    bounds = [p for p in result.patches if p.delta_50_is_bound]
+    assert bounds, "the 20 x 20 patch resolves steps below 1 mm, which are below the smallest reliable rung here"
+    for patch in bounds:
+        assert patch.delta_50_mm == pytest.approx(min(s for s, ok in zip(patch.steps_mm, patch.rung_reliable) if ok))
+        assert patch.delta_50_fit_mm < patch.delta_50_mm
+        assert "below the robot's repeatability; bound, not a measurement" in patch.note
+        assert math.isnan(patch.delta_50_lower_mm)
+    resolution_depth.write_outputs(result, tmp_path)
+    rows = _read_csv(tmp_path / resolution_depth.SUMMARY_CSV_NAME)
+    assert {r["delta_50_is_bound"] for r in rows} >= {"True"}
+
+
+def test_z_staircase_notes_steps_below_the_robot_repeatability(session, result_z, tmp_path):
+    """Section 11.2, Step 5: when the fine step (quantum / subdivision) is smaller than the robot repeatability the
+    staircase note says the plateau widths carry that uncertainty (a note, not a refusal); with the specified 0.05 mm
+    the quick session's fine step is larger and there is no such note."""
+    assert "below the robot's repeatability" not in result_z.staircases[0].note
+    coarse_robot = replace(session, params=replace(session.params, robot_repeatability_mm=10.0))
+    result = resolution_depth.run_depth_resolution(coarse_robot, tmp_path, {})
+    assert "staircase steps" in result.staircases[0].note and "below the robot's repeatability" in result.staircases[0].note
+    assert result.staircases[0].true_z_mm
 
 
 def test_z_step4_patch_size_lowers_delta_50(result_z):

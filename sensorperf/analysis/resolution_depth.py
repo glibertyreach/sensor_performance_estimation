@@ -8,20 +8,34 @@ Steps (per station Z0)
      of one step size, Delta = mean(Z at B) - mean(Z at A) for patches of ``zstep_patch_sizes_px`` (1 px, 5 x 5,
      20 x 20), tiled over the region of interest (non-overlapping tiles fully inside the ROI of both visits; the
      patch means of the frame-mean depth images are box filters, ``scipy.ndimage.uniform_filter``, sampled at the tile
-     centers). The true step is the dial-indicator difference (indicator of B minus indicator of A); where the
-     manifest has no indicator reading the commanded step (``step_mm``) is used and the result says so.
-  2  Regression of the mean Delta on the true step over the ladder: slope (gain), intercept, largest deviation.
+     centers). The true step is the difference of the registered front-plane depth of the two visits along the
+     optical axis: the z component of the manifest's ``target_pose_camera`` (the read-back robot pose carried into the
+     camera frame through the registration) at B minus at A. For a fronto-parallel plate, which series Z uses, the
+     front plane is perpendicular to the optical axis and the z component of the target pose is its depth. The
+     commanded ``step_mm`` is only the label of the rung; it is never the truth.
+  2  Regression of the mean Delta on the true step over the ladder: slope (gain), intercept, largest deviation. Rungs
+     whose true step is below ``robot_repeatability_mm`` (the step truth is then no better than the robot itself) get
+     ``truth_reliable`` = False: they are excluded from this regression, kept in the detection curve of Step 4, and the
+     note says how many rungs were flagged. The registration enters only through the DIFFERENCE of two registered
+     poses: its translation cancels and a rotation error acts through the cosine of the angle error (negligible), so
+     the step truth is as good as the robot's relative motion accuracy.
+     The robot's own read-back scatter is reported from the A -> A pairs (``robot_readback_repeatability_mm``, per
+     station) with the mean read-back minus commanded step of the A -> B pairs; a station whose scatter exceeds
+     ``robot_repeatability_mm`` is flagged.
   3  The null distribution: Delta of consecutive A -> A visits (same Z0, no commanded step) per patch size;
      tau is its (1 - DETECTION_FALSE_ALARM_TARGET) quantile. Delta and -Delta are both used, so that tau does not
      depend on the sign of the commanded step.
   4  A step counts as detected if Delta > tau in the commanded direction. The detection fraction per step size, pooled
      over pairs and tiles, is fitted with the psychometric model of Section 13 (``stats.psychometric``, logistic, on
      ln delta, guess rate = the measured A -> A false-alarm fraction, lapse rate at most DETECTION_LAPSE_RATE_MAX);
-     delta_50 is the step at 50 percent corrected detection. Its confidence interval is a bootstrap over ABAB cycles
+     delta_50 is the step at 50 percent corrected detection; when it falls below the smallest rung with a reliable
+     truth it is reported as an upper bound (``delta_50_is_bound``, delta_50_mm = that rung): below the robot's
+     repeatability the ladder cannot measure it. Its confidence interval is a bootstrap over ABAB cycles
      (tau and the guess rate are held fixed). The scaling of delta_50 with patch size is compared with the
      1 / sqrt(area) = 1 / side expected for uncorrelated noise.
   5  The staircase (sub-series "staircase", ordered by the commanded displacement): sensed Z of single pixels and of the
-     20 x 20 patch against the indicator Z; the measured quantum from plateau widths of single pixels, compared with
+     20 x 20 patch against the read-back Z of each step (the z component of the target pose, whose uncertainty is the
+     robot repeatability; a note says when the fine step is smaller than that); the measured quantum from plateau widths of single pixels, compared with
      q Z^2 / k using q of Analysis A (``previous["A"]``) when it is available.
 
 The quantum of Step 5. Plateau widths need a staircase much finer than the quantum, with many steps. When too few
@@ -60,9 +74,20 @@ FIGURE_STEMS = {"detection": "Z_detection_curves", "sensed": "Z_sensed_vs_true",
 SUMMARY_COLUMNS = (
     "station_z_mm", "patch_px", "gain", "intercept_mm", "max_deviation_mm", "tau_mm", "delta_50_mm",
     "delta_50_lower_mm", "delta_50_upper_mm", "quantum_mm", "quantum_predicted_mm", "cycles", "quantum_method",
-    "false_alarm_fraction", "tiles_per_pair", "truth_source", "note")
+    "false_alarm_fraction", "tiles_per_pair", "truth_source", "truth_reliable", "delta_50_is_bound",
+    "robot_readback_repeatability_mm", "readback_minus_commanded_mm", "robot_scatter_exceeds_spec", "note")
 """Columns of Z_resolution_summary.csv: the Section 11.2 list, then the quantum method, the measured false-alarm
-fraction, the tiles per pair, where the true step came from, and a note."""
+fraction, the tiles per pair, where the true step came from, whether every ladder rung of the station has a reliable
+truth (False when any rung is flagged), whether delta_50 is only an upper bound, the robot's read-back scatter from the A -> A
+pairs and the mean read-back minus commanded step of the A -> B pairs, whether that scatter exceeds
+``robot_repeatability_mm``, and a note."""
+RUNGS_CSV_NAME = "Z_resolution_rungs.csv"
+RUNG_COLUMNS = (
+    "station_z_mm", "patch_px", "step_mm", "true_step_mm", "mean_delta_mm", "detections", "trials",
+    "detection_fraction", "readback_minus_commanded_mm", "truth_source", "truth_reliable")
+"""Columns of Z_resolution_rungs.csv, one row per station, patch size and ladder rung: the commanded step (the label),
+the mean true step, the mean sensed step, the detection counts, the read-back minus commanded step, and ``truth_reliable`` (False for a rung whose true step
+is below ``robot_repeatability_mm``: reported, but not part of the gain regression)."""
 
 OKABE_ITO_BLACK = "#000000"
 OKABE_ITO_ORANGE = "#E69F00"
@@ -111,8 +136,22 @@ FIT_CURVE_POINTS = 100
 """Points of the smooth fitted curves."""
 MIN_FIT_POINTS_FOR_SCALING = 2
 """Fewest patch sizes with a delta_50 for the scaling exponent."""
-TRUTH_INDICATOR = "indicator"
-TRUTH_COMMANDED = "commanded step_mm (no indicator reading in the manifest)"
+TRUTH_SOURCE = "read-back robot pose through the registration"
+"""Where the true Z step comes from: the manifest's ``target_pose_camera`` (read-back flange pose through the
+registration), reported in the ``truth_source`` column."""
+TRUTH_COMPARISON_TOLERANCE_MM = 1.0e-9
+"""Numerical guard of the comparisons of a true step with the robot repeatability and of a commanded step with zero:
+a step that equals the limit up to rounding of the registration product counts as reaching it, mm."""
+PAIR_DIFFERENCE_SIGMA_FACTOR = math.sqrt(2.0)
+"""The standard deviation of the difference of two independent visits is this factor times the scatter of one visit."""
+MIN_PAIRS_FOR_SCATTER = 2
+"""Fewest A -> A read-back differences for a standard deviation."""
+BOUND_NOTE_ROBOT = "below the robot's repeatability; bound, not a measurement"
+"""Note of a delta_50 that falls below the smallest rung whose truth is reliable (smaller rungs were flagged)."""
+BOUND_NOTE_LADDER = "below the smallest tested step; bound, not a measurement"
+"""Note of a delta_50 that falls below the smallest rung of a ladder in which no rung was flagged."""
+OPTICAL_AXIS = 2
+"""Index of the optical axis (camera z) in a translation vector."""
 
 
 # ---------------------------------------------------------------------------
@@ -152,6 +191,18 @@ class PatchResult:
     delta_50_mm: float = float("nan")
     delta_50_lower_mm: float = float("nan")
     delta_50_upper_mm: float = float("nan")
+    delta_50_is_bound: bool = False
+    """True when the fitted delta_50 fell below the smallest reliable rung: ``delta_50_mm`` is then that rung, an upper
+    bound, not a measurement."""
+    delta_50_fit_mm: float = float("nan")
+    """The fitted delta_50 before it was replaced by a bound (equal to ``delta_50_mm`` otherwise)."""
+    robot_readback_repeatability_mm: float = float("nan")
+    """Scatter of one visit's read-back Z at the station: the standard deviation of the A -> A read-back differences of
+    the ladder divided by sqrt(2), mm."""
+    readback_minus_commanded_mm: float = float("nan")
+    """Mean over the A -> B pairs of the read-back step minus the commanded step, mm."""
+    robot_scatter_exceeds_spec: bool = False
+    """True when ``robot_readback_repeatability_mm`` exceeds ``robot_repeatability_mm``."""
     cycles: int = 0
     tiles_per_pair: float = float("nan")
     steps_mm: list[float] = field(default_factory=list)
@@ -161,6 +212,17 @@ class PatchResult:
     trials: list[int] = field(default_factory=list)
     pair_true_mm: list[float] = field(default_factory=list)
     pair_delta_mm: list[float] = field(default_factory=list)
+    pair_reliable: list[bool] = field(default_factory=list)
+    """For each pair of ``pair_true_mm``: False when the rung's true step is below the robot repeatability."""
+    rung_labels_mm: list[float] = field(default_factory=list)
+    """Commanded step (``step_mm``, the label of the rung) of each level of ``steps_mm``."""
+    rung_readback_offset_mm: list[float] = field(default_factory=list)
+    """Mean read-back step minus the commanded step of each level of ``steps_mm``, mm."""
+    rung_reliable: list[bool] = field(default_factory=list)
+    """``truth_reliable`` of each level of ``steps_mm``: False when the mean true step of the rung is below
+    ``robot_repeatability_mm``."""
+    flagged_rungs: int = 0
+    """Number of rungs with ``truth_reliable`` False."""
     fit_alpha: float = float("nan")
     fit_beta: float = float("nan")
     fit_lapse: float = float("nan")
@@ -174,7 +236,9 @@ class StaircaseResult:
     """Step 5 for one station."""
 
     station_z_mm: float
-    indicator_mm: list[float] = field(default_factory=list)
+    true_z_mm: list[float] = field(default_factory=list)
+    """Read-back Z of each staircase step: the z component of the target pose in the camera frame (read-back robot pose
+    through the registration)."""
     patch_mean_mm: list[float] = field(default_factory=list)
     """Sensed Z of the 20 x 20 patch at each staircase point."""
     pixel_curves_mm: list[list[float]] = field(default_factory=list)
@@ -190,7 +254,7 @@ class StaircaseResult:
     predicted_quantum_mm: float = float("nan")
     patch_rms_about_line_mm: float = float("nan")
     patch_is_smooth: bool | None = None
-    truth_source: str = TRUTH_INDICATOR
+    truth_source: str = TRUTH_SOURCE
     note: str = ""
 
 
@@ -212,10 +276,10 @@ class DepthResolutionResult:
 
     def forward_model_terms(self) -> dict[str, Any]:
         """The measured depth quantum per station and delta_50 of the 1-px patch per station (mm), keyed by the station
-        depth in mm."""
+        depth in mm. An upper bound (``delta_50_is_bound``) is not a measurement and is left out."""
         quanta = {f"{s.station_z_mm:g}": s.quantum_mm for s in self.staircases if math.isfinite(s.quantum_mm)}
         delta = {f"{p.station_z_mm:g}": p.delta_50_mm for p in self.patches
-                 if p.patch_px == 1 and math.isfinite(p.delta_50_mm)}
+                 if p.patch_px == 1 and math.isfinite(p.delta_50_mm) and not p.delta_50_is_bound}
         return {"depth_quantum_mm": quantum_or_none(quanta), "delta_50_1px_mm": quantum_or_none(delta)}
 
 
@@ -297,11 +361,18 @@ def _load_visits(session: Session, records: list[FrameRecord], sizes: tuple[int,
     return sorted(visits, key=lambda v: _time_key(v.record))
 
 
-def _true_step(a: _Visit, b: _Visit) -> tuple[float, str]:
-    """(true step, source): the dial-indicator difference if both visits carry a reading, else the commanded step."""
-    if a.record.indicator_mm is not None and b.record.indicator_mm is not None:
-        return float(b.record.indicator_mm - a.record.indicator_mm), TRUTH_INDICATOR
-    return float(b.record.step_mm), TRUTH_COMMANDED
+def registered_depth_mm(record: FrameRecord) -> float:
+    """Depth of the registered front plane of the target along the optical axis, mm: the z component of the manifest's
+    ``target_pose_camera`` (read-back robot pose through the registration). The plate of series Z is fronto-parallel, so
+    its front plane is perpendicular to the optical axis and the target origin on it has the depth of the whole plane;
+    a tilted plate would need the plane's depth at the optical axis instead."""
+    return float(record.target_pose_camera.translation[OPTICAL_AXIS])
+
+
+def _true_step(a: _Visit, b: _Visit) -> float:
+    """True step of an A -> B visit pair, mm: the registered front-plane depth at B minus at A. The commanded
+    ``step_mm`` is the label of the rung and does not enter."""
+    return registered_depth_mm(b.record) - registered_depth_mm(a.record)
 
 
 def _pair_delta(a: _Visit, b: _Visit, size: int) -> np.ndarray:
@@ -339,9 +410,20 @@ def _analyze_station(session: Session, station: float, visits: list[_Visit], opt
         a_visits = [v for v in sequence if v.visit == VISIT_A]
         aa_pairs.extend(zip(a_visits, a_visits[1:]))
     results = []
-    truth_sources: set[str] = set()
+    # The robot's own scatter from the read-back poses of consecutive A -> A visits (the plate is commanded to the same
+    # Z0): the standard deviation of their registered-depth differences, divided by sqrt(2) for a single visit.
+    a_differences = [registered_depth_mm(b.record) - registered_depth_mm(a.record) for a, b in aa_pairs]
+    scatter = (float(np.std(a_differences, ddof=1)) / PAIR_DIFFERENCE_SIGMA_FACTOR
+               if len(a_differences) >= MIN_PAIRS_FOR_SCATTER else float("nan"))
+    exceeds = bool(math.isfinite(scatter) and scatter > params.robot_repeatability_mm)
+    scatter_note = ""
+    if exceeds:
+        scatter_note = (f"the read-back scatter of the robot ({scatter:.3g} mm) exceeds its repeatability of "
+                        f"{params.robot_repeatability_mm:g} mm: the step truth is poorer than specified")
+        notes.append(f"station {station:g} mm: {scatter_note}")
     for size in sizes:
-        out = PatchResult(station_z_mm=station, patch_px=size)
+        out = PatchResult(station_z_mm=station, patch_px=size, robot_readback_repeatability_mm=scatter,
+                          robot_scatter_exceeds_spec=exceeds)
         # Step 3: the null distribution and tau (symmetrized so that tau does not depend on the direction).
         null = [_pair_delta(a, b, size) for a, b in aa_pairs]
         null_all = np.concatenate(null) if null else np.array([])
@@ -359,13 +441,15 @@ def _analyze_station(session: Session, station: float, visits: list[_Visit], opt
         mean_delta = np.full(n_steps, np.nan)
         detections = np.zeros(n_steps)
         trials = np.zeros(n_steps)
+        reliable = np.ones(n_steps, dtype=bool)
+        offsets = np.full(n_steps, np.nan)
+        pair_steps: list[int] = []
         per_cycle: dict[int, dict[int, tuple[int, int]]] = {}
         tile_counts = []
         for index, step in enumerate(step_sizes):
             true_values, deltas = [], []
             for pair_number, (a, b) in enumerate(ab_pairs[step]):
-                true_step, source = _true_step(a, b)
-                truth_sources.add(source)
+                true_step = _true_step(a, b)
                 delta = _pair_delta(a, b, size)
                 if delta.size == 0:
                     continue
@@ -382,18 +466,43 @@ def _analyze_station(session: Session, station: float, visits: list[_Visit], opt
             if true_values:
                 levels[index] = float(np.mean(np.abs(true_values)))
                 mean_delta[index] = float(np.mean(deltas))
+                offsets[index] = float(np.mean(true_values)) - float(step)
                 out.pair_true_mm.extend(true_values)
                 out.pair_delta_mm.extend(deltas)
+                pair_steps.extend([index] * len(true_values))
+                # truth_reliable: the true step reaches the robot's repeatability (Section 3.1, ISO 9283).
+                reliable[index] = levels[index] >= params.robot_repeatability_mm - TRUTH_COMPARISON_TOLERANCE_MM
         have = trials > 0
         out.steps_mm, out.mean_delta_mm = levels[have].tolist(), mean_delta[have].tolist()
+        out.rung_labels_mm = [float(step_sizes[i]) for i in np.flatnonzero(have)]
+        out.rung_reliable = [bool(r) for r in reliable[have]]
+        out.pair_reliable = [bool(reliable[i]) for i in pair_steps]
+        out.rung_readback_offset_mm = offsets[have].tolist()
+        if pair_steps:
+            out.readback_minus_commanded_mm = float(np.mean(
+                np.array(out.pair_true_mm) - np.array([step_sizes[i] for i in pair_steps])))
+        out.flagged_rungs = int(np.sum(~reliable[have]))
+        flagged_note = ""
+        if out.flagged_rungs:
+            flagged_labels = ", ".join(f"{step:g}" for step, ok in zip(out.rung_labels_mm, out.rung_reliable) if not ok)
+            flagged_note = (f"{out.flagged_rungs} of {int(have.sum())} ladder rungs flagged truth_reliable = False "
+                            f"(commanded {flagged_labels} mm, true step below the robot repeatability of "
+                            f"{params.robot_repeatability_mm:g} mm): excluded from the gain regression, kept in the "
+                            "detection curve")
         out.detections, out.trials = detections[have].astype(int).tolist(), trials[have].astype(int).tolist()
         out.cycles = len(per_cycle)
         out.tiles_per_pair = float(np.mean(tile_counts)) if tile_counts else float("nan")
-        # Step 2: gain, intercept and the largest deviation from the line.
-        if len(set(np.round(out.pair_true_mm, 9))) >= MIN_DISTINCT_STEPS_FOR_FIT:
-            slope, intercept = np.polyfit(out.pair_true_mm, out.pair_delta_mm, 1)
+        # Step 2: gain, intercept and the largest deviation from the line, over the rungs with a reliable truth.
+        keep_pairs = np.array(out.pair_reliable, dtype=bool)
+        fit_true = np.array(out.pair_true_mm)[keep_pairs]
+        fit_delta = np.array(out.pair_delta_mm)[keep_pairs]
+        fit_levels = have & reliable
+        if len(set(np.round(fit_true, 9))) >= MIN_DISTINCT_STEPS_FOR_FIT:
+            slope, intercept = np.polyfit(fit_true, fit_delta, 1)
             out.gain, out.intercept_mm = float(slope), float(intercept)
-            out.max_deviation_mm = float(np.max(np.abs(mean_delta[have] - (intercept + slope * levels[have]))))
+            out.max_deviation_mm = float(np.max(np.abs(mean_delta[fit_levels] - (intercept + slope * levels[fit_levels]))))
+        elif out.flagged_rungs:
+            flagged_note += "; too few reliable rungs for the gain regression"
         # Step 4: the psychometric fit and its bootstrap over cycles.
         lapse = params.detection_lapse_rate_max
         fit = _fit_curve(levels, detections, trials, out.false_alarm_fraction, lapse)
@@ -401,8 +510,15 @@ def _analyze_station(session: Session, station: float, visits: list[_Visit], opt
             out.note = "too few step sizes (or a false-alarm rate too high) for the psychometric fit"
         else:
             out.fit_alpha, out.fit_beta, out.fit_lapse, out.fit_converged = fit.alpha, fit.beta, fit.lapse_rate, fit.converged
-            out.delta_50_mm = fit.threshold(0.5)
-            if not (levels[have].min() <= out.delta_50_mm <= levels[have].max()):
+            out.delta_50_mm = out.delta_50_fit_mm = fit.threshold(0.5)
+            usable = have & reliable
+            if usable.any() and out.delta_50_mm < levels[usable].min():
+                # Below the smallest rung whose truth is reliable the ladder cannot measure delta_50: an upper bound.
+                out.delta_50_is_bound = True
+                out.delta_50_mm = float(levels[usable].min())
+                bound_note = BOUND_NOTE_ROBOT if out.flagged_rungs else BOUND_NOTE_LADDER
+                out.note = "; ".join(x for x in (out.note, bound_note) if x)
+            elif not (levels[have].min() <= out.delta_50_mm <= levels[have].max()):
                 out.note = "delta_50 lies outside the tested steps (extrapolated)"
             cache: dict[tuple, float] = {}
             groups = [(cycle, per_cycle[cycle]) for cycle in sorted(per_cycle)]
@@ -419,13 +535,14 @@ def _analyze_station(session: Session, station: float, visits: list[_Visit], opt
                     sampled = _fit_curve(levels, successes, attempts, out.false_alarm_fraction, lapse)
                     cache[key] = float("nan") if sampled is None else sampled.threshold(0.5)
                 return cache[key]
-            if groups:
+            if groups and not out.delta_50_is_bound:          # a bound is not a measurement: no interval
                 boot = bootstrap_statistic(groups, statistic, params.bootstrap_resamples, params.confidence_level, rng)
                 out.delta_50_lower_mm, out.delta_50_upper_mm = float(boot.lower), float(boot.upper)
                 out.bootstrap_failures = boot.failures
+        out.note = "; ".join(x for x in (out.note, flagged_note, scatter_note) if x)
         results.append(out)
-    if len(truth_sources) == 1 and TRUTH_COMMANDED in truth_sources:
-        notes.append(f"station {station:g} mm: the manifest has no indicator readings; the true step is the commanded step_mm")
+        if out.flagged_rungs and size == sizes[0]:
+            notes.append(f"station {station:g} mm: {flagged_note}")
     return results
 
 
@@ -438,26 +555,21 @@ def _analyze_staircase(session: Session, station: float, stair_records: list[Fra
     params = session.params
     result = StaircaseResult(station_z_mm=station)
     poses = sorted(group_by_pose(stair_records).values(), key=lambda g: g[0].step_mm)
-    sensed, indicators, truth = [], [], set()
+    sensed, true_z = [], []
     roi = None
     for group in poses:
         stack = load_stack(group)
         geometry = pose_geometry(session, stack.record(), stack.camera)
         roi = region_of_interest(geometry, params) if roi is None else roi & region_of_interest(geometry, params)
         record = stack.record()
-        if record.indicator_mm is not None:
-            indicators.append(float(record.indicator_mm))
-            truth.add(TRUTH_INDICATOR)
-        else:
-            indicators.append(float(station + record.step_mm))
-            truth.add(TRUTH_COMMANDED)
+        true_z.append(registered_depth_mm(record))
         with np.errstate(invalid="ignore"), warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
             sensed.append((stack.depth, np.nanmedian(stack.depth, axis=0), stack.camera))
     camera = sensed[0][2]
     # The Z0 point: the staircase starts at Z0, so the ladder's A visits (same plate position) stand in when the
-    # staircase has no zero-step pose.
-    if min(indicators) > station - 1.0e-9 + 0.0 and not any(abs(i - station) < 1e-9 for i in indicators):
+    # staircase has no zero-step pose (judged by the commanded step label; the read-back Z carries the robot's scatter).
+    if not any(abs(group[0].step_mm) <= TRUTH_COMPARISON_TOLERANCE_MM for group in poses):
         baseline = []
         for group in sorted(group_by_pose(ladder_a_records).values(), key=lambda g: _time_key(g[0]))[:options.baseline_max_poses]:
             baseline.append(load_stack(group).depth)
@@ -466,13 +578,12 @@ def _analyze_staircase(session: Session, station: float, stair_records: list[Fra
             with np.errstate(invalid="ignore"), warnings.catch_warnings():
                 warnings.simplefilter("ignore", RuntimeWarning)
                 sensed.insert(0, (frames, np.nanmedian(frames, axis=0), camera))
-            a_indicators = [r.indicator_mm for r in ladder_a_records if r.indicator_mm is not None]
-            indicators.insert(0, float(np.mean(a_indicators)) if a_indicators else float(station))
-    result.truth_source = TRUTH_INDICATOR if truth == {TRUTH_INDICATOR} else TRUTH_COMMANDED
-    order = np.argsort(indicators)
-    indicators = [indicators[i] for i in order]
+            true_z.insert(0, float(np.mean([registered_depth_mm(r) for r in ladder_a_records])))
+    result.truth_source = TRUTH_SOURCE
+    order = np.argsort(true_z)
+    true_z = [true_z[i] for i in order]
     sensed = [sensed[i] for i in order]
-    result.indicator_mm = indicators
+    result.true_z_mm = true_z
     medians = np.stack([s[1] for s in sensed])                   # (steps, H, W): per-pixel sensed Z
     patch = central_patch_mask(camera, params.quantization_patch_px)
     result.patch_mean_mm = [float(np.nanmean(m[patch])) for m in medians]
@@ -491,13 +602,19 @@ def _analyze_staircase(session: Session, station: float, stair_records: list[Fra
     else:
         result.note = "q Z^2 / k from Analysis A: unavailable"
         result.expected_quantum_mm = levels_mm
+    fine_step = result.expected_quantum_mm / params.z_staircase_subdivision
+    if math.isfinite(fine_step) and fine_step < params.robot_repeatability_mm:
+        result.note = (result.note + "; " if result.note else "") + (
+            f"the staircase steps ({fine_step:.3g} mm) are below the robot's repeatability "
+            f"({params.robot_repeatability_mm:g} mm): the read-back Z of each step, and so the plateau widths, carry "
+            "that uncertainty")
     # Plateau widths of single pixels. A jump is a change larger than a fraction of the expected quantum.
-    if math.isfinite(result.expected_quantum_mm) and len(indicators) >= 3:
+    if math.isfinite(result.expected_quantum_mm) and len(true_z) >= 3:
         usable = roi & np.all(np.isfinite(medians), axis=0)
         values = medians[:, usable]                              # (steps, pixels)
         change = np.abs(np.diff(values, axis=0))
         jumps = change > options.plateau_tolerance_fraction * result.expected_quantum_mm
-        x = np.array(indicators)
+        x = np.array(true_z)
         midpoints = (x[:-1] + x[1:]) / 2.0
         widths = []
         for column in range(values.shape[1]):
@@ -529,10 +646,10 @@ def _analyze_staircase(session: Session, station: float, stair_records: list[Fra
         result.quantum_method = ("depth levels of the pooled single-pixel readings (output LSB is the quantizer)"
                                  if is_lsb else "depth levels of the pooled single-pixel readings (phase resultant)")
     # Is the patch mean smooth (quantizer dithered)?
-    if len(indicators) >= 3 and math.isfinite(result.quantum_mm):
-        line = np.polyfit(indicators, result.patch_mean_mm, 1)
+    if len(true_z) >= 3 and math.isfinite(result.quantum_mm):
+        line = np.polyfit(true_z, result.patch_mean_mm, 1)
         result.patch_rms_about_line_mm = float(np.sqrt(np.mean((np.array(result.patch_mean_mm)
-                                                                  - np.polyval(line, indicators)) ** 2)))
+                                                                  - np.polyval(line, true_z)) ** 2)))
         result.patch_is_smooth = bool(result.patch_rms_about_line_mm < SMOOTH_PATCH_FRACTION * result.quantum_mm)
     return result
 
@@ -572,7 +689,8 @@ def run_depth_resolution(session: Session, out_dir: str | Path, previous: dict |
             notes.append(f"station {station:g} mm has no staircase poses")
     scaling: dict[float, dict[str, Any]] = {}
     for station in sorted({p.station_z_mm for p in patches}):
-        good = [p for p in patches if p.station_z_mm == station and math.isfinite(p.delta_50_mm) and p.delta_50_mm > 0]
+        good = [p for p in patches if p.station_z_mm == station and math.isfinite(p.delta_50_mm) and p.delta_50_mm > 0
+                and not p.delta_50_is_bound]
         if len(good) >= MIN_FIT_POINTS_FOR_SCALING:
             exponent = float(np.polyfit(np.log([p.patch_px for p in good]), np.log([p.delta_50_mm for p in good]), 1)[0])
             scaling[station] = {
@@ -607,7 +725,10 @@ def _figure_detection(result: DepthResolutionResult, out_dir: Path) -> list[Path
                 continue
             color = OKABE_ITO_CYCLE[index % len(OKABE_ITO_CYCLE)]
             fraction = np.array(p.detections) / np.maximum(np.array(p.trials), 1)
-            axis.plot(p.steps_mm, fraction, "o", color=color, label=f"{p.patch_px} px")
+            ok = np.array(p.rung_reliable, dtype=bool)
+            axis.plot(np.array(p.steps_mm)[ok], fraction[ok], "o", color=color, label=f"{p.patch_px} px")
+            if not ok.all():                  # flagged rungs (truth below the robot repeatability): open markers
+                axis.plot(np.array(p.steps_mm)[~ok], fraction[~ok], "o", color=color, markerfacecolor="none")
             if math.isfinite(p.fit_alpha):
                 grid = np.geomspace(min(p.steps_mm) * 0.5, max(p.steps_mm) * 1.5, FIT_CURVE_POINTS)
                 corrected = 1.0 / (1.0 + np.exp(-(np.log(grid) - p.fit_alpha) / p.fit_beta))
@@ -634,11 +755,15 @@ def _figure_sensed(result: DepthResolutionResult, out_dir: Path) -> list[Path]:
             if not p.pair_true_mm:
                 continue
             color = OKABE_ITO_CYCLE[index % len(OKABE_ITO_CYCLE)]
-            axis.plot(p.pair_true_mm, p.pair_delta_mm, "o", color=color, markersize=3, alpha=0.7,
+            ok = np.array(p.pair_reliable, dtype=bool)
+            true, delta = np.array(p.pair_true_mm), np.array(p.pair_delta_mm)
+            axis.plot(true[ok], delta[ok], "o", color=color, markersize=3, alpha=0.7,
                       label=f"{p.patch_px} px, gain {p.gain:.3f}")
+            if not ok.all():                  # flagged rungs are not in the gain regression: open markers
+                axis.plot(true[~ok], delta[~ok], "o", color=color, markersize=3, markerfacecolor="none")
             top = max(top, max(p.pair_true_mm))
         axis.plot([0.0, top], [0.0, top], color=OKABE_ITO_BLACK, linewidth=0.7, linestyle="--")
-        axis.set_xlabel("true step, indicator difference (mm)")
+        axis.set_xlabel("true step, read-back pose difference (mm)")
         axis.set_ylabel("sensed step, mean Delta (mm)")
         axis.set_title(f"Z0 = {station:g} mm", fontsize="small")
         axis.grid(True, alpha=0.3)
@@ -651,14 +776,14 @@ def _figure_staircase(result: DepthResolutionResult, out_dir: Path) -> list[Path
         return None
     figure, axes = _grid_figure(len(result.staircases), 2)
     for axis, stair in zip(axes, result.staircases):
-        x = np.array(stair.indicator_mm) - stair.station_z_mm
+        x = np.array(stair.true_z_mm) - stair.station_z_mm
         for index, curve in enumerate(stair.pixel_curves_mm):
             axis.plot(x, np.array(curve) - stair.station_z_mm, marker=".", linewidth=0.7, alpha=0.7,
                       color=OKABE_ITO_SKY_BLUE, label="single pixels" if index == 0 else None)
         axis.plot(x, np.array(stair.patch_mean_mm) - stair.station_z_mm, marker="o", color=OKABE_ITO_VERMILLION,
                   label="20 x 20 patch mean")
-        axis.plot(x, x, color=OKABE_ITO_BLACK, linestyle="--", linewidth=0.7, label="indicator")
-        axis.set_xlabel("indicator Z - Z0 (mm)")
+        axis.plot(x, x, color=OKABE_ITO_BLACK, linestyle="--", linewidth=0.7, label="read-back Z")
+        axis.set_xlabel("read-back Z - Z0 (mm)")
         axis.set_ylabel("sensed Z - Z0 (mm)")
         title = f"Z0 = {stair.station_z_mm:g} mm"
         if math.isfinite(stair.quantum_mm):
@@ -670,7 +795,8 @@ def _figure_staircase(result: DepthResolutionResult, out_dir: Path) -> list[Path
 
 
 def write_outputs(result: DepthResolutionResult, out_dir: str | Path) -> list[Path]:
-    """Z_resolution_summary.csv (one row per station and patch size), Z_resolution_details.json and the figures
+    """Z_resolution_summary.csv (one row per station and patch size), Z_resolution_rungs.csv (one row per station, patch
+    size and ladder rung, with ``truth_reliable``), Z_resolution_details.json and the figures
     (detection fraction with the fits, sensed against true step, staircase)."""
     out_dir = Path(out_dir)
     stairs = {s.station_z_mm: s for s in result.staircases}
@@ -685,9 +811,22 @@ def write_outputs(result: DepthResolutionResult, out_dir: str | Path) -> list[Pa
             "quantum_predicted_mm": float("nan") if stair is None else stair.predicted_quantum_mm,
             "cycles": p.cycles, "quantum_method": "" if stair is None else stair.quantum_method,
             "false_alarm_fraction": p.false_alarm_fraction, "tiles_per_pair": p.tiles_per_pair,
-            "truth_source": "" if stair is None else stair.truth_source,
+            "truth_source": TRUTH_SOURCE, "truth_reliable": p.flagged_rungs == 0,
+            "delta_50_is_bound": p.delta_50_is_bound,
+            "robot_readback_repeatability_mm": p.robot_readback_repeatability_mm,
+            "readback_minus_commanded_mm": p.readback_minus_commanded_mm,
+            "robot_scatter_exceeds_spec": p.robot_scatter_exceeds_spec,
             "note": "; ".join(x for x in (p.note, "" if stair is None else stair.note) if x)})
-    written = [write_csv_rows(out_dir / SUMMARY_CSV_NAME, rows, SUMMARY_COLUMNS)]
+    rung_rows = [
+        {"station_z_mm": p.station_z_mm, "patch_px": p.patch_px, "step_mm": label, "true_step_mm": true,
+         "mean_delta_mm": delta, "detections": hits, "trials": trials, "detection_fraction": hits / trials,
+         "readback_minus_commanded_mm": offset, "truth_source": TRUTH_SOURCE, "truth_reliable": ok}
+        for p in result.patches
+        for label, true, delta, hits, trials, offset, ok in zip(
+            p.rung_labels_mm, p.steps_mm, p.mean_delta_mm, p.detections, p.trials, p.rung_readback_offset_mm,
+            p.rung_reliable)]
+    written = [write_csv_rows(out_dir / SUMMARY_CSV_NAME, rows, SUMMARY_COLUMNS),
+               write_csv_rows(out_dir / RUNGS_CSV_NAME, rung_rows, RUNG_COLUMNS)]
     details = {
         "patches": [p.__dict__ for p in result.patches],
         "staircases": [s.__dict__ for s in result.staircases],

@@ -10,8 +10,6 @@ What to see:
     - Z runs along the left IR camera's optical axis from its optical center; V is vertical in
       this view and H points into the page;
     - the frustum is the indicative field of view of the left camera;
-    - the dial indicator stands on the floor on its own stand and touches the back of the adapter
-      along the target normal (the B-Z series, section 8);
     - the enclosure (or blackout curtains) surrounds everything.
 The robot arm is a sketch and is not to scale; the Z axis, the target and the frustum are.
 
@@ -65,8 +63,6 @@ ROBOT_BASE_SIZE_MM = (170.0, 70.0)
 ROBOT_ELBOW_MM = (1380.0, 300.0)
 ROBOT_SHOULDER_MM = (1560.0, -250.0)
 LINK_WIDTH_PT = 14
-DIAL_HEIGHT_MM = -200.0                 # height of the indicator tip (below the flange, on the adapter back)
-DIAL_STAND_X_MM = 1100.0
 ENCLOSURE_MARGIN_MM = (170.0, 40.0)
 
 
@@ -167,17 +163,6 @@ def main() -> None:
                 xytext=(ax_x + 120, 300), fontsize=7.5, ha="left", color=BLACK,
                 arrowprops=dict(arrowstyle="-", color=BLACK, lw=0.8))
     ax.text(flange_x + 30, -FLANGE_HALF_HEIGHT_MM - 8, "robot flange", fontsize=7.5, va="top", ha="left")
-
-    # Dial indicator on its own floor stand, touching the back of the adapter along the target normal.
-    stand_w = 26.0
-    ax.add_patch(Rectangle((DIAL_STAND_X_MM, FLOOR_Y_MM), stand_w, DIAL_HEIGHT_MM - FLOOR_Y_MM + 20,
-                           facecolor=LIGHT_GRAY, edgecolor=BLACK, lw=1.2))
-    ax.add_patch(Rectangle((ax_x + ADAPTER_THICKNESS_MM + 2, DIAL_HEIGHT_MM - 10), DIAL_STAND_X_MM - ax_x -
-                           ADAPTER_THICKNESS_MM, 20, facecolor=BLUE, alpha=0.5, edgecolor=BLACK, lw=1.0))
-    ax.add_patch(Circle((DIAL_STAND_X_MM - 60, DIAL_HEIGHT_MM - 50), 36, facecolor="white", edgecolor=BLUE, lw=1.6))
-    ax.annotate("dial indicator on a\nfixed stand (series Z): reads\nthe Z move of the adapter,\nalong the target normal",
-                xy=(DIAL_STAND_X_MM - 40, DIAL_HEIGHT_MM - 55), xytext=(DIAL_STAND_X_MM + 50, -350.0),
-                fontsize=7.5, color=BLUE, ha="left", va="center", arrowprops=dict(arrowstyle="-", color=BLUE, lw=0.8))
 
     # Enclosure boundary.
     margin_x, margin_y = ENCLOSURE_MARGIN_MM

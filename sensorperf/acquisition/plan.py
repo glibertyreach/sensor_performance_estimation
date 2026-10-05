@@ -164,6 +164,12 @@ FLANGE_POSE_COLUMNS = (("base_x_mm", "base_y_mm", "base_z_mm", "base_rx_deg", "b
 """Flange pose to command in the robot base frame (only with a registration): position in mm and
 rotation vector in degrees (six values), the rotation matrix r00..r22 row-major, and the unit
 quaternion (w >= 0), as plan_poses.py of the calibration repository wrote them."""
+MIN_POSE_LOG_DECIMALS = 3
+"""Fewest decimals (0.001 mm) the series-Z rows of a robot pose log must show in x_mm, y_mm, z_mm: the read-back pose is
+the step truth of series Z, and the smallest rungs are tens of micrometers (``pose_log.build_manifest`` warns)."""
+APPROACH_FROM_BELOW = "from below"
+"""``notes["approach"]`` of every series Z pose: the robot arrives at the pose moving toward larger Z (from the side of
+smaller Z, nearer the sensor), after backing off by ``z_step_approach_overshoot_mm``, so backlash cancels in A / B."""
 PLAN_NOTES_COLUMN = "notes"
 """Column holding the pose's notes as a JSON object."""
 PLAN_CSV_COLUMNS = PLAN_IDENTITY_COLUMNS + TARGET_POSE_COLUMNS + (PLAN_NOTES_COLUMN,)
@@ -673,7 +679,12 @@ def plan_zstep_series(params: CharacterizationParameters, geometry: SensorGeomet
     Z0 + delta for Z_STEP_REPEATS cycles (A, B, A, B, ...). Each visit is its own pose with
     FRAMES_PER_ZSTEP_POSE frames, sub-series "ladder", visit "A" or "B" and step_mm = delta for both
     visits; the commanded displacement is 0 for A and delta for B (``notes["displacement_mm"]``, and the
-    target pose carries it in its Z). The dial indicator is read at every visit (pose log column).
+    target pose carries it in its Z). The ground truth of the
+    step is the read-back robot pose carried into the camera frame (the analysis takes the difference of the registered
+    front-plane depth of the two visits).
+    Every visit of series Z is approached from below (``notes["approach"]``): the robot backs off by
+    ``params.z_step_approach_overshoot_mm`` toward smaller Z and then moves up onto the pose, so backlash does not
+    enter the A / B difference.
     Step 3, fine staircase: from Z0 to Z0 + Z_STAIRCASE_QUANTA x dZ_q in steps of dZ_q /
     Z_STAIRCASE_SUBDIVISION (both ends included), Z_STAIRCASE_FRAMES frames per step, sub-series
     "staircase", step_mm = the displacement from Z0. dZ_q comes from ``expected_quantum_mm`` (a function
@@ -699,7 +710,8 @@ def plan_zstep_series(params: CharacterizationParameters, geometry: SensorGeomet
                         counter, PROCEDURE_ZSTEP, TARGET_NOISE_PLATE, None, z0, FIELD_POSITION_CENTER,
                         params.frames_per_zstep_pose, SUBSERIES_LADDER,
                         fronto_parallel_pose(0.0, 0.0, z0 + displacement), step_mm=float(delta), visit=visit,
-                        notes={"displacement_mm": displacement}))
+                        notes={"displacement_mm": displacement, "approach": APPROACH_FROM_BELOW,
+                               "approach_overshoot_mm": params.z_step_approach_overshoot_mm}))
         quantum = float(quantum_at(z0))
         step = quantum / params.z_staircase_subdivision
         steps = int(round(params.z_staircase_quanta * params.z_staircase_subdivision))
@@ -712,7 +724,9 @@ def plan_zstep_series(params: CharacterizationParameters, geometry: SensorGeomet
             plan.append(_new_capture(
                 counter, PROCEDURE_ZSTEP, TARGET_NOISE_PLATE, None, z0, FIELD_POSITION_CENTER,
                 params.z_staircase_frames, SUBSERIES_STAIRCASE, fronto_parallel_pose(0.0, 0.0, z0 + displacement),
-                step_mm=displacement, notes={"displacement_mm": displacement, "staircase_step": k}))
+                step_mm=displacement, notes={"displacement_mm": displacement, "staircase_step": k,
+                                             "approach": APPROACH_FROM_BELOW,
+                                             "approach_overshoot_mm": params.z_step_approach_overshoot_mm}))
     return _renumber(plan)
 
 
@@ -1212,6 +1226,11 @@ def plan_summary_text(plan: Sequence[PlannedCapture], params: CharacterizationPa
                      f"{DOCUMENT_ESTIMATE_HOURS:g} h. This plan: {total.poses:,} poses ({total.poses / DOCUMENT_ESTIMATE_POSES:.2f} x), "
                      f"{total.frames:,} frames ({total.frames / DOCUMENT_ESTIMATE_FRAMES:.2f} x), "
                      f"{total.robot_hours:.1f} h ({total.robot_hours / DOCUMENT_ESTIMATE_HOURS:.2f} x).")
+    if any(c.procedure == PROCEDURE_ZSTEP for c in plan):
+        lines += ["", f"Series Z approach: every visit {APPROACH_FROM_BELOW} (back off {params.z_step_approach_overshoot_mm:g} mm "
+                      "toward smaller Z, then move up onto the pose), so that backlash does not enter the A / B difference.",
+                  f"Series Z pose log: write x_mm, y_mm, z_mm with at least {MIN_POSE_LOG_DECIMALS} decimals; the "
+                  "read-back pose is the step truth."]
     adjustments = _adjustment_lines(plan)
     lines += ["", f"Field-offset adjustments (Section 5, Step 1: the target must fit the field): {len(adjustments)}"]
     lines += adjustments if adjustments else ["  none"]
@@ -1280,7 +1299,9 @@ def write_plan(path_dir: str | Path, plan: Sequence[PlannedCapture], registratio
     poses.csv columns: the Section 9 identity, frames, sub-series, seed, offsets, tilt, step, visit, level, order, the
     target pose in the camera frame (target_x_mm .. target_rz_deg: x, y, z in mm and the rotation vector in degrees),
     the notes as JSON and, with a registration, base_x_mm .. base_rz_deg (flange -> base), r00..r22 and quat_w..quat_z.
-    If matplotlib is missing, plan.png is skipped with a warning on stderr (and in the summary)."""
+    If matplotlib is missing, plan.png is skipped with a warning on stderr (and in the summary).
+    The pose log the robot writes for series Z must carry x_mm, y_mm, z_mm with at least MIN_POSE_LOG_DECIMALS decimals (0.001 mm): the
+    read-back pose is the step truth, and plan_summary.txt says so (``build_manifest`` warns otherwise)."""
     directory = Path(path_dir)
     directory.mkdir(parents=True, exist_ok=True)
     params = CharacterizationParameters() if params is None else params

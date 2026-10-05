@@ -83,7 +83,7 @@ def test_manifest_round_trip(tmp_path: Path):
     pose = tilted_pose(10.0, -5.0, TEST_DEPTH_MM, "V", 15.0)
     records = [FrameRecord(tmp_path / format_file_name("A", "T2", None, TEST_DEPTH_MM, 0, 4, f), "A", "T2", None,
                            TEST_DEPTH_MM, 0, 4, f, RigidTransform.from_rotation_vector_degrees([1, 2, 3], [100, 200, 300]),
-                           pose, seed=11, offset_h_mm=0.5, offset_v_mm=-0.25, indicator_mm=0.021, timestamp="t",
+                           pose, seed=11, offset_h_mm=0.5, offset_v_mm=-0.25, timestamp="t",
                            sensor_temp_c=31.5, subseries="tilt", tilt_axis="V", tilt_deg=15.0, metadata={"note": "x"})
                for f in range(3)]
     path = write_manifest_csv(tmp_path / "manifest.csv", records)
@@ -93,7 +93,6 @@ def test_manifest_round_trip(tmp_path: Path):
     assert first.pose_key() == records[0].pose_key()
     assert first.target_pose_camera.difference_from(pose) == pytest.approx((0.0, 0.0), abs=1e-9)
     assert first.robot_pose.difference_from(records[0].robot_pose) == pytest.approx((0.0, 0.0), abs=1e-9)
-    assert first.indicator_mm == pytest.approx(0.021)
     assert first.tilt_axis == "V" and first.tilt_deg == 15.0 and first.metadata == {"note": "x"}
     assert list(group_by_pose(loaded)) == [records[0].pose_key()]
     assert len(select(loaded, procedure="A", subseries="tilt")) == 3

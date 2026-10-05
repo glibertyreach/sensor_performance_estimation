@@ -31,7 +31,7 @@ How the steps are implemented
        pixels in the band whose position along the edge is at least (band + EDGE_CORNER_MARGIN_PX) pixels inside
        the edge's end points (the one-edge-near rule: pixels near a corner, where two edges are within reach, are
        excluded). Orientation: left/right edges are near-vertical, their normal along H, the baseline ("along");
-       top/bottom edges are near-horizontal ("across"). Disks and cutouts: the radial signed distance, one feature
+       top/bottom edges are near-horizontal ("across"). Disks and cutouts: the signed distance from the circle (r - D/2), one feature
        per pixel (the nearest).
     4  R_fab = P(read | V = 0); R_drop = P(no-read | V = 1); beta_read = (R_fab - R_drop) / (R_fab + R_drop), NaN
        when both are 0. W_fab = sum over bins of (reads at V = 0 in the bin / pixels in the bin) x bin width, the

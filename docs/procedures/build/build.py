@@ -72,6 +72,7 @@ SECTION_NUMBER_PATTERN = re.compile(r"^(?:Appendix\s+)?(?P<num>[0-9]+(?:\.[0-9]+
 
 sys.path.insert(0, str(REPO_ROOT))
 
+from sensorperf.acquisition.plan import MIN_POSE_LOG_DECIMALS  # noqa: E402
 from sensorperf.parameters import CharacterizationParameters, SensorGeometry, parameter_table_rows  # noqa: E402
 
 BUDGET_FRAME_RATE_HZ = 10.0
@@ -178,6 +179,7 @@ def derived_values(params: CharacterizationParameters, geometry: SensorGeometry,
         "noise_station_frames": params.frames_per_noise_station,
         "sentinel_frames": params.sentinel_frames,
         "budget_frame_rate_hz": f"{BUDGET_FRAME_RATE_HZ:g}",
+        "pose_log_min_decimals": MIN_POSE_LOG_DECIMALS,
     }
     values.update(budget_totals)
     values["total_poses_text"] = f"{budget_totals['total_poses']:,}"

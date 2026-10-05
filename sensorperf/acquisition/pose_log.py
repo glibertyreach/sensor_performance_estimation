@@ -36,8 +36,12 @@ base frame, the read-back flange pose = flange -> base)
     synthetic sessions and the tests use it.
 
     Optional columns, all of which end up in the manifest when present: timestamp,
-    indicator_mm (the dial indicator of the B-Z visits), sensor_temp_c, air_temp_c,
-    ambient_ir.
+    sensor_temp_c, air_temp_c, ambient_ir.
+
+    Resolution of the logged position: for series Z the read-back pose is the ground truth of the depth step, so
+    x_mm, y_mm, z_mm must be written with at least ``MIN_POSE_LOG_DECIMALS`` decimals (0.001 mm). A log rounded to 0.1 mm
+    makes the small ladder rungs meaningless; ``build_manifest`` warns, naming the problem, when every z_mm value of the
+    series-Z rows has fewer decimals.
 
 Rotation conventions (adapted from ``sphcal/cli/make_manifest.py`` of the
 depth-calibration repository, which this table reproduces verbatim; all through
@@ -78,15 +82,17 @@ import csv
 import warnings
 from collections import defaultdict
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from sensorperf.acquisition.plan import PlannedCapture, read_plan_csv
+from sensorperf.acquisition.plan import MIN_POSE_LOG_DECIMALS, PlannedCapture, read_plan_csv
 from sensorperf.geometry.registration import Registration
 from sensorperf.geometry.transforms import RigidTransform
 from sensorperf.io.manifest import FrameRecord, format_file_name, parse_file_name, validate_record
+from sensorperf.parameters import PROCEDURE_ZSTEP
 
 # ---------------------------------------------------------------------------
 # Constants (rotation table: from sphcal/cli/make_manifest.py, same names and values)
@@ -132,7 +138,7 @@ LOG_TRANSLATION_COLUMNS = ("x_mm", "y_mm", "z_mm")
 IDENTITY_COLUMNS = ("procedure", "target_id", "gap_mm", "station_z_mm", "field", "pose_index")
 """The Section 9 identity of a pose (the columns of a per-pose log row)."""
 OPTIONAL_TEXT_COLUMNS = ("timestamp",)
-OPTIONAL_FLOAT_COLUMNS = ("indicator_mm", "sensor_temp_c", "air_temp_c", "ambient_ir")
+OPTIONAL_FLOAT_COLUMNS = ("sensor_temp_c", "air_temp_c", "ambient_ir")
 """Optional pose log columns copied to the manifest."""
 FRAME_SEPARATOR = "_f"
 """Separator of the pose part and the frame index in a Section 9 file name."""
@@ -305,8 +311,10 @@ def read_pose_log(path: str | Path, plan_by_key: dict[tuple, PlannedCapture],
             "(one row per pose) or 'frame_index' (one row per frame)")
         return []
     entries: list[LogFrame] = []
+    z_text_by_where: dict[str, str] = {}                        # raw z_mm text per line, for the resolution check
     for line, row in enumerate(rows, start=2):                  # line 1 is the header
         where = f"pose log line {line}"
+        z_text_by_where[where] = (row.get(LOG_TRANSLATION_COLUMNS[2]) or row.get(PLAN_TRANSLATION_COLUMNS[2]) or "").strip()
         pose = robot_pose_from_columns(row, where, messages)
         text = {c: (row.get(c) or "").strip() for c in OPTIONAL_TEXT_COLUMNS if c in row}
         numbers: dict[str, float | None] = {}
@@ -349,7 +357,29 @@ def read_pose_log(path: str | Path, plan_by_key: dict[tuple, PlannedCapture],
             frames = planned.frames
         for index in range(int(frames)):
             entries.append(LogFrame(key, index, pose, text, numbers, where))
+    _check_z_resolution(entries, z_text_by_where, messages)
     return entries
+
+
+def _decimals(text: str) -> int | None:
+    """Decimals written in a number's text ("750.000" -> 3, "750.1" -> 1, "750" -> 0), None if it is not a number."""
+    try:
+        exponent = Decimal(text).as_tuple().exponent
+    except InvalidOperation:
+        return None
+    return max(-exponent, 0) if isinstance(exponent, int) else None
+
+
+def _check_z_resolution(entries: list[LogFrame], z_text_by_where: dict[str, str], messages: Messages) -> None:
+    """Warn when every z_mm value of the series-Z rows is written with fewer than ``MIN_POSE_LOG_DECIMALS`` decimals:
+    the read-back pose is the step truth of series Z, so a log rounded to 0.1 mm makes the small rungs meaningless."""
+    counts = [_decimals(z_text_by_where[e.where]) for e in entries if e.pose_key[0] == PROCEDURE_ZSTEP]
+    counts = [c for c in counts if c is not None]
+    if counts and all(c < MIN_POSE_LOG_DECIMALS for c in counts):
+        messages.warnings.append(
+            f"pose log resolution: every z_mm value of the series-Z rows has fewer than {MIN_POSE_LOG_DECIMALS} decimals "
+            f"(at most {max(counts)}); the read-back pose is the step truth of series Z, so write x_mm, y_mm, z_mm "
+            f"with at least {MIN_POSE_LOG_DECIMALS} decimals (0.001 mm) or the small rungs are meaningless")
 
 
 # ---------------------------------------------------------------------------
@@ -487,7 +517,7 @@ def _record(planned: PlannedCapture, frame_index: int, path: Path, entry: LogFra
         station_z_mm=planned.station_z_mm, field=planned.field, pose_index=planned.pose_index,
         frame_index=frame_index, robot_pose=entry.pose, target_pose_camera=registration.target_to_camera(entry.pose),
         seed=planned.seed, offset_h_mm=planned.offset_h_mm, offset_v_mm=planned.offset_v_mm,
-        indicator_mm=entry.numbers.get("indicator_mm"), timestamp=entry.text.get("timestamp", ""),
+        timestamp=entry.text.get("timestamp", ""),
         sensor_temp_c=entry.numbers.get("sensor_temp_c"), air_temp_c=entry.numbers.get("air_temp_c"),
         ambient_ir=entry.numbers.get("ambient_ir"), sensor_config_id=sensor_config_id, subseries=planned.subseries,
         tilt_axis=planned.tilt_axis, tilt_deg=planned.tilt_deg, step_mm=planned.step_mm, visit=planned.visit,
