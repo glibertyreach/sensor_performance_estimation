@@ -13,9 +13,9 @@
  },
  "C03": {
   "title": "Equipment and targets",
-  "reviewed": null,
-  "tier": null,
-  "note": "not yet reviewed"
+  "reviewed": "2026-10-05",
+  "tier": "fable",
+  "note": "P1–P3 + R1–R7 executed as the Z-sweep redesign (3 features per plate, 400–1600 mm ladder, plane registration); gate PASS with all touched sections intended; Section 9 budget table pending the plan tool"
  },
  "C04": {
   "title": "Chamfered boundaries",
