@@ -442,8 +442,15 @@ Reviewer findings (proposals; nothing executed until Neil closes the chunk):
 
 Neil's comments: none; closed 2026-10-05.
 Executed (document rev 92): R2 manifest columns listed as the manifest module writes them; R3 file-name digits,
-G0 and f00 stated; R4 the budget's exclusions and the optional captures listed. R1 (the table numbers) waits for
-the ramp code: the plan tool's rows and totals are written in when it lands, with the gate invariants updated.
+G0 and f00 stated; R4 the budget's exclusions and the optional captures listed. R1 (the table numbers) waited for
+the ramp code; executed at document rev 93 once it landed: rows refilled from the plan tool (A main + tilt 64 poses,
+5,600 frames, 0.21 h; B-Z ladder + ramp 369, 4,050, 0.42; a separate Sentinels row 11, 330, 0.02; totals 7,194
+poses, 42,520 frames, 7.18 h), gate invariants updated, gate PASS with scope ['9'].
+- Follow-up for Neil (from the ramp code, 2026-10-05): at 400 mm the ramp's tilt of 0.318° would put the plate's
+  near edge 1.1 mm inside Z_MIN, so the planner moves the plate center 1.11 mm farther (station label stays 400 mm,
+  shift recorded in the pose notes). Section 6.2 does not mention this; proposal: one sentence in 6.2, Step 3
+  (closed chunk C07; to be declared as intended when executed). Also noted by the code: the far edge of the ramp
+  at 1600 mm lies 12 mm beyond Z_MAX, and the 49.6 mm rung reaches 1650 mm.
 
 ## C11 — Section 10 Analysis A, noise vs Z (opened 2026-10-05)
 

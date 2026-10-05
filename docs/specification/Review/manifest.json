@@ -1,6 +1,6 @@
 {
   "document": "VSX3000_characterization_specification.docx",
-  "built": "2026-10-05T17:04:28",
+  "built": "2026-10-05T17:26:58",
   "source_of_truth": "https://claude.ai/code/artifact/20fd839b-0e95-4210-9e8f-959da07ce6c2",
   "elements": [
     {
@@ -290,9 +290,9 @@
       "title": "9. Data logging, file layout, and capture budget",
       "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
       "asserts": {
-        "total_poses": "7,292",
-        "total_frames": "44,140",
-        "total_robot_hours": "7.3"
+        "total_poses": "7,194",
+        "total_frames": "42,520",
+        "total_robot_hours": "7.18"
       },
       "refs": [
         "Section 2"
@@ -305,9 +305,9 @@
       "caption": "Series",
       "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
       "asserts": {
-        "total_poses": "7,292",
-        "total_frames": "44,140",
-        "total_robot_hours": "7.3"
+        "total_poses": "7,194",
+        "total_frames": "42,520",
+        "total_robot_hours": "7.18"
       },
       "refs": []
     },
@@ -487,9 +487,9 @@
     "zstep_rung_count": 6,
     "registration_poses": 30,
     "sentinel_frames": 30,
-    "total_poses": "7,292",
-    "total_frames": "44,140",
-    "total_robot_hours": "7.3",
+    "total_poses": "7,194",
+    "total_frames": "42,520",
+    "total_robot_hours": "7.18",
     "z_range_mm": "400–1600",
     "feature_diameters_mm": "7.0, 19.7, 55.8",
     "station_ladder_mm": "400, 476, 566, 673, 800, 951, 1131, 1345, 1600",
