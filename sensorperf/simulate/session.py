@@ -158,7 +158,7 @@ def write_synthetic_session(root: str | Path, params: CharacterizationParameters
                 offset_h_mm=capture.offset_h_mm, offset_v_mm=capture.offset_v_mm,
                 timestamp=stamp.isoformat(), sensor_config_id=SENSOR_CONFIG_ID, subseries=capture.subseries,
                 tilt_axis=capture.tilt_axis, tilt_deg=capture.tilt_deg, step_mm=capture.step_mm,
-                visit=capture.visit, level_index=capture.level_index))
+                visit=capture.visit, level_index=capture.level_index, metadata=capture.manifest_metadata()))
         # The pose took its frames plus the robot move and settle time before the next one.
         clock += timedelta(seconds=frames * frame_period_s + params.move_and_settle_time_s)
         if progress is not None:

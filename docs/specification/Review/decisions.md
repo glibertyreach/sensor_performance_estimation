@@ -324,3 +324,8 @@ Reviewer findings (proposals; nothing executed until the person closes the chunk
   plain-language style once the person decides.
 
 Person's comments: (pending)
+- C07-P1 (person, 2026-10-05): instead of moving the target in Z by multiples of a suspected quantum, tilt the target
+  by a small angle about H and/or V so that the true depth varies smoothly across the plate; one capture then shows
+  the quantization plateaus along the ramp, and the many small Z moves are not needed. Reviewer assessment given in
+  chat (adopt as a ramp sub-series; geometry table; fixed-pattern subtraction from A; one time-staircase kept at the
+  reference station as a cross-check is the open question).

@@ -112,6 +112,11 @@ MANIFEST_COLUMNS = (
        "subseries", "tilt_axis", "tilt_deg", "step_mm", "visit", "level_index"))
 """All manifest columns in order. Any further column is kept as string metadata."""
 
+FIELD_FRACTION_ACHIEVED_KEY = "field_fraction_achieved"
+"""Plan-notes key and manifest metadata column holding the achieved fraction of the requested field offset of a pose
+(1 when the requested off-axis position fits the field; smaller when the planner pulled the pose inward). Poses that
+are not placed at a field position do not carry it."""
+
 OPTIONAL_FLOAT_COLUMNS = ("gap_mm", "sensor_temp_c", "air_temp_c", "step_mm", "tilt_deg")
 """Float columns that may be empty."""
 

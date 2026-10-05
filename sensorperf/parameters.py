@@ -198,7 +198,9 @@ class CharacterizationParameters:
     field_offset_fraction: float = 0.6
     """Off-axis field positions at (+/- f W/2, +/- f H/2) from the center, f of the half field (A, C)."""
     tilt_angles_deg: tuple[float, ...] = (0.0, 15.0, 30.0, 45.0)
-    """Plate tilts about H and about V in the A tilt sub-series."""
+    """Plate tilts about H and about V in the A tilt sub-series. A tilt is planned only where the plate's near edge
+    stays at or beyond Z_MIN (``acquisition.plan.tilt_near_edge_mm``); the others are skipped and listed in
+    plan_summary.txt."""
 
     # Capture control
     warmup_min_minutes: float = 45.0
@@ -298,8 +300,10 @@ class CharacterizationParameters:
 
     # Boundary bias (E)
     boundary_band_half_width_px: float = 8.0
-    """Analysis band on each side of a true edge (E); also the ROI shrink in A and the
-    reference-plane exclusion in B and C."""
+    """Analysis band on each side of a true edge (E); also the ROI shrink in A, the
+    reference-plane exclusion in B and C, and the edge margin of the capture planner's field-of-view fit
+    (``acquisition.plan``: a target must lie this many pixels inside the image, so the margin used to pull an
+    off-axis pose inward is the same band the analysis shrinks the region of interest by)."""
     boundary_bin_width_px: float = 0.25
     """Signed-distance bin width (B, E): four bins per pixel."""
     surface_assignment_sigma_multiple: float = 3.0
@@ -327,7 +331,7 @@ class CharacterizationParameters:
     """The five VSX3000 BrownBoard box centers (column, row) of testZRepeatabilityBrownBoard.py."""
     legacy_metric_depths_mm: tuple[float, ...] = (700.0, 1000.0)
     """Depths at which the legacy metrics are computed (Section 10, Step 12); series A adds them as extra
-    noise stations to the ladder."""
+    noise stations to the ladder, captured at the center field position only."""
     station_match_tolerance_mm: float = 0.5
     """Two depths closer than this are the same station (the file-name rule rounds a station to 1 mm)."""
     autocorrelation_threshold: float = 1.0 / math.e
@@ -433,13 +437,19 @@ class CharacterizationParameters:
         both ends (400, 800, 1600 with the defaults)."""
         return self._strided_stations_mm(self.z_reduced_station_stride)
 
+    def legacy_extra_stations_mm(self) -> tuple[float, ...]:
+        """The LEGACY_METRIC_DEPTHS_MM that are not already ladder stations (700 and 1000 mm with the
+        defaults), in ascending order. Series A captures them at the center field position only (the legacy
+        metrics are center-box metrics), not at the five field positions of the ladder stations."""
+        return tuple(sorted(z for z in self.legacy_metric_depths_mm
+                            if all(abs(z - s) > self.station_match_tolerance_mm for s in self.z_stations_mm())))
+
     def noise_stations_mm(self) -> tuple[float, ...]:
-        """The A stations: every ladder station plus the LEGACY_METRIC_DEPTHS_MM that are not already
-        stations (700 and 1000 mm), in ascending order, so the legacy metrics are computed at the same
-        depths as the existing data."""
-        extra = [z for z in self.legacy_metric_depths_mm if all(abs(z - s) > self.station_match_tolerance_mm
-                                                                for s in self.z_stations_mm())]
-        return tuple(sorted(self.z_stations_mm() + tuple(extra)))
+        """The A stations: every ladder station plus the legacy extra stations (700 and 1000 mm), in ascending
+        order, so the legacy metrics are computed at the same depths as the existing data. The ladder stations
+        are captured at the five field positions, the extra ones at the center only
+        (:meth:`legacy_extra_stations_mm`)."""
+        return tuple(sorted(self.z_stations_mm() + self.legacy_extra_stations_mm()))
 
     def detection_zero_stations_mm(self) -> tuple[float, ...]:
         """The DETECTION_ZERO_STATION_COUNT farthest stations (1131, 1345, 1600 mm), which carry

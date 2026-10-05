@@ -18,7 +18,7 @@ step by step (each docstring cites its section):
     plan_zstep_series        Section 6.2         (Z, target T2; the document's B-Z)
     plan_area_series         Section 7           (C, targets T4 and T5; every station)
     plan_detection_series    Section 8           (D, targets T4 and T5; every station)
-    insert_sentinels         Section 5, Step 3   (S, drift sentinels on the budget clock)
+    insert_sentinels         Section 5, Step 3   (S, drift sentinels on the mounted target, on the budget clock)
     plan_full_session        all of the above in the order of the procedure
     capture_budget           Section 9           (poses, frames and robot hours per series)
     write_plan               poses.csv, plan_summary.txt, plan.png
@@ -45,14 +45,21 @@ the field offset.")
     A pose at a field position is checked with :func:`pose_fits_field` and, when
     the target would not fit, pulled inward along its field direction (the same
     fraction of both the H and V offsets) until it fits; the fraction kept is
-    stored in ``notes["field_placement"]`` and listed in plan_summary.txt.
+    stored in ``notes["field_placement"]`` and listed in plan_summary.txt, and the achieved fraction of the
+    requested offset is stored for every pose placed at a field position in ``notes["field_fraction_achieved"]``
+    (1 when the request fits), from where the manifest carries it to Analysis A.
     Targets with features (the raised square, the window, the arrays) must have
     every feature outline inside the image by the edge margin. A plate (T2)
     is judged per image axis: it must lie inside the image by the edge margin or,
     when it is larger than the field at that depth, cover the whole image across
     that axis, so that no plate edge falls into the border band of the analysis
     region of interest. The edge margin is BOUNDARY_BAND_HALF_WIDTH_PX (the ROI
-    shrink of Analysis A), plus half the phase-jitter span for jittered series.
+    shrink of Analysis A, and the only margin the fit uses), plus half the phase-jitter span for jittered series.
+
+Drift sentinels (Section 5, Step 3, as revised): a sentinel is captured on the front plane of the target that is
+mounted at that point of the plan, so none needs a re-mount; see :func:`insert_sentinels`.
+Tilt feasibility (Section 5, Step 5): a tilt of the T2 plate is planned only where its near edge stays at or beyond
+Z_MIN; see :func:`tilt_is_feasible`.
 """
 from __future__ import annotations
 
@@ -60,6 +67,7 @@ import csv
 import json
 import math
 import sys
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
@@ -70,12 +78,12 @@ from scipy.spatial.transform import Rotation
 from sensorperf.geometry.camera import PinholeCamera
 from sensorperf.geometry.registration import Registration
 from sensorperf.geometry.targets import (
-    FEATURE_POST, TARGET_KIND_PLATE, TargetSet, TwoPlaneTarget, fronto_parallel_pose, make_noise_plate,
+    FEATURE_POST, TARGET_KIND_PLATE, TargetSet, TwoPlaneTarget, fronto_parallel_pose,
     make_standard_target_set, tilted_pose,
 )
 from sensorperf.geometry.transforms import RigidTransform
 from sensorperf.io.manifest import (
-    SUBSERIES_EXTENDED, SUBSERIES_FIELD, SUBSERIES_FILTERS_OFF, SUBSERIES_JITTER, SUBSERIES_LADDER, SUBSERIES_MAIN,
+    FIELD_FRACTION_ACHIEVED_KEY, SUBSERIES_EXTENDED, SUBSERIES_FIELD, SUBSERIES_FILTERS_OFF, SUBSERIES_JITTER, SUBSERIES_LADDER, SUBSERIES_MAIN,
     SUBSERIES_NOMINAL, SUBSERIES_OPEN, SUBSERIES_REMOUNT, SUBSERIES_SENTINEL, SUBSERIES_STAIRCASE, SUBSERIES_TILT,
     TARGET_POSE_COLUMNS, TILT_AXIS_H, TILT_AXIS_V, VISIT_A, VISIT_B, format_file_name, pose_to_six,
     six_to_pose,
@@ -107,6 +115,9 @@ datasheet value."""
 FIELD_PULL_TOLERANCE = 1.0e-3
 """Resolution of the fraction of the requested field offset kept when a pose is pulled
 inward (bisection stops when the bracket is narrower than this)."""
+TILT_NEAR_EDGE_TOLERANCE_MM = 1.0e-9
+"""A tilted plate whose near edge is at Z_MIN or beyond it by no less than minus this many millimeters counts as feasible
+(numerical guard of the tilt feasibility rule, :func:`tilt_is_feasible`)."""
 FIT_VIOLATION_TOLERANCE_PX = 1.0e-6
 """A fit violation at or below this many pixels counts as fitting (numerical guard)."""
 FIELD_PULL_REPORT_TOLERANCE = 1.0e-9
@@ -240,6 +251,12 @@ class PlannedCapture:
         return format_file_name(self.procedure, self.target_id, self.gap_mm, self.station_z_mm, self.field,
                                 self.pose_index, frame_index)
 
+    def manifest_metadata(self) -> dict[str, str]:
+        """The plan quantities the manifest carries as extra columns (string metadata of the FrameRecord): the achieved
+        fraction of the requested field offset, for a pose placed at a field position (empty for any other pose)."""
+        fraction = self.notes.get(FIELD_FRACTION_ACHIEVED_KEY)
+        return {} if fraction is None else {FIELD_FRACTION_ACHIEVED_KEY: repr(float(fraction))}
+
 
 # ---------------------------------------------------------------------------
 # Diagnostics collected while planning
@@ -255,6 +272,8 @@ class PlanDiagnostics:
     """Things the technician should read before running the plan."""
     notes: list[str] = field(default_factory=list)
     """Informational lines (assumptions, counts)."""
+    skipped: list[str] = field(default_factory=list)
+    """Poses left out of the plan, each with its reason (the infeasible tilts of series A), listed in plan_summary.txt."""
     master_seed: int | None = None
     """Seed of the master generator, when the caller knows it (logged in the summary)."""
 
@@ -267,6 +286,11 @@ class PlanDiagnostics:
         """Record an information line once."""
         if message not in self.notes:
             self.notes.append(message)
+
+    def skip(self, message: str) -> None:
+        """Record once that poses were left out of the plan, with the reason."""
+        if message not in self.skipped:
+            self.skipped.append(message)
 
 
 def _warn(diagnostics: PlanDiagnostics | None, message: str) -> None:
@@ -476,8 +500,11 @@ def place_in_field(params: CharacterizationParameters, geometry: SensorGeometry,
 
 
 def _placement_notes(placement: FieldPlacement) -> dict[str, Any]:
-    """Notes of a pose placed at a field position: the position always, the adjustment record when one was made."""
-    notes: dict[str, Any] = {"field_h_mm": placement.h_mm, "field_v_mm": placement.v_mm}
+    """Notes of a pose placed at a field position: the position and the achieved fraction of the requested offset
+    (``FIELD_FRACTION_ACHIEVED_KEY``: 1 when the request fits, smaller when the pose was pulled inward) always, the
+    adjustment record when one was made."""
+    notes: dict[str, Any] = {"field_h_mm": placement.h_mm, "field_v_mm": placement.v_mm,
+                             FIELD_FRACTION_ACHIEVED_KEY: placement.fraction_kept}
     if placement.adjusted or not placement.fits:
         notes["field_placement"] = placement.as_notes()
     return notes
@@ -547,21 +574,66 @@ def plan_registration(params: CharacterizationParameters, geometry: SensorGeomet
 # ---------------------------------------------------------------------------
 # Section 5: noise series
 # ---------------------------------------------------------------------------
+def tilt_near_edge_mm(plate: TwoPlaneTarget, station_z_mm: float, tilt_axis: str, tilt_deg: float) -> float:
+    """Depth of the near edge of the plate when it is tilted by ``tilt_deg`` about ``tilt_axis`` through its center at
+    ``station_z_mm``: Z - h sin(|tilt|), where h is the half extent of the plate across the tilt axis (the edge that swings
+    toward the sensor: half the width for a tilt about V, half the height for a tilt about H; both are 200 mm for the
+    400 x 400 mm plate)."""
+    half_extent = plate.half_width_mm if tilt_axis == TILT_AXIS_V else plate.half_height_mm
+    return station_z_mm - half_extent * math.sin(math.radians(abs(tilt_deg)))
+
+
+def tilt_is_feasible(params: CharacterizationParameters, plate: TwoPlaneTarget, station_z_mm: float, tilt_axis: str,
+                     tilt_deg: float) -> bool:
+    """Whether a tilted plate keeps its near edge at or beyond Z_MIN (Section 5, Step 5, tilt feasibility): Z - h sin(tilt)
+    >= Z_MIN, so that no part of the plate comes closer to the sensor than the nearest depth the sensor is specified to
+    read. With the 400 x 400 mm plate this rules out every tilt at Z = 400 mm and none at 800 and 1600 mm."""
+    return tilt_near_edge_mm(plate, station_z_mm, tilt_axis, tilt_deg) >= params.z_min_mm - TILT_NEAR_EDGE_TOLERANCE_MM
+
+
+def _feasible_tilt_angles(params: CharacterizationParameters, plate: TwoPlaneTarget, station_z_mm: float,
+                          tilt_axis: str, diagnostics: PlanDiagnostics | None) -> list[float]:
+    """The angles of TILT_ANGLES_DEG of one tilt sweep (station and axis) that are planned. An infeasible angle is
+    skipped. When no angle other than zero is feasible the whole sweep is skipped: the zero angle alone is no sweep (the
+    fronto-parallel pose is the main station already). Every skipped angle is listed in ``diagnostics`` with the reason."""
+    angles = [float(a) for a in params.tilt_angles_deg]
+    feasible = [a for a in angles if tilt_is_feasible(params, plate, station_z_mm, tilt_axis, a)]
+    if not any(a != 0.0 for a in feasible):
+        feasible = []                                                   # no real tilt is allowed: no sweep at all
+    skipped = [a for a in angles if a not in feasible]
+    if skipped and diagnostics is not None:
+        near_edges = ", ".join(f"{a:g} deg -> {tilt_near_edge_mm(plate, station_z_mm, tilt_axis, a):.0f} mm"
+                               for a in skipped if a != 0.0)
+        reason = (f"the plate's near edge, Z - h sin(tilt) with h = half the plate extent across the tilt axis = "
+                  f"{plate.half_width_mm if tilt_axis == TILT_AXIS_V else plate.half_height_mm:g} mm, would come closer than "
+                  f"Z_MIN = {params.z_min_mm:g} mm ({near_edges})")
+        if not feasible:
+            reason += "; with no tilt left, the zero-angle pose alone is not a sweep either"
+        diagnostics.skip(f"A tilt about {tilt_axis} at Z = {station_z_mm:g} mm: skipped "
+                         f"{', '.join(f'{a:g}' for a in skipped)} deg; {reason}")
+    return feasible
+
+
 def plan_noise_series(params: CharacterizationParameters, geometry: SensorGeometry, rng: np.random.Generator,
                       filters_off: bool = False, with_sentinels: bool = True, targets: TargetSet | None = None,
                       diagnostics: PlanDiagnostics | None = None) -> list[PlannedCapture]:
     """Section 5 (Series A), target T2: main stations, tilt sub-series and repeat-mount check.
 
     Step 1: the station list is every station of the geometric ladder (``params.z_stations_mm()``, nine
-    stations from Z_MIN to Z_MAX) plus the LEGACY_METRIC_DEPTHS_MM (700 and 1000 mm) as extra stations, so the
-    legacy metrics are computed at the depths of the existing data (``params.noise_stations_mm()``), at the five
-    field positions (center, then the four off-axis ones), all fronto-parallel, FRAMES_PER_NOISE_STATION
-    frames each; positions that do not fit the field are pulled inward (see module docstring).
+    stations from Z_MIN to Z_MAX) at the five field positions (center, then the four off-axis ones), plus the
+    LEGACY_METRIC_DEPTHS_MM (700 and 1000 mm, ``params.legacy_extra_stations_mm()``) as extra stations at the center
+    field position ONLY, so the legacy metrics are computed at the depths of the existing data without adding off-axis
+    poses: 9 x 5 + 2 = 47 main poses. All are fronto-parallel, FRAMES_PER_NOISE_STATION frames each; off-axis positions
+    that do not fit the field are pulled inward (see module docstring) and the achieved fraction of the requested
+    offset is stored in ``notes["field_fraction_achieved"]``.
     Step 2: the station list is shuffled with a logged seed. Step 4 (move, settle, capture) is the
     robot's job; the budget counts the settle time. Step 5: at the center and each Z in
     reduced station (``params.z_reduced_stations_mm()``), T2 is tilted about V and then about H through every angle in
     TILT_ANGLES_DEG (FRAMES_PER_TILT_POSE frames each; the zero angle is captured in both
-    sweeps, as the procedure lists it). Step 6: the repeat-mount check repeats the center station at
+    sweeps, as the procedure lists it). A tilt is planned only where the plate's near edge stays at or beyond Z_MIN
+    (:func:`tilt_is_feasible`: Z - h sin(tilt) >= Z_MIN, h the half extent of the plate across the tilt axis); infeasible
+    tilts are skipped and listed in plan_summary.txt with the reason. With the 400 x 400 mm plate every tilt at 400 mm is
+    infeasible, which leaves the 800 and 1600 mm stations. Step 6: the repeat-mount check repeats the center station at
     Z_REFERENCE_MM after the tilt sub-series (subseries "remount"). Step 3: the drift sentinels
     are inserted by :func:`insert_sentinels` when ``with_sentinels`` is true.
 
@@ -574,7 +646,8 @@ def plan_noise_series(params: CharacterizationParameters, geometry: SensorGeomet
     counter = _PoseCounter(FILTERS_OFF_POSE_INDEX_BASE if filters_off else 0)
     main_label = SUBSERIES_FILTERS_OFF if filters_off else SUBSERIES_MAIN
     # Step 1: the station list with its field placements.
-    stations = [(z, code) for z in params.noise_stations_mm() for code in FIELD_POSITION_CODES]
+    stations = [(z, code) for z in params.z_stations_mm() for code in FIELD_POSITION_CODES]
+    stations += [(z, FIELD_POSITION_CENTER) for z in params.legacy_extra_stations_mm()]      # legacy depths: center only
     # Step 2: shuffle with a logged seed so slow drift cannot masquerade as a Z dependence.
     order_seed = derive_seed(rng)
     permutation = np.random.default_rng(order_seed).permutation(len(stations))
@@ -591,15 +664,15 @@ def plan_noise_series(params: CharacterizationParameters, geometry: SensorGeomet
                                  notes=notes))
         _warn_not_fitting(diagnostics, "A", plate, z, placement)
     # Step 5: tilt sub-series at the center, about V and then about H.
+    camera = camera_of(geometry)
     for z in params.z_reduced_stations_mm():
         for axis in (TILT_AXIS_V, TILT_AXIS_H):
-            for angle in params.tilt_angles_deg:
+            for angle in _feasible_tilt_angles(params, plate, z, axis, diagnostics):
                 pose = tilted_pose(0.0, 0.0, z, axis, angle)
-                capture = _new_capture(counter, PROCEDURE_NOISE, TARGET_NOISE_PLATE, None, z, FIELD_POSITION_CENTER,
-                                       params.frames_per_tilt_pose, SUBSERIES_FILTERS_OFF if filters_off
-                                       else SUBSERIES_TILT, pose, tilt_axis=axis, tilt_deg=float(angle))
-                plan.append(capture)
-                camera = camera_of(geometry)
+                notes = {"near_edge_mm": tilt_near_edge_mm(plate, z, axis, angle)}
+                plan.append(_new_capture(counter, PROCEDURE_NOISE, TARGET_NOISE_PLATE, None, z, FIELD_POSITION_CENTER,
+                                         params.frames_per_tilt_pose, SUBSERIES_FILTERS_OFF if filters_off
+                                         else SUBSERIES_TILT, pose, tilt_axis=axis, tilt_deg=angle, notes=notes))
                 if fit_violation_px(camera, plate, pose, margin) > fit_violation_px(
                         camera, plate, fronto_parallel_pose(0.0, 0.0, z), margin) + FIT_VIOLATION_TOLERANCE_PX:
                     _warn(diagnostics, f"A: the T2 plate tilted {angle:g} deg about {axis} at Z = {z:g} mm fits the "
@@ -614,7 +687,7 @@ def plan_noise_series(params: CharacterizationParameters, geometry: SensorGeomet
     _renumber(plan)
     if with_sentinels:
         plan = insert_sentinels(plan, params, geometry, _seconds_per_frame(geometry), params.move_and_settle_time_s,
-                                diagnostics=diagnostics)
+                                diagnostics=diagnostics, targets=targets)
     return plan
 
 
@@ -905,70 +978,131 @@ def capture_duration_s(capture: PlannedCapture, seconds_per_frame: float, move_s
     return capture_duration_s_for_frames(capture.frames, seconds_per_frame, move_settle_s)
 
 
+SENTINEL_NOTE_KEY = "sentinel_note"
+SENTINEL_TARGET_KEY = "sentinel_target"
+SENTINEL_GAP_KEY = "sentinel_gap_mm"
+SENTINEL_REFERENCE_KEY = "mount_reference"
+"""Keys of the ``notes`` of a sentinel pose: an explanatory note, the mounted target and its gap (also the pose row's
+``target_id`` and ``gap_mm``), and whether this is the first sentinel after the target was mounted (the reference of
+that target's drift, see ``analysis.noise``)."""
+
+
+def _mounted_target_id(plan: Sequence[PlannedCapture], position: int) -> str | None:
+    """The target mounted at ``plan[position]`` as seen by a sentinel: the target of the nearest earlier capture that is
+    not a sentinel, or of the nearest later one when nothing was captured before (a sentinel at the start of a plan)."""
+    for other in list(reversed(plan[:position])) + list(plan[position + 1:]):
+        if other.procedure != PROCEDURE_SENTINEL:
+            return other.target_id
+    return None
+
+
+def count_sentinel_remounts(plan: Sequence[PlannedCapture]) -> int:
+    """Number of sentinels whose target differs from the target mounted at that point of the plan (see
+    :func:`_mounted_target_id`), i.e. sentinels that would need a re-mount. Zero for every plan made by
+    :func:`insert_sentinels`: a sentinel is captured on the mounted target."""
+    return sum(1 for position, capture in enumerate(plan)
+               if capture.procedure == PROCEDURE_SENTINEL
+               and _mounted_target_id(plan, position) not in (None, capture.target_id))
+
+
 def insert_sentinels(plan: list[PlannedCapture], params: CharacterizationParameters, geometry: SensorGeometry,
                      seconds_per_frame: float, move_settle_s: float,
-                     sentinel_target_id: str = TARGET_NOISE_PLATE,
-                     diagnostics: PlanDiagnostics | None = None) -> list[PlannedCapture]:
-    """Section 5, Step 3: "Before the first station, capture a drift sentinel: center, Z = Z_REFERENCE_MM (800 mm), 30 frames.
-    Repeat the sentinel every DRIFT_SENTINEL_INTERVAL_MIN and after the last station." (Section 7, Step 5 and
-    Section 8 ask for the same cadence in their series.)
+                     diagnostics: PlanDiagnostics | None = None,
+                     targets: TargetSet | None = None) -> list[PlannedCapture]:
+    """Section 5, Step 3, as revised in the specification review: drift sentinels on the MOUNTED target.
 
-    Walks the plan with a clock that adds, per capture, the move plus settle time and the frames at
-    ``seconds_per_frame`` (the Section 9 budget model). A sentinel (procedure S, target T2, gap None, field 0, Z =
-    Z_REFERENCE_MM, SENTINEL_FRAMES frames, sub-series "sentinel") is placed before the first non-registration
-    capture, before any capture that starts when at least DRIFT_SENTINEL_INTERVAL_MIN of clock time has passed since
-    the previous sentinel began, and after the last capture. Registration poses (Section 4) come before the first
-    sentinel and are not counted. Existing sentinels in ``plan`` are dropped first, so the function can be
-    applied to a plan again after it was changed. Order is renumbered 0..N-1; the input list is not modified.
+    A sentinel is captured on the front plane of the target that is mounted at that point of the plan (the target of
+    the surrounding series, with the gap as mounted), centered at Z_REFERENCE_MM, SENTINEL_FRAMES frames each
+    (procedure S, sub-series "sentinel"). The pose row carries the mounted ``target_id`` and ``gap_mm`` and a note
+    (``notes["sentinel_note"]``); no target is re-mounted for a sentinel. The first sentinel after each mount is that
+    target's reference (``notes["mount_reference"]``): the analysis (``analysis.noise``) computes each target's drift
+    relative to it. A mount is a change of ``target_id`` from one capture to the next; a change of gap is not (the
+    front plane stays where it is).
 
-    The sentinel is the T2 noise plate as the procedure defines it. In series that mount another target (B, C,
-    D) a sentinel therefore needs a re-mount of T2; the number of such sentinels is noted in ``diagnostics``.
-    ``geometry`` is used to check that the plate fits the field at the sentinel station."""
+    The function walks the plan with a clock that adds, per capture, the move plus settle time and the frames at
+    ``seconds_per_frame`` (the Section 9 budget model) and places a sentinel
+      * before the first capture that is not a registration pose, on the target of that capture (T2 when series A
+        comes first, as the procedure defines it);
+      * at every series boundary, that is after the last pose of each series, on the target still mounted there (T2
+        after A and after B-Z, so T2 sentinels bracket those series; T3b, T5 and T5 after B-HV, C and D);
+      * before any capture that starts when at least DRIFT_SENTINEL_INTERVAL_MIN of clock time has passed since the
+        previous sentinel began, on the mounted target;
+      * after the last capture (the end of the last series).
+    Registration poses (Section 4) come before the first sentinel and are not counted. Existing sentinels in ``plan``
+    are dropped first, so the function can be applied to a plan again after it was changed. Order is renumbered
+    0..N-1; the input list is not modified.
+
+    ``diagnostics`` receives a note with the sentinel count and the number of re-mounts they need (zero by
+    construction; a warning if it were not), and a warning for a mounted target that does not fit the field of view at
+    Z_REFERENCE_MM. ``targets`` is the target set of that fit check (default: the standard set)."""
     interval_s = params.drift_sentinel_interval_min * SECONDS_PER_MINUTE
     pose = fronto_parallel_pose(0.0, 0.0, params.z_reference_mm)
     sentinel_counter = _PoseCounter()
-
-    def sentinel() -> PlannedCapture:
-        """A new sentinel pose with the next free pose index."""
-        return _new_capture(sentinel_counter, PROCEDURE_SENTINEL, sentinel_target_id, None, params.z_reference_mm,
-                            FIELD_POSITION_CENTER, params.sentinel_frames, SUBSERIES_SENTINEL, pose)
-
     sentinel_duration = capture_duration_s_for_frames(params.sentinel_frames, seconds_per_frame, move_settle_s)
     result: list[PlannedCapture] = []
+    mounted_target: str | None = None          # target of the latest capture placed (registration poses included)
+    mount_serial = 0                           # counts the mounts so far
+    referenced_serial = 0                      # the mount that already has its reference sentinel
+
+    def mount(capture: PlannedCapture) -> None:
+        """Note that ``capture`` is taken with its target mounted (a change of target is a new mount)."""
+        nonlocal mounted_target, mount_serial
+        if capture.target_id != mounted_target:
+            mounted_target, mount_serial = capture.target_id, mount_serial + 1
+
+    def sentinel(on: PlannedCapture) -> PlannedCapture:
+        """A new sentinel pose on the target (and gap) of the capture ``on``, with the next free pose index."""
+        nonlocal referenced_serial
+        reference = referenced_serial != mount_serial
+        referenced_serial = mount_serial
+        gap_text = "no back plate" if on.gap_mm is None else f"G = {on.gap_mm:g} mm"
+        notes = {SENTINEL_NOTE_KEY: f"drift sentinel on the mounted target {on.target_id} ({gap_text}): front plane at "
+                                    f"Z = {params.z_reference_mm:g} mm, centered" + ("; reference of this mount"
+                                                                                   if reference else ""),
+                 SENTINEL_TARGET_KEY: on.target_id, SENTINEL_GAP_KEY: on.gap_mm, SENTINEL_REFERENCE_KEY: reference}
+        return _new_capture(sentinel_counter, PROCEDURE_SENTINEL, on.target_id, on.gap_mm, params.z_reference_mm,
+                            FIELD_POSITION_CENTER, params.sentinel_frames, SUBSERIES_SENTINEL, pose, notes=notes)
+
     since_last: float | None = None            # clock time since the last sentinel began; None before the first
+    previous: PlannedCapture | None = None     # latest capture placed that is not a registration pose
     for capture in (c for c in plan if c.procedure != PROCEDURE_SENTINEL):
         if capture.procedure == PROCEDURE_REGISTRATION:
+            mount(capture)
             result.append(capture)
             continue
-        if since_last is None or since_last >= interval_s:
-            result.append(sentinel())
+        if previous is None:
+            mount(capture)                                       # the first pose of the plan: sentinel on its target
+            result.append(sentinel(capture))
             since_last = sentinel_duration
+        elif since_last >= interval_s or capture.procedure != previous.procedure:
+            result.append(sentinel(previous))                    # interval up or series ended: target still mounted
+            since_last = sentinel_duration
+        mount(capture)
         result.append(capture)
         since_last += capture_duration_s(capture, seconds_per_frame, move_settle_s)
-    if since_last is not None:
-        result.append(sentinel())
+        previous = capture
+    if previous is not None:
+        result.append(sentinel(previous))                        # after the last pose of the last series
     _renumber(result)
     if diagnostics is not None:
-        count = sum(c.procedure == PROCEDURE_SENTINEL for c in result)
-        diagnostics.note(f"{count} drift sentinels (every {params.drift_sentinel_interval_min:g} min of estimated "
-                         f"clock, {params.sentinel_frames} frames, {sentinel_target_id} at Z = "
-                         f"{params.z_reference_mm:g} mm center)")
-        # A sentinel whose neighbors (the captures just before and after it) both mount another target needs a re-mount.
-        remounts = 0
-        for position, capture in enumerate(result):
-            if capture.procedure != PROCEDURE_SENTINEL:
-                continue
-            neighbors = [result[i].target_id for i in (position - 1, position + 1)
-                         if 0 <= i < len(result) and result[i].procedure != PROCEDURE_SENTINEL]
-            if neighbors and all(t != sentinel_target_id for t in neighbors):
-                remounts += 1
+        sentinels = [c for c in result if c.procedure == PROCEDURE_SENTINEL]
+        per_target = ", ".join(f"{t}: {n}" for t, n in sorted(Counter(c.target_id for c in sentinels).items()))
+        remounts = count_sentinel_remounts(result)
+        diagnostics.note(f"{len(sentinels)} drift sentinels ({per_target}), each on the front plane of the target "
+                         f"mounted at that point of the plan, centered at Z = {params.z_reference_mm:g} mm, "
+                         f"{params.sentinel_frames} frames, at the series boundaries and every "
+                         f"{params.drift_sentinel_interval_min:g} min of estimated clock; {remounts} sentinel re-mounts")
         if remounts:
-            diagnostics.warn(f"{remounts} of {count} drift sentinels fall between captures of another target; each "
-                             f"needs {sentinel_target_id} mounted (a re-mount), as the procedure defines the sentinel "
-                             "on the noise plate")
-        if not pose_fits_field(camera_of(geometry), make_noise_plate(params), pose,
-                               _fit_margin_px(params, jittered=False)):
-            diagnostics.warn("the sentinel plate does not fit the field of view at the sentinel station")
+            diagnostics.warn(f"{remounts} of {len(sentinels)} drift sentinels are not on the target mounted at that "
+                             "point of the plan; each needs a re-mount")
+        target_set = _targets(params, geometry, targets)
+        camera = camera_of(geometry)
+        for target_id, gap in sorted({(c.target_id, c.gap_mm) for c in sentinels}, key=str):
+            if not pose_fits_field(camera, target_set.get(target_id).with_gap(gap), pose,
+                                   _fit_margin_px(params, jittered=False)):
+                diagnostics.warn(f"the sentinel target {target_id} ({'no back plate' if gap is None else f'G = {gap:g} mm'}) "
+                                 f"does not fit the field of view at the sentinel station Z = "
+                                 f"{params.z_reference_mm:g} mm")
     return result
 
 
@@ -1018,7 +1152,7 @@ def plan_full_session(params: CharacterizationParameters, geometry: SensorGeomet
     if PROCEDURE_DETECTION in chosen:
         parts += plan_detection_series(params, geometry, rng, extended, target_set, diagnostics)
     return insert_sentinels(parts, params, geometry, _seconds_per_frame(geometry), params.move_and_settle_time_s,
-                            diagnostics=diagnostics)
+                            diagnostics=diagnostics, targets=target_set)
 
 
 # ---------------------------------------------------------------------------
@@ -1225,8 +1359,8 @@ def plan_summary_text(plan: Sequence[PlannedCapture], params: CharacterizationPa
                   f"to Z_MAX {params.z_max_mm:g} mm): " + ", ".join(f"{z:g}" for z in stations),
               "  B-HV shape stations: " + ", ".join(f"{z:g}" for z in params.z_shape_stations_mm()),
               "  B-Z and tilt reduced stations: " + ", ".join(f"{z:g}" for z in params.z_reduced_stations_mm()),
-              "  A legacy-metric extra stations: " + ", ".join(f"{z:g}" for z in params.noise_stations_mm()
-                                                               if z not in stations),
+              "  A legacy-metric extra stations (center field only): "
+              + ", ".join(f"{z:g}" for z in params.legacy_extra_stations_mm()),
               "  D zero-detection stations (extra trials): "
               + ", ".join(f"{z:g}" for z in params.detection_zero_stations_mm()),
               "  Feature diameters (mm): " + ", ".join(f"{d:.1f}" for d in params.feature_diameters_mm(geometry))
@@ -1260,8 +1394,15 @@ def plan_summary_text(plan: Sequence[PlannedCapture], params: CharacterizationPa
                   f"Series Z pose log: write x_mm, y_mm, z_mm with at least {MIN_POSE_LOG_DECIMALS} decimals; the "
                   "read-back pose is the step truth."]
     adjustments = _adjustment_lines(plan)
-    lines += ["", f"Field-offset adjustments (Section 5, Step 1: the target must fit the field): {len(adjustments)}"]
+    lines += ["", f"Field-offset adjustments (Section 5, Step 1: the target must fit the field; margin = "
+                  f"BOUNDARY_BAND_HALF_WIDTH_PX = {params.boundary_band_half_width_px:g} px inside the image, plus half "
+                  f"the {params.phase_jitter_span_px:g} px phase-jitter span for the jittered series; the fraction kept "
+                  f"of the requested offset is in the notes of poses.csv as {FIELD_FRACTION_ACHIEVED_KEY}): "
+                  f"{len(adjustments)}"]
     lines += adjustments if adjustments else ["  none"]
+    skipped = [] if diagnostics is None else diagnostics.skipped
+    lines += ["", f"Skipped poses (left out of the plan): {len(skipped)}"]
+    lines += [f"  {message}" for message in skipped] if skipped else ["  none"]
     if diagnostics is not None and diagnostics.notes:
         lines += ["", "Notes:"] + [f"  {n}" for n in diagnostics.notes]
     warnings = [] if diagnostics is None else diagnostics.warnings

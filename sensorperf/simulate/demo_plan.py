@@ -182,9 +182,13 @@ class _PlanBuilder:
                      offset_h_mm=offset_h, offset_v_mm=offset_v)
 
     def add_sentinel(self) -> None:
-        """A drift sentinel: the noise plate at the reference station (Section 5, Step 3)."""
+        """A drift sentinel (Section 5, Step 3): the target mounted at this point of the plan (that of the latest capture;
+        the noise plate T2 at the start of the plan) at the reference station, centered, as ``insert_sentinels`` plans it."""
         z_reference = self.params.z_reference_mm
-        self.add(PROCEDURE_SENTINEL, TARGET_NOISE_PLATE, None, z_reference, FIELD_POSITION_CENTER,
+        mounted = self.captures[-1] if self.captures else None
+        target_id = TARGET_NOISE_PLATE if mounted is None else mounted.target_id
+        gap_mm = None if mounted is None else mounted.gap_mm
+        self.add(PROCEDURE_SENTINEL, target_id, gap_mm, z_reference, FIELD_POSITION_CENTER,
                  self.params.sentinel_frames, SUBSERIES_SENTINEL, fronto_parallel_pose(0.0, 0.0, z_reference))
 
 
@@ -211,7 +215,8 @@ def _plan_registration(builder: _PlanBuilder, quick: bool) -> None:
 
 def _plan_noise(builder: _PlanBuilder) -> None:
     """Section 5: T2 at Z_MIN, Z_REFERENCE and Z_MAX (center field), two tilt poses at the reference
-    station, and a drift sentinel before and after (a real plan inserts one per hour of clock)."""
+    station, and a drift sentinel before it (a real plan inserts one per hour of clock; the sentinel after series A is
+    added by ``demo_plan``)."""
     params = builder.params
     builder.add_sentinel()
     for station in (params.z_min_mm, params.z_reference_mm, params.z_max_mm):
@@ -280,8 +285,9 @@ def demo_plan(params: CharacterizationParameters, geometry: SensorGeometry, rng:
     """The demonstration plan (module docstring) of the requested series (all of ALL_SERIES by default),
     in acquisition order R, A, B, Z, C, D with ``order`` set 0..N-1. ``geometry`` is the sensor the plan
     will be rendered with (it converts the jitter span from pixels to mm); ``quick`` uses fewer
-    registration poses. A drift sentinel is appended after the last series when A is included, so that
-    the session has a sentinel at each end. Raises ValueError for an unknown series letter."""
+    registration poses. When A is included, a drift sentinel follows series A and another follows the last series,
+    each on the target mounted there (T2 after A, so that the T2 sentinels bracket A; the target of the last series at
+    the end), as ``insert_sentinels`` plans them. Raises ValueError for an unknown series letter."""
     chosen = tuple(ALL_SERIES if series is None else series)
     unknown = [letter for letter in chosen if letter not in ALL_SERIES]
     if unknown:
@@ -291,6 +297,7 @@ def demo_plan(params: CharacterizationParameters, geometry: SensorGeometry, rng:
         _plan_registration(builder, quick)
     if PROCEDURE_NOISE in chosen:
         _plan_noise(builder)
+        builder.add_sentinel()                  # series boundary: T2 is still mounted
     if PROCEDURE_EDGES in chosen:
         _plan_edges(builder)
     if PROCEDURE_ZSTEP in chosen:
@@ -299,6 +306,6 @@ def demo_plan(params: CharacterizationParameters, geometry: SensorGeometry, rng:
         _plan_area(builder)
     if PROCEDURE_DETECTION in chosen:
         _plan_detection(builder)
-    if PROCEDURE_NOISE in chosen:
-        builder.add_sentinel()
+    if PROCEDURE_NOISE in chosen and builder.captures[-1].procedure != PROCEDURE_SENTINEL:
+        builder.add_sentinel()                  # the end of the last series, on the target mounted there
     return builder.captures

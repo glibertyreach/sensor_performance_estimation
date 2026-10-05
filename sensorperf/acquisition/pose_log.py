@@ -521,7 +521,7 @@ def _record(planned: PlannedCapture, frame_index: int, path: Path, entry: LogFra
         sensor_temp_c=entry.numbers.get("sensor_temp_c"), air_temp_c=entry.numbers.get("air_temp_c"),
         sensor_config_id=sensor_config_id, subseries=planned.subseries,
         tilt_axis=planned.tilt_axis, tilt_deg=planned.tilt_deg, step_mm=planned.step_mm, visit=planned.visit,
-        level_index=planned.level_index)
+        level_index=planned.level_index, metadata=planned.manifest_metadata())
 
 
 def _check_agreement(records: list[FrameRecord], plan_by_key: dict[tuple, PlannedCapture], messages: Messages) -> None:

@@ -678,8 +678,34 @@ def fit_noise_model(stations_mm: np.ndarray, sigma_t_mm: np.ndarray, k_mm_px: fl
 # ---------------------------------------------------------------------------
 # Step 11: sentinels
 # ---------------------------------------------------------------------------
-def _frame_means(session: Session, records: list[FrameRecord], options: NoiseOptions) -> list[dict[str, Any]]:
-    """Per frame of the sentinel poses: time (s since epoch), temperature, ROI mean of Z - Z_GT and of Z."""
+def mount_epochs(records: Sequence[FrameRecord]) -> dict[tuple, int]:
+    """The mount number of every pose of the manifest, by pose key. A mount is a change of ``target_id`` from one
+    capture that is not a sentinel to the next (registration poses count: they use T2); a sentinel belongs to the mount
+    it is captured in, because a sentinel is captured on the target mounted at that point of the plan
+    (``acquisition.plan.insert_sentinels``). The records must be in acquisition order, which both manifest writers
+    (``simulate.session`` and ``acquisition.pose_log``) guarantee. Mount 0 is the first."""
+    epochs: dict[tuple, int] = {}
+    mounted: str | None = None
+    epoch = 0
+    for record in records:
+        if record.procedure != PROCEDURE_SENTINEL:
+            if mounted is not None and record.target_id != mounted:
+                epoch += 1
+            mounted = record.target_id
+        epochs.setdefault(record.pose_key(), epoch)
+    return epochs
+
+
+def a_mount_epochs(records: Sequence[FrameRecord], epochs: dict[tuple, int]) -> set[int]:
+    """The mounts in which series A was captured (the T2 mount of the plan; the drift correction of A is taken from the
+    T2 sentinels of these mounts)."""
+    return {epochs[r.pose_key()] for r in records if r.procedure == PROCEDURE_NOISE}
+
+
+def _frame_means(session: Session, records: list[FrameRecord], options: NoiseOptions,
+                 epochs: dict[tuple, int]) -> list[dict[str, Any]]:
+    """Per frame of the sentinel poses: the mounted target, its gap and mount number, time (s since epoch),
+    temperature, ROI mean of Z - Z_GT and of Z."""
     out = []
     for pose_id, (key, group) in enumerate(group_by_pose(records).items()):
         stack = load_stack(group)
@@ -691,29 +717,84 @@ def _frame_means(session: Session, records: list[FrameRecord], options: NoiseOpt
             if not ok.any():
                 continue
             stamp = _parse_time(frame_record.timestamp)
-            out.append({"pose_id": pose_id, "time_s": None if stamp is None else stamp.timestamp(),
+            out.append({"pose_id": pose_id, "target_id": frame_record.target_id, "gap_mm": frame_record.gap_mm,
+                        "epoch": epochs.get(key, 0),
+                        "time_s": None if stamp is None else stamp.timestamp(),
                         "temperature_c": frame_record.sensor_temp_c,
                         "registered_mm": float(np.mean((frame - geometry.z_front_gt)[ok])),
                         "raw_mm": float(np.mean(frame[ok])), "station_z_mm": frame_record.station_z_mm})
     return out
 
 
+def _pose_means(hours: np.ndarray, values: np.ndarray, pose_ids: np.ndarray) -> tuple[list[float], list[float]]:
+    """(time in hours, mean value) of every sentinel pose, in order of time, with the values relative to the first pose:
+    the drift of the target relative to its first sentinel after mounting."""
+    ids = sorted(set(pose_ids.tolist()))
+    pose_hours = [float(np.mean(hours[pose_ids == p])) for p in ids]
+    pose_values = [float(np.mean(values[pose_ids == p])) for p in ids]
+    order = np.argsort(pose_hours)
+    return [pose_hours[i] for i in order], [pose_values[i] - pose_values[order[0]] for i in order]
+
+
+def _line_rate(hours: np.ndarray, values: np.ndarray) -> float:
+    """Slope of the least-squares line of values against hours (mm per hour); NaN without a spread in time."""
+    return float(np.polyfit(hours, values, 1)[0]) if np.ptp(hours) > 0 else float("nan")
+
+
+def target_drifts(frames: list[dict[str, Any]], options: NoiseOptions, time_origin_s: float,
+                  correction_epochs: set[int]) -> list[TargetDrift]:
+    """The drift of every mounted target (Step 11): the sentinel frames are grouped by (target, mount), and each group's
+    drift is the sentinel line relative to its first sentinel after the mount (the reference of that mount, so a
+    re-mount of the target, whose repeatability is ADAPTER_REMOUNT_REPEATABILITY_MM, does not enter). A group with one
+    sentinel pose has only its reference (offset 0, no rate). ``correction_epochs`` are the mounts of series A; the T2
+    groups among them are the ones the A drift correction uses."""
+    groups: dict[tuple, list[dict[str, Any]]] = {}
+    for f in frames:
+        groups.setdefault((f["epoch"], f["target_id"]), []).append(f)
+    result = []
+    for (epoch, target_id), members in sorted(groups.items(), key=lambda item: min(f["time_s"] for f in item[1])):
+        hours = np.array([(f["time_s"] - time_origin_s) / SECONDS_PER_HOUR for f in members])
+        key = "registered_mm" if options.sentinel_reference == "registered" else "raw_mm"
+        values = np.array([f[key] for f in members])
+        pose_hours, pose_offsets = _pose_means(hours, values, np.array([f["pose_id"] for f in members]))
+        rate = _line_rate(hours, values)
+        span_hours = float(np.ptp(pose_hours)) if len(pose_hours) > 1 else 0.0
+        result.append(TargetDrift(
+            target_id=target_id, mount=epoch, gap_mm=members[0]["gap_mm"], sentinel_poses=len(pose_hours),
+            pose_hours=pose_hours, pose_offset_mm=pose_offsets, rate_mm_per_hour=rate, span_hours=span_hours,
+            drift_over_span_mm=abs(rate) * span_hours if math.isfinite(rate) else float("nan"),
+            used_for_a_correction=(target_id == TARGET_NOISE_PLATE and epoch in correction_epochs)))
+    return result
+
+
 def analyze_sentinels(session: Session, rows: list[StationNoise], model: NoiseModelFit | None,
-                      session_hours: float, options: NoiseOptions, time_origin_s: float) -> DriftResult | None:
-    """Step 11: the sentinel line, the drift over the session against the allowance, and the bias correction."""
+                      session_hours: float, options: NoiseOptions, time_origin_s: float,
+                      epochs: dict[tuple, int] | None = None) -> DriftResult | None:
+    """Step 11: the sentinel lines per mounted target, the drift of A against the allowance, and the bias correction.
+
+    The sentinels are captured on the target mounted at that point of the plan, so they are grouped by (target, mount)
+    and each group's drift is computed relative to its first sentinel after mounting (:func:`target_drifts`, all of them
+    returned in ``DriftResult.targets``). The A drift correction uses the T2 sentinels of the mount(s) in which series
+    A was captured: their line gives the rate, the drift over ``session_hours`` is compared with the allowance
+    WARMUP_DRIFT_FRACTION_OF_SIGMA x sigma_t at the sentinel Z, and, when it exceeds it, the offsets of the sentinel poses
+    (relative to the first one) interpolated in time are subtracted from the bias of every A pose."""
     params = session.params
     records = select(session.records, procedure=PROCEDURE_SENTINEL)
     if not records:
         return None
-    frames = [f for f in _frame_means(session, records, options) if f["time_s"] is not None]
+    epochs = mount_epochs(session.records) if epochs is None else epochs
+    correction_epochs = a_mount_epochs(session.records, epochs)
+    all_frames = [f for f in _frame_means(session, records, options, epochs) if f["time_s"] is not None]
+    per_target = target_drifts(all_frames, options, time_origin_s, correction_epochs)
+    frames = [f for f in all_frames if f["target_id"] == TARGET_NOISE_PLATE and f["epoch"] in correction_epochs]
     if len(frames) < SENTINEL_MIN_FRAMES:
         return None
     hours = np.array([(f["time_s"] - time_origin_s) / SECONDS_PER_HOUR for f in frames])
     registered = np.array([f["registered_mm"] for f in frames])
     raw = np.array([f["raw_mm"] for f in frames])
     chosen = registered if options.sentinel_reference == "registered" else raw
-    rate_registered = float(np.polyfit(hours, registered, 1)[0]) if np.ptp(hours) > 0 else float("nan")
-    rate_raw = float(np.polyfit(hours, raw, 1)[0]) if np.ptp(hours) > 0 else float("nan")
+    rate_registered = _line_rate(hours, registered)
+    rate_raw = _line_rate(hours, raw)
     rate = rate_registered if options.sentinel_reference == "registered" else rate_raw
     temperatures = [f["temperature_c"] for f in frames]
     slope_temperature = None
@@ -726,13 +807,8 @@ def analyze_sentinels(session: Session, rows: list[StationNoise], model: NoiseMo
     drift_over_session = abs(rate) * session_hours if math.isfinite(rate) else float("nan")
     threshold = params.warmup_drift_fraction_of_sigma * sigma_here
     apply = bool(math.isfinite(drift_over_session) and drift_over_session > threshold)
-    # Per-sentinel-pose offsets relative to the first sentinel, for the time interpolation.
-    pose_ids = sorted({f["pose_id"] for f in frames})
-    pose_hours = [float(np.mean([h for h, f in zip(hours, frames) if f["pose_id"] == p])) for p in pose_ids]
-    pose_offsets = [float(np.mean([m for m, f in zip(chosen, frames) if f["pose_id"] == p])) for p in pose_ids]
-    order = np.argsort(pose_hours)
-    pose_hours = [pose_hours[i] for i in order]
-    pose_offsets = [pose_offsets[i] - pose_offsets[order[0]] for i in order]
+    # Per-sentinel-pose offsets relative to the first sentinel after the mount, for the time interpolation.
+    pose_hours, pose_offsets = _pose_means(hours, chosen, np.array([f["pose_id"] for f in frames]))
     if apply:
         for row in rows:
             if math.isfinite(row.mean_time_hours):
@@ -745,7 +821,7 @@ def analyze_sentinels(session: Session, rows: list[StationNoise], model: NoiseMo
         rate_raw_mm_per_hour=rate_raw, rate_registered_mm_per_hour=rate_registered,
         temperature_slope_mm_per_c=slope_temperature, session_hours=session_hours,
         drift_over_session_mm=drift_over_session, threshold_mm=threshold, sentinel_station_mm=sentinel_z,
-        correction_applied=apply, pose_hours=pose_hours, pose_offset_mm=pose_offsets,
+        correction_applied=apply, pose_hours=pose_hours, pose_offset_mm=pose_offsets, targets=per_target,
         note=("sensor temperature not logged: no drift against temperature" if slope_temperature is None else ""))
 
 
