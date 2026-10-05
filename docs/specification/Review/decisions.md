@@ -440,4 +440,7 @@ Reviewer findings (proposals; nothing executed until Neil closes the chunk):
   mount checks and registration time are excluded as before.
 - C10-R5 (plain style): the folder-layout and manifest paragraphs are already plain; no change beyond R2–R4.
 
-Neil's comments: (pending)
+Neil's comments: none; closed 2026-10-05.
+Executed (document rev 92): R2 manifest columns listed as the manifest module writes them; R3 file-name digits,
+G0 and f00 stated; R4 the budget's exclusions and the optional captures listed. R1 (the table numbers) waits for
+the ramp code: the plan tool's rows and totals are written in when it lands, with the gate invariants updated.

@@ -55,9 +55,9 @@
  },
  "C10": {
   "title": "Data logging, layout, budget",
-  "reviewed": null,
-  "tier": null,
-  "note": "not yet reviewed"
+  "reviewed": "2026-10-05",
+  "tier": "fable",
+  "note": "R2–R4 executed; R1 budget refill pending the ramp code"
  },
  "C11": {
   "title": "Analysis A, noise vs Z",
