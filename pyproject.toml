@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sensorperf"
+version = "0.1.0"
+description = "Acquisition planning, synthetic sample data, and analysis code for the VSX3000 resolution, area-fidelity, detectability, and noise characterization procedure"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26", "scipy>=1.11"]
+
+[project.optional-dependencies]
+figures = ["matplotlib>=3.8"]
+test = ["pytest>=8.0"]
+docs = ["pypandoc_binary>=1.13", "python-docx>=1.1"]
+
+[tool.setuptools.packages.find]
+include = ["sensorperf*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
