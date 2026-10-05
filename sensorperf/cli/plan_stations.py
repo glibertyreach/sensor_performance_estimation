@@ -120,8 +120,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--lateral-sweep", action="store_true",
                         help="add the optional second pass of the B-HV series (Section 6.1, Step 6): the edge target T3a "
                              "swept in H and then in V at Z_REFERENCE_MM in steps of LATERAL_SWEEP_STEP_PX over "
-                             "LATERAL_SWEEP_SPAN_PX (both ends included); its poses are labeled lateral_sweep and are "
-                             "listed outside the main budget in plan_summary.txt")
+                             "LATERAL_SWEEP_SPAN_PX (20 poses per axis, approached from alternating directions); its poses "
+                             "are labeled lateral_sweep and are listed outside the main budget in plan_summary.txt")
     parser.add_argument("--open-background", action="store_true",
                         help="add the open-background variant of the C series for the cutout arrays (Section 7, Step 4)")
     return parser

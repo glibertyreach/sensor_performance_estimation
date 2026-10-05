@@ -261,7 +261,7 @@ class PlannedCapture:
 
 def plan_registration(params, geometry, rng) -> list[PlannedCapture]        # Section 4, Step 6: T2, poses span Z_MIN..Z_MAX
 def plan_noise_series(params, geometry, rng, filters_off=False) -> list     # Section 5: 9 ladder stations x 5 field positions + the 2 legacy depths at the center (47, shuffled), feasible tilts at the reduced stations, remount; sentinels by the budget clock
-def plan_edge_series(params, geometry, rng, lateral_sweep=False) -> list    # Section 6.1: T3a, T3b x gaps x stations: nominal + jitter poses; optional lateral sweep (42 poses)
+def plan_edge_series(params, geometry, rng, lateral_sweep=False) -> list    # Section 6.1: T3a, T3b x gaps x stations: nominal + jitter poses; optional lateral sweep (40 poses)
 def plan_zstep_series(params, geometry, rng, expected_quantum_mm: Callable[[float], float]) -> list   # Section 6.2: ladder ABAB + staircase
 def plan_area_series(params, geometry, rng, open_background=False) -> list   # Section 7: arrays x gaps x stations, field sub-series, open variant
 def plan_detection_series(params, geometry, rng, extended=True, reuse_c_first_frames=False, c_plan=None) -> list   # Section 8: T4, T5 x gaps x all 9 stations; extended (low point, D_5) trials at the 3 farthest; optional reuse of the C first frames
@@ -434,10 +434,12 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
 - *Optional B-HV lateral sweep* (`plan_edge_series(lateral_sweep=True)`, `plan_full_session(lateral_sweep=True)`,
   `plan_stations --lateral-sweep`; parameters `lateral_sweep_step_px` = 0.1 and `lateral_sweep_span_px` = 2, positions from
   `lateral_sweep_positions_px()`). Off by default. For T3a (small gap) already mounted, placed right after its stations, at
-  `z_reference_mm`: a sweep in H and then in V over the span centered on the nominal position, both ends included (21 positions
-  per axis, 42 poses), each step converted to millimeters with p(Z) = Z / f_x (0.1163 mm at 800 mm), `frames_per_edge_pose`
-  frames each, sub-series `lateral_sweep` (`SUBSERIES_LATERAL_SWEEP`), axis and offset in the notes. Outside the main budget like
-  the staircase (`lateral_sweep_budget`, `OPTIONAL_SUBSERIES`; 42 poses, 1,260 frames); the lateral-resolution analysis leaves
+  `z_reference_mm`: a sweep in H and then in V at offsets k x step, k = 1 ... span / step (20 per axis, 40 poses; the origin is the
+  nominal B pose, already captured), each step converted to millimeters with p(Z) = Z / f_x (0.1163 mm at 800 mm),
+  `frames_per_edge_pose` frames each, sub-series `lateral_sweep` (`SUBSERIES_LATERAL_SWEEP`), axis and offset in the notes. The
+  approach alternates on purpose so that lateral hysteresis shows: odd-numbered poses are approached from the negative side,
+  even-numbered from the positive side (`notes["approach_direction"]` = -H, +H, -V or +V; plan_summary.txt says so). Outside the
+  main budget like the staircase (`lateral_sweep_budget`, `OPTIONAL_SUBSERIES`; 40 poses, 1,200 frames); the lateral-resolution analysis leaves
   these poses out of its pooled edge spread function.
 - *Optional reuse of the C first frames* (`plan_detection_series(reuse_c_first_frames=True)`, `plan_stations --reuse-c-first-frames`).
   Off by default. The first frame of each centered C "jitter" pose of the same target, gap and station counts as a D trial

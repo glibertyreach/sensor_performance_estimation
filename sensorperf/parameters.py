@@ -289,8 +289,9 @@ class CharacterizationParameters:
     is outside the Section 9 budget."""
     lateral_sweep_span_px: float = 2.0
     """OPTIONAL second pass of B-HV (lateral sweep): span of the sweep in H and in V, pixels at the reference station.
-    The sweep covers the span centered on the nominal position, both ends included, so it has
-    ``lateral_sweep_span_px / lateral_sweep_step_px + 1`` positions per axis (21 with the defaults)."""
+    The sweep runs from one step to the full span from the nominal position, so it has
+    ``lateral_sweep_span_px / lateral_sweep_step_px`` poses per axis (20 with the defaults); the nominal position itself
+    (offset 0) is the nominal B pose already captured and is not repeated."""
     zstep_patch_sizes_px: tuple[int, ...] = (1, 5, 20)
     """Side lengths of the square patches of the B-Z analysis (1 px, 5 x 5, 20 x 20)."""
 
@@ -500,11 +501,11 @@ class CharacterizationParameters:
         return self.post_diameter_fraction_of_d0 * self.expected_d0_px * geometry.pixel_footprint_mm(self.z_min_mm)
 
     def lateral_sweep_positions_px(self) -> tuple[float, ...]:
-        """The positions of the optional lateral sweep along one axis, in pixels from the nominal position: from
-        -LATERAL_SWEEP_SPAN_PX / 2 to +LATERAL_SWEEP_SPAN_PX / 2 in steps of LATERAL_SWEEP_STEP_PX, both ends included
-        (21 positions with the defaults)."""
+        """The positions of the optional lateral sweep along one axis, in pixels from the nominal position:
+        k x LATERAL_SWEEP_STEP_PX for k = 1 ... LATERAL_SWEEP_SPAN_PX / LATERAL_SWEEP_STEP_PX (20 values, 0.1 to 2.0 px
+        with the defaults). The origin is the nominal B pose, already captured, so it is not repeated."""
         steps = int(round(self.lateral_sweep_span_px / self.lateral_sweep_step_px))
-        return tuple(-self.lateral_sweep_span_px / 2.0 + k * self.lateral_sweep_step_px for k in range(steps + 1))
+        return tuple(k * self.lateral_sweep_step_px for k in range(1, steps + 1))
 
     def feature_diameters_mm(self, geometry: SensorGeometry) -> tuple[float, ...]:
         """The disk and cutout diameters D_k = FEATURE_MIN_PX_AT_Z_MAX x p(Z_MAX) x FEATURE_LADDER_RATIO^k,

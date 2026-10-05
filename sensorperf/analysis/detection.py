@@ -67,12 +67,15 @@ How the steps are implemented
        it and start below it); otherwise it is NaN and the status column says why.
     5  Model range of D_10 over the logistic, normal and Weibull fits; model-free isotonic crossings (0.1, 0.5) of
        the corrected proportions.
-    6  D_5 measured, as a D_px BRACKET: per merged level the one-sided Clopper-Pearson upper bound psi_U at
-       CONFIDENCE_LEVEL, corrected P*_U = (psi_U - gamma) / (1 - gamma); D_5 is the largest D_px such that P*_U <=
+    5b D_5, fitted: the best fitted curve (by deviance, as D_10) inverted at DETECTION_LOW_PROBABILITY, reported when the
+       corrected proportions bracket it (d5_status), with the range over the three shapes (d5_model_min / _max) and the
+       bootstrap interval of Step 9 (d5_lower / d5_upper).
+    6  D_5 empirical (measured), reported beside the fitted D_5, as a D_px BRACKET: per merged level the one-sided
+       Clopper-Pearson upper bound psi_U at CONFIDENCE_LEVEL, corrected P*_U = (psi_U - gamma) / (1 - gamma); D_5 is the largest D_px such that P*_U <=
        DETECTION_LOW_PROBABILITY at that level and at every smaller one (the smallest level whose corrected
        probability is demonstrably at or below 5 percent, and the lowest measured point); NaN when even the smallest
        level fails (not demonstrated). The bracket is [D_5, next level up], converted to mm at each station
-       (columns d5 and d5_next).
+       (columns d5_empirical and d5_empirical_next).
     7  D_0 PREDICTED (a prediction, never a measurement): the best fitted curve (by deviance) inverted at the corrected
        probability DETECTION_ZERO_PREDICTION_LEVEL, i.e. the fit extrapolated below the lowest measured point D_5
        (:func:`predict_d0`); the range of the same inversion over the three fitted shapes is the model range
@@ -87,8 +90,9 @@ How the steps are implemented
     9  Bootstrap over poses (trials), stratified by station: each resample draws poses with replacement within each
        station, recomputes the per-feature tau from the resampled blank statistics, the pooled gamma and the pooled
        counts, and re-fits ONE curve family (the best family of the original fit; refitting all three in every
-       resample would triple the run time) to give D_50 and D_10 in D_px. The model D_0 interval is the
-       profile-likelihood interval of Step 7, not a bootstrap; the predicted D_0 has no bootstrap interval yet. The number of resamples is BOOTSTRAP_RESAMPLES, reduced
+       resample would triple the run time) to give D_50, D_10, D_5 and the predicted D_0 in D_px (d5_lower / d5_upper and
+       d0_predicted_lower / d0_predicted_upper; the interval of the prediction carries the same flag as the value). The
+       model D_0 interval is the profile-likelihood interval of Step 7, not a bootstrap. The number of resamples is BOOTSTRAP_RESAMPLES, reduced
        to DetectionOptions.reduced_bootstrap_resamples when the stations of the group have fewer than
        DetectionOptions.full_bootstrap_min_poses poses each on average (stated in the details).
     10 Every minimum in mm, px and mrad (D_px and theta are constant over stations for a pooled minimum, D_mm scales
@@ -188,7 +192,7 @@ ALLOWED_FLAGS_FLOOR = 1
 """Independence: at least this many flagged tests are tolerated (multiple testing)."""
 SAMPLE_VARIANCE_GUARD = 1.0e-12
 """A binary sequence whose sum of squares is below this has no variance (never or always detected)."""
-BOOTSTRAP_STAT_NAMES = ("d50_px", "d10_px", "gamma", "tau_mm")
+BOOTSTRAP_STAT_NAMES = ("d50_px", "d10_px", "d5_px", "d0_predicted_px", "gamma", "tau_mm")
 """The quantities the bootstrap resamples, in order."""
 PSYCHOMETRIC_CURVE_POINTS = 200
 """Points of the fitted curves drawn in the figures."""
@@ -196,6 +200,10 @@ P_STAR_D50 = 0.5
 P_STAR_D10 = 0.1
 """The corrected detection probabilities that define D_50 and D_10 (Section 13, Steps 4 and 5). D_5 uses
 DETECTION_LOW_PROBABILITY and the predicted D_0 DETECTION_ZERO_PREDICTION_LEVEL, both procedure parameters."""
+BOOTSTRAP_SLOT_D50, BOOTSTRAP_SLOT_D10, BOOTSTRAP_SLOT_D5, BOOTSTRAP_SLOT_D0 = 0, 1, 2, 3
+"""Positions of D_50, D_10, D_5 and the predicted D_0 in the bootstrap statistic (BOOTSTRAP_STAT_NAMES)."""
+NOT_RESAMPLED = 0.0
+"""Bootstrap slot of a quantity that the original data do not give (so it is not resampled; its interval is NaN)."""
 D0_NOTE_PREDICTION = (
     "PREDICTION, not a measurement: extrapolation of the best fitted psychometric curve ({curve}) below the lowest "
     "measured point (D_5, corrected probability {low:g}) to the corrected probability {level:g}")
@@ -574,27 +582,30 @@ def threshold_status(corrected: np.ndarray, p_star: float) -> str:
 
 
 def _fit_thresholds(levels, successes, trials, gamma, params, curve: str,
-                    warm_start: tuple[float, float, float] | None = None) -> tuple[float, float]:
-    """(D_50, D_10) in the units of ``levels`` from one fitted curve family; NaN for a threshold the corrected
-    proportions do not bracket."""
+                    warm_start: tuple[float, float, float] | None = None) -> tuple[float, float, float, float]:
+    """(D_50, D_10, D_5, predicted D_0) in the units of ``levels`` from one fitted curve family; NaN for a threshold the
+    corrected proportions do not bracket (D_50, D_10, D_5), and for the predicted D_0 when the fit did not converge. The
+    predicted D_0 is the curve inverted at DETECTION_ZERO_PREDICTION_LEVEL, an extrapolation, so it needs no bracket."""
     keep = trials > 0
     corrected = np.asarray(corrected_rate(successes[keep] / trials[keep], gamma))
-    reaches_half, reaches_tenth = bracketed(corrected, P_STAR_D50), bracketed(corrected, P_STAR_D10)
-    if not (reaches_half or reaches_tenth):
-        return NO_THRESHOLD, NO_THRESHOLD
     fit = fit_psychometric(levels[keep], successes[keep], trials[keep], gamma, _fit_parameters(params, curve, warm_start))
+    reaches_half, reaches_tenth = bracketed(corrected, P_STAR_D50), bracketed(corrected, P_STAR_D10)
+    reaches_low = bracketed(corrected, params.detection_low_probability)
+    d0 = fit.threshold(params.detection_zero_prediction_level) if fit.converged else NO_THRESHOLD
     return (fit.threshold(P_STAR_D50) if reaches_half else NO_THRESHOLD,
-            fit.threshold(P_STAR_D10) if reaches_tenth else NO_THRESHOLD)
+            fit.threshold(P_STAR_D10) if reaches_tenth else NO_THRESHOLD,
+            fit.threshold(params.detection_low_probability) if reaches_low else NO_THRESHOLD, d0)
 
 
 def empirical_d5(levels: np.ndarray, successes: np.ndarray, trials: np.ndarray, gamma: float, confidence: float,
                  bound: float) -> dict[str, Any]:
-    """Step 6: the measured low point D_5. Per level (ascending), the one-sided Clopper-Pearson upper bound psi_U of the
-    raw detection rate at ``confidence``, corrected for false alarms to P*_U = (psi_U - gamma) / (1 - gamma), and
+    """Step 6: the EMPIRICAL low point, reported beside the fitted D_5 (Section 13: the measured corrected rates of the
+    levels nearest to D_5, so that the reader sees the point is measured). Per level (ascending), the one-sided
+    Clopper-Pearson upper bound psi_U of the raw detection rate at ``confidence``, corrected for false alarms to P*_U = (psi_U - gamma) / (1 - gamma), and
     whether P*_U is within ``bound`` (DETECTION_LOW_PROBABILITY, 5 percent). D_5 is the largest level such that it and
     every smaller level are within the bound (the smallest levels whose corrected probability is demonstrably at or
-    below 5 percent), NaN when even the smallest level is not. Returns ``levels`` (the per-level table), ``d5`` and
-    ``d5_next`` (the next level up, so that D_5 is a bracket; NaN when every level passes). The levels keep the units
+    below 5 percent), NaN when even the smallest level is not. Returns ``levels`` (the per-level table), ``d5_empirical`` and
+    ``d5_empirical_next`` (the next level up, so that it is a bracket; NaN when every level passes). The levels keep the units
     of ``levels`` (D_px in the pooled analysis)."""
     order = np.argsort(levels, kind="stable")
     rows = []
@@ -617,7 +628,7 @@ def empirical_d5(levels: np.ndarray, successes: np.ndarray, trials: np.ndarray, 
             next_level = float(levels[index])
     if passing and rows:                                 # every level passes: the 5 percent point is above the range
         next_level = NO_THRESHOLD
-    return {"levels": rows, "d5": d5, "d5_next": next_level}
+    return {"levels": rows, "d5_empirical": d5, "d5_empirical_next": next_level}
 
 
 def predict_d0(fits: Mapping[str, PsychometricFit] | None, best: PsychometricFit | None, level: float,
@@ -753,8 +764,9 @@ class DetectionResult:
 def _minimum_columns() -> list[str]:
     """Names of the threshold columns that are reported in mm, px and mrad."""
     return ["d50", "d50_lower", "d50_upper", "d10", "d10_lower", "d10_upper", "d10_model_min", "d10_model_max",
-            "d50_isotonic", "d10_isotonic", "d5", "d5_next", "d0_predicted", "d0_predicted_model_min",
-            "d0_predicted_model_max", "d0_model", "d0_model_lower", "d0_model_upper", "d0_geometric",
+            "d50_isotonic", "d10_isotonic", "d5", "d5_lower", "d5_upper", "d5_model_min", "d5_model_max",
+            "d5_empirical", "d5_empirical_next", "d0_predicted", "d0_predicted_lower", "d0_predicted_upper",
+            "d0_predicted_model_min", "d0_predicted_model_max", "d0_model", "d0_model_lower", "d0_model_upper", "d0_geometric",
             "d0_geometric_cameras"]
 
 
@@ -765,8 +777,8 @@ POOLED_MINIMUMS = tuple(name for name in _minimum_columns() if not name.startswi
 def _summary_columns() -> list[str]:
     columns = ["target_id", "kind", "gap_mm", "station_z_mm", "field", "rule", "trials_per_level",
                "trials_per_level_max", "trials_new", "trials_reused", "gamma", "gamma_lower", "gamma_upper",
-               "gamma_blank_trials", "tau_mm", "best_curve", "d50_status", "d10_status", "d0_model_status",
-               "d0_is_prediction", "d0_predicted_note"]
+               "gamma_blank_trials", "tau_mm", "best_curve", "d50_status", "d10_status", "d5_status",
+               "d0_model_status", "d0_is_prediction", "d0_predicted_note"]
     for name in _minimum_columns():
         columns += [f"{name}_mm", f"{name}_px", f"{name}_mrad"]
     columns += ["independence_ok", "bootstrap_resamples", "bootstrap_failures", "fit_note"]
@@ -776,7 +788,8 @@ def _summary_columns() -> list[str]:
 SUMMARY_COLUMNS = tuple(_summary_columns())
 """Columns of D_detect_summary.csv, one row per configuration: the specification's list (target, gap, Z, gamma of the
 station and its interval, tau, best curve, D_50, D_10 with their intervals, the D_10 model range, the isotonic values,
-the measured D_5 bracket [d5, d5_next], the PREDICTED D_0 (``d0_predicted``, its model range, ``d0_is_prediction`` always
+D_5 (fitted, with its bootstrap interval and model range) beside the empirical bracket [d5_empirical,
+d5_empirical_next], the PREDICTED D_0 (``d0_predicted``, its bootstrap interval, its model range, ``d0_is_prediction`` always
 True and ``d0_predicted_note``), the floor-model D_0 with its interval (also a prediction), the geometric D_0,
 independence flag), each minimum in mm, px and mrad, plus status and bookkeeping columns. The minimums are those of the pooled group (D_px, constant over the
 stations) converted to mm at the configuration's station."""
@@ -784,13 +797,13 @@ stations) converted to mm at the configuration's station."""
 POOLED_COLUMNS = (
     ("kind", "gap_mm", "field", "rule", "stations", "pairs", "trials", "gamma", "gamma_lower", "gamma_upper",
      "gamma_blank_trials", "best_curve", "alpha_ln_px", "beta", "lapse_rate", "deviance", "d50_status", "d10_status",
-     "d0_model_status", "d0_is_prediction", "d0_predicted_note")
+     "d5_status", "d0_model_status", "d0_is_prediction", "d0_predicted_note")
     + tuple(f"{name}_px" for name in POOLED_MINIMUMS)
     + ("bootstrap_resamples", "bootstrap_failures", "regression_status", "regression_observations",
        "regression_b0", "regression_b_ln_dpx", "regression_se_ln_dpx", "regression_b_ln_sigma",
        "regression_se_ln_sigma", "regression_p_noise", "regression_separated", "fit_note"))
 """Columns of D_pooled_summary.csv, one row per (kind, gap, field, rule) group pooled over its stations: the pooled
-psychometric fit on ln D_px (D_50, D_10 and the measured D_5 in D_px, with the D_5 bracket [d5, d5_next], and the
+psychometric fit on ln D_px (D_50, D_10 and D_5 in D_px, with the empirical D_5 bracket [d5_empirical, d5_empirical_next], and the
 predicted D_0 flagged by ``d0_is_prediction`` and ``d0_predicted_note``), the group's
 false-alarm rate, and the noise-covariate regression (logit p = b0 + b_ln_dpx ln D_px + b_ln_sigma ln sigma_tot(Z))."""
 
@@ -1031,7 +1044,7 @@ def _analyze_group(session: Session, members: list[_ConfigRule], options: Detect
         "trials": sum(p["trials"] for p in pairs), "gamma": gamma, "gamma_lower": gamma_lower,
         "gamma_upper": gamma_upper, "gamma_blank_trials": blank_trials, "best_curve": "", "alpha_ln_px": math.nan,
         "beta": math.nan, "lapse_rate": math.nan, "deviance": math.nan, "d50_status": "too few trials",
-        "d10_status": "too few trials", "d0_model_status": "too few trials", "d0_is_prediction": True,
+        "d10_status": "too few trials", "d5_status": "too few trials", "d0_model_status": "too few trials", "d0_is_prediction": True,
         "d0_predicted_note": D0_NOTE_NO_FIT, "bootstrap_resamples": 0,
         "bootstrap_failures": 0, "regression_status": "not attempted", "fit_note": ""}
     for name in POOLED_MINIMUMS:
@@ -1057,7 +1070,7 @@ def _analyze_group(session: Session, members: list[_ConfigRule], options: Detect
 
     model = None
     best_name = ""
-    d5 = {"d5": math.nan, "d5_next": math.nan, "levels": []}
+    d5 = {"d5_empirical": math.nan, "d5_empirical_next": math.nan, "levels": []}
     if enough:
         raw = merged_successes / merged_trials
         corrected = np.asarray(corrected_rate(raw, gamma))
@@ -1068,26 +1081,34 @@ def _analyze_group(session: Session, members: list[_ConfigRule], options: Detect
         best_name = best.curve
         row.update(best_curve=best_name, alpha_ln_px=best.alpha, beta=best.beta, lapse_rate=best.lapse_rate,
                    deviance=best.deviance, d50_status=threshold_status(corrected, P_STAR_D50),
-                   d10_status=threshold_status(corrected, P_STAR_D10))
+                   d10_status=threshold_status(corrected, P_STAR_D10),
+                   d5_status=threshold_status(corrected, params.detection_low_probability))
         if row["d50_status"] == "ok":
             row["d50_px"] = best.threshold(P_STAR_D50)
         if row["d10_status"] == "ok":
             row["d10_px"] = best.threshold(P_STAR_D10)
             tails = [f.threshold(P_STAR_D10) for f in fits.values()]
             row["d10_model_min_px"], row["d10_model_max_px"] = float(min(tails)), float(max(tails))
+        if row["d5_status"] == "ok":                      # Step 5b: D_5 from the fitted curves
+            row["d5_px"] = best.threshold(params.detection_low_probability)
+            lows = [f.threshold(params.detection_low_probability) for f in fits.values()]
+            row["d5_model_min_px"], row["d5_model_max_px"] = float(min(lows)), float(max(lows))
         row["d50_isotonic_px"] = isotonic_threshold(level_px, corrected, P_STAR_D50, merged_trials)
         row["d10_isotonic_px"] = isotonic_threshold(level_px, corrected, P_STAR_D10, merged_trials)
         detail["fits"] = {name: {"alpha_ln_px": f.alpha, "beta": f.beta, "lapse_rate": f.lapse_rate,
                                  "deviance": f.deviance, "converged": f.converged, "d50_px": f.threshold(P_STAR_D50),
-                                 "d10_px": f.threshold(P_STAR_D10)} for name, f in fits.items()}
+                                 "d10_px": f.threshold(P_STAR_D10),
+                                 "d5_px": f.threshold(params.detection_low_probability),
+                                 "d0_predicted_px": f.threshold(params.detection_zero_prediction_level)}
+                               for name, f in fits.items()}
         detail["curve_px"] = _curve_points(level_px, best)
         detail["levels_px"] = [{"d_px": float(x), "trials": int(n), "detections": int(k), "proportion": float(p),
                                 "corrected": float(c)}
                                for x, n, k, p, c in zip(level_px, merged_trials, merged_successes, raw, corrected)]
-        # Step 6: the measured low point, D_5, as a D_px bracket.
+        # Step 6: the empirical low point (corrected bound) as a D_px bracket, beside the fitted D_5.
         d5 = empirical_d5(level_px, merged_successes, merged_trials, gamma, params.confidence_level,
                           params.detection_low_probability)
-        row["d5_px"], row["d5_next_px"] = d5["d5"], d5["d5_next"]
+        row["d5_empirical_px"], row["d5_empirical_next_px"] = d5["d5_empirical"], d5["d5_empirical_next"]
         # Step 7: the predicted D_0 (the best curve extrapolated below D_5) and the floor model.
         prediction = predict_d0(fits, best, params.detection_zero_prediction_level, params.detection_low_probability)
         row.update(d0_predicted_px=prediction["d0"], d0_predicted_model_min_px=prediction["model_min"],
@@ -1114,7 +1135,7 @@ def _analyze_group(session: Session, members: list[_ConfigRule], options: Detect
                            f"{options.min_trials_per_level} trials over {n_levels} distinct D_px "
                            f"(need {options.min_pairs_for_fit} and {MIN_DISTINCT_LEVELS_FOR_FIT}); "
                            "curve fits not attempted")
-    detail["d5_measured"] = d5
+    detail["d5_empirical"] = d5
     if not enough:
         detail["d0_predicted"] = {"d_px": math.nan, "is_prediction": True, "note": D0_NOTE_NO_FIT}
 
@@ -1173,14 +1194,17 @@ def _prediction_detail(prediction: dict[str, Any], best: PsychometricFit, level_
 def _bootstrap_group(row: dict[str, Any], detail: dict[str, Any], members: list[_ConfigRule], level_px: np.ndarray,
                      clusters: np.ndarray, pairs: list[dict[str, Any]], best: PsychometricFit, params,
                      options: DetectionOptions, total_poses: int) -> None:
-    """Step 9: the stratified bootstrap over poses of the pooled D_50 and D_10 (in D_px), filling the interval columns
+    """Step 9: the stratified bootstrap over poses of the pooled D_50, D_10, D_5 and predicted D_0 (in D_px), filling the interval columns
     of ``row`` and the bootstrap record of ``detail``."""
     lookup = {(p["member"], p["column"]): int(clusters[index]) for index, p in enumerate(pairs)}
     groups = [(m, i) for m, member in enumerate(members) for i in range(len(member.config.pose_keys))]
     strata = [m for m, _ in groups]
     resamples = _bootstrap_count(total_poses, len(members), options, params)
-    statistic = _make_bootstrap_statistic(members, level_px, lookup, params, best, row["d50_status"] == "ok",
-                                          row["d10_status"] == "ok")
+    statistic = _make_bootstrap_statistic(
+        members, level_px, lookup, params, best,
+        wanted={BOOTSTRAP_SLOT_D50: row["d50_status"] == "ok", BOOTSTRAP_SLOT_D10: row["d10_status"] == "ok",
+                BOOTSTRAP_SLOT_D5: row["d5_status"] == "ok",
+                BOOTSTRAP_SLOT_D0: math.isfinite(row["d0_predicted_px"])})
     rng = np.random.default_rng(options.bootstrap_seed)
     started = time.time()
     try:
@@ -1190,9 +1214,14 @@ def _bootstrap_group(row: dict[str, Any], detail: dict[str, Any], members: list[
         return
     lower, upper = np.asarray(boot.lower, dtype=float), np.asarray(boot.upper, dtype=float)
     if row["d50_status"] == "ok":
-        row["d50_lower_px"], row["d50_upper_px"] = float(lower[0]), float(upper[0])
+        row["d50_lower_px"], row["d50_upper_px"] = float(lower[BOOTSTRAP_SLOT_D50]), float(upper[BOOTSTRAP_SLOT_D50])
     if row["d10_status"] == "ok":
-        row["d10_lower_px"], row["d10_upper_px"] = float(lower[1]), float(upper[1])
+        row["d10_lower_px"], row["d10_upper_px"] = float(lower[BOOTSTRAP_SLOT_D10]), float(upper[BOOTSTRAP_SLOT_D10])
+    if row["d5_status"] == "ok":
+        row["d5_lower_px"], row["d5_upper_px"] = float(lower[BOOTSTRAP_SLOT_D5]), float(upper[BOOTSTRAP_SLOT_D5])
+    if math.isfinite(row["d0_predicted_px"]):             # an interval of a PREDICTION (extrapolated curve)
+        row["d0_predicted_lower_px"] = float(lower[BOOTSTRAP_SLOT_D0])
+        row["d0_predicted_upper_px"] = float(upper[BOOTSTRAP_SLOT_D0])
     row["bootstrap_resamples"], row["bootstrap_failures"] = resamples, boot.failures
     detail["bootstrap"] = {
         "resamples": resamples, "failures": boot.failures, "seconds": time.time() - started,
@@ -1209,7 +1238,7 @@ def _fill_config_minimums(session: Session, member: _ConfigRule, pooled_row: dic
     station = member.config.station_z_mm
     fx = float(session.geometry.require("sensor_fx_px"))
     row.update(best_curve=pooled_row["best_curve"], d50_status=pooled_row["d50_status"],
-               d10_status=pooled_row["d10_status"], d0_model_status=pooled_row["d0_model_status"],
+               d10_status=pooled_row["d10_status"], d5_status=pooled_row["d5_status"], d0_model_status=pooled_row["d0_model_status"],
                d0_is_prediction=True, d0_predicted_note=pooled_row["d0_predicted_note"],
                bootstrap_resamples=pooled_row["bootstrap_resamples"],
                bootstrap_failures=pooled_row["bootstrap_failures"], fit_note=pooled_row["fit_note"])
@@ -1232,13 +1261,14 @@ def _curve_points(levels_px: np.ndarray, fit: PsychometricFit) -> dict[str, Any]
 
 
 def _make_bootstrap_statistic(members: list[_ConfigRule], level_px: np.ndarray, lookup: dict[tuple[int, int], int],
-                              params, best: PsychometricFit, want_d50: bool, want_d10: bool):
+                              params, best: PsychometricFit, wanted: Mapping[int, bool]):
     """The bootstrap statistic of Step 9: given the drawn (station, pose) groups, recompute per station the per-feature
     tau from the drawn blank statistics and the detections, pool them into the levels of the curve, take gamma from
-    the pooled blank sites, refit the (best) curve family and return (D_50, D_10, gamma, median tau), the D values in
-    D_px. A resample whose proportions do not bracket a threshold that the original data bracket gives NaN (counted
-    as a failure by the bootstrap). A threshold the original data do not bracket is not resampled (its slot is 0.0 and
-    its interval is reported as NaN by the caller). The refit starts from the original optimum ``best`` (one optimizer
+    the pooled blank sites, refit the (best) curve family and return (D_50, D_10, D_5, predicted D_0, gamma, median
+    tau) (BOOTSTRAP_STAT_NAMES), the D values in D_px. A resample whose proportions do not bracket a threshold that
+    the original data bracket gives NaN (counted as a failure by the bootstrap), as does a refit that did not
+    converge for the predicted D_0. A quantity the original data do not give (``wanted`` is False for its slot) is not
+    resampled (its slot is NOT_RESAMPLED and its interval is reported as NaN by the caller). The refit starts from the original optimum ``best`` (one optimizer
     run per resample)."""
     target = params.detection_false_alarm_target
     rule = members[0].rule
@@ -1272,11 +1302,10 @@ def _make_bootstrap_statistic(members: list[_ConfigRule], level_px: np.ndarray, 
         gamma = hits / blanks if blanks else 0.0
         keep = trials > 0
         with _quiet():
-            d50, d10 = _fit_thresholds(level_px[keep], successes[keep], trials[keep], gamma, params, best.curve,
-                                       warm_start)
-        d50 = d50 if want_d50 else 0.0
-        d10 = d10 if want_d10 else 0.0
-        return np.array([d50, d10, gamma, float(np.median(finite_taus)) if finite_taus else math.nan])
+            values = _fit_thresholds(level_px[keep], successes[keep], trials[keep], gamma, params, best.curve,
+                                     warm_start)
+        resampled = [value if wanted[slot] else NOT_RESAMPLED for slot, value in enumerate(values)]
+        return np.array(resampled + [gamma, float(np.median(finite_taus)) if finite_taus else math.nan])
 
     return statistic
 
@@ -1302,7 +1331,7 @@ def _figures_psychometric(result: DetectionResult, out_dir: Path) -> list[Path]:
     """Step 11: per (kind, gap, field) the pooled detection fractions of all (feature, station) pairs with
     Clopper-Pearson error bars against D_px (one color per feature, one marker per station is too many: the stations
     are the points of a feature's curve), the fitted curve of each rule, and the minimums marked (D_50 solid, D_10
-    dashed, the measured D_5 dotted, the floor-model D_0 dash-dot). The predicted D_0 is drawn as a prediction, not as a
+    dashed, the fitted D_5 dotted, the floor-model D_0 dash-dot). The predicted D_0 is drawn as a prediction, not as a
     measurement: a hollow marker at the fitted curve's value there, on a dashed extrapolation of the curve below the
     smallest measured level, labeled "predicted"."""
     written: list[Path] = []
@@ -1352,7 +1381,7 @@ def _figures_psychometric(result: DetectionResult, out_dir: Path) -> list[Path]:
         axis.set_xlabel("feature diameter D_px = D f_x / Z (px), all stations pooled")
         axis.set_ylabel("detection fraction (error bars: 95% Clopper-Pearson)")
         axis.set_title(f"{kind}s, G = {gap:g} mm" + (f", field {field_code}" if field_code else "")
-                       + "\nsolid D_50, dashed D_10, dotted D_5 (measured), dash-dot D_0 floor model; hollow marker "
+                       + "\nsolid D_50, dashed D_10, dotted D_5, dash-dot D_0 floor model; hollow marker "
                        "and dashed curve: D_0 predicted (extrapolation)", fontsize=8)
         axis.legend(fontsize=6, ncol=2)
         axis.grid(True, linewidth=0.3, which="both")
@@ -1372,9 +1401,10 @@ FEATURE_MARKERS = ("o", "s", "^", "D", "v")
 
 
 def _figure_minimum_vs_z(result: DetectionResult, out_dir: Path) -> list[Path]:
-    """Step 10: the minimum diameter in mm (D_50, D_10, the measured D_5 and the PREDICTED D_0) against Z, one panel per
-    kind and rule, one line style per gap, with the feature diameters of the plate as faint horizontal lines and, for
-    cutouts, the geometric limit. The predicted D_0 has a hollow marker and a dashed line and is labeled "predicted". A pooled minimum is constant in D_px, so in mm it rises in proportion to Z."""
+    """Step 10: the minimum diameter in mm (D_50, D_10, the fitted D_5, the lower end of its empirical bracket and the
+    PREDICTED D_0) against Z, one panel per kind and rule, one line style per gap, with the feature diameters of the plate
+    as faint horizontal lines and, for cutouts, the geometric limit. The predicted D_0 has a hollow marker and a dashed
+    line and is labeled "predicted". A pooled minimum is constant in D_px, so in mm it rises in proportion to Z."""
     panels = sorted({(r["kind"], r["rule"]) for r in result.rows})
     if not panels:
         return []
@@ -1382,7 +1412,8 @@ def _figure_minimum_vs_z(result: DetectionResult, out_dir: Path) -> list[Path]:
     figure.clf()
     axes = figure.subplots(1, len(panels), squeeze=False, sharey=True)[0]
     styles = (("d50", "o", OKABE_ITO_BLUE, "50%"), ("d10", "s", OKABE_ITO_ORANGE, "10%"),
-              ("d5", "^", OKABE_ITO_VERMILLION, "5% (measured)"),
+              ("d5", "^", OKABE_ITO_VERMILLION, "5%"),
+              ("d5_empirical", "x", OKABE_ITO_VERMILLION, "5% (empirical bracket)"),
               ("d0_predicted", "v", OKABE_ITO_BLACK, "0% (predicted)"))
     for axis, (kind, rule) in zip(axes, panels):
         rows = [r for r in result.rows if r["kind"] == kind and r["rule"] == rule and r["field"] == 0]
@@ -1397,7 +1428,8 @@ def _figure_minimum_vs_z(result: DetectionResult, out_dir: Path) -> list[Path]:
                     axis.plot(*zip(*points), marker=marker, color=color, linestyle=PREDICTION_LINE_STYLE,
                               markerfacecolor="none", label=f"{label}, G = {gap:g} mm")
                 elif points:
-                    axis.plot(*zip(*points), marker=marker, color=color, linestyle=linestyle,
+                    axis.plot(*zip(*points), marker=marker, color=color,
+                              linestyle=":" if name == "d5_empirical" else linestyle,
                               label=f"{label}, G = {gap:g} mm")
         geometric = [(r["station_z_mm"], r["d0_geometric_mm"]) for r in sorted(
             rows, key=lambda r: r["station_z_mm"]) if math.isfinite(r["d0_geometric_mm"]) and r["gap_mm"] == gaps[0]]

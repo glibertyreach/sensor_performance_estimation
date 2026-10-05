@@ -741,13 +741,17 @@ def plan_edge_series(params: CharacterizationParameters, geometry: SensorGeometr
     Optional second pass, the lateral sweep (``lateral_sweep=True``; default off; outside the Section 9 budget, as the
     filters-off repeat and the staircase): for the edge target already mounted (T3a, the raised square, with
     GAP_SMALL_MM) at the reference station Z_REFERENCE_MM, a systematic sweep of the lateral position, first in H and then
-    in V, in steps of LATERAL_SWEEP_STEP_PX over LATERAL_SWEEP_SPAN_PX centered on the nominal position, both ends
-    included (21 positions per axis, 42 poses, ``params.lateral_sweep_positions_px``). Each step is converted to
-    millimeters at the reference station with the pixel pitch p(Z) = Z / f_x, so the step is 0.1 px x p(Z_REFERENCE_MM)
+    in V, in steps of LATERAL_SWEEP_STEP_PX over LATERAL_SWEEP_SPAN_PX: the offsets from the nominal position are
+    k x step for k = 1 ... span / step (20 per axis, 40 poses, ``params.lateral_sweep_positions_px``; the origin is the
+    nominal B pose already captured and is not repeated). Each step is converted to millimeters at the reference station with the pixel pitch p(Z) = Z / f_x, so the step is 0.1 px x p(Z_REFERENCE_MM)
     (0.116 mm at the indicative geometry). Each pose has FRAMES_PER_EDGE_POSE frames and the sub-series "lateral_sweep";
     the pose indices continue after the main poses of the same configuration (as the staircase of series B-Z), the
     sweep is placed right after the stations of T3a with the small gap, while that target is still mounted, and the
-    sweep axis, position index and offset in pixels are in ``notes``. The sweep is not repeated in the filters-off pass.
+    sweep axis, position index and offset in pixels are in ``notes``. The approach direction ALTERNATES on purpose, so
+    that lateral hysteresis shows (Section 6.1, Step 6): the odd-numbered poses (1st, 3rd, ...) of an axis are approached
+    from the negative side (``notes["approach_direction"]`` is "-H" or "-V", the robot arrives moving toward positive
+    offsets) and the even-numbered poses from the positive side ("+H" or "+V"); this is unlike the from-below rule of
+    series Z. The sweep is not repeated in the filters-off pass.
 
     Section 4, Step 4.2 (``filters_off=True``): returns the filters-off repeat of the whole series instead,
     with the same poses (new logged jitter offsets) and the sub-series "filters_off" on every one, and pose
@@ -782,6 +786,11 @@ def plan_edge_series(params: CharacterizationParameters, geometry: SensorGeometr
 
 LATERAL_SWEEP_AXES = ("H", "V")
 """The axes of the lateral sweep, in the order they are captured: H first, then V."""
+LATERAL_SWEEP_APPROACH_PERIOD = 2
+"""The approach direction of the lateral sweep alternates with this period: the 1st, 3rd, ... pose of an axis from the
+negative side, the 2nd, 4th, ... from the positive side."""
+APPROACH_DIRECTION_KEY = "approach_direction"
+"""``notes`` key of a lateral-sweep pose: the side the robot approaches the pose from, "-H", "+H", "-V" or "+V"."""
 
 
 def _plan_lateral_sweep(counter: _PoseCounter, params: CharacterizationParameters, geometry: SensorGeometry,
@@ -793,21 +802,26 @@ def _plan_lateral_sweep(counter: _PoseCounter, params: CharacterizationParameter
     positions_px = params.lateral_sweep_positions_px()
     if diagnostics is not None:
         diagnostics.note(f"B-HV lateral sweep (optional) of {TARGET_RAISED_SQUARE} (G = {params.gap_small_mm:g} mm) at "
-                         f"Z = {z_ref:g} mm: {len(positions_px)} positions per axis in H and then in V, steps of "
-                         f"{params.lateral_sweep_step_px:g} px = {params.lateral_sweep_step_px * pitch_mm:.4f} mm over "
-                         f"{params.lateral_sweep_span_px:g} px, {params.frames_per_edge_pose} frames each, outside the "
-                         "main budget")
+                         f"Z = {z_ref:g} mm: {len(positions_px)} poses per axis in H and then in V at offsets "
+                         f"k x {params.lateral_sweep_step_px:g} px = k x {params.lateral_sweep_step_px * pitch_mm:.4f} mm, "
+                         f"k = 1 to {len(positions_px)} (span {params.lateral_sweep_span_px:g} px; the nominal pose is "
+                         f"already captured), {params.frames_per_edge_pose} frames each, outside the main budget")
     plan: list[PlannedCapture] = []
     for axis in LATERAL_SWEEP_AXES:
         for index, position_px in enumerate(positions_px):
             offset_mm = position_px * pitch_mm
             offset = (offset_mm, 0.0) if axis == "H" else (0.0, offset_mm)
             pose = fronto_parallel_pose(offset[0], offset[1], z_ref)
+            # Alternating approach (Section 6.1, Step 6): odd-numbered poses (1st, 3rd, ...) from the negative side,
+            # even-numbered from the positive side of the axis being swept.
+            from_negative = index % LATERAL_SWEEP_APPROACH_PERIOD == 0
+            direction = ("-" if from_negative else "+") + axis
             plan.append(_new_capture(
                 counter, PROCEDURE_EDGES, TARGET_RAISED_SQUARE, params.gap_small_mm, z_ref, FIELD_POSITION_CENTER,
                 params.frames_per_edge_pose, SUBSERIES_LATERAL_SWEEP, pose, offset=offset,
                 notes={"lateral_sweep_axis": axis, "lateral_sweep_index": index, "lateral_sweep_offset_px": position_px,
-                       "lateral_sweep_step_px": params.lateral_sweep_step_px, "pixel_pitch_mm": pitch_mm}))
+                       "lateral_sweep_step_px": params.lateral_sweep_step_px, "pixel_pitch_mm": pitch_mm,
+                       APPROACH_DIRECTION_KEY: direction}))
     return plan
 
 
@@ -1730,6 +1744,15 @@ def plan_summary_text(plan: Sequence[PlannedCapture], params: CharacterizationPa
                       f"{reuse.configurations} configurations); {d_planned:,} D poses are planned instead of "
                       f"{d_planned + reuse.poses:,}. Only the first frame of a C pose may be used (Section 8, Independence "
                       "rule)."]
+    sweep = [c for c in plan if c.subseries == SUBSERIES_LATERAL_SWEEP]
+    if sweep:
+        lines += ["", f"B-HV lateral sweep approach (Section 6.1, Step 6): {len(sweep)} poses, "
+                      f"{sum(1 for c in sweep if c.notes['lateral_sweep_axis'] == 'H')} in H and "
+                      f"{sum(1 for c in sweep if c.notes['lateral_sweep_axis'] == 'V')} in V, at "
+                      f"Z = {sweep[0].station_z_mm:g} mm. The approach ALTERNATES on purpose so that lateral hysteresis "
+                      "shows: odd-numbered poses are approached from the negative side (-H, -V) and even-numbered poses "
+                      "from the positive side (+H, +V); the side is in the notes of poses.csv as "
+                      f"{APPROACH_DIRECTION_KEY}."]
     if any(c.procedure == PROCEDURE_ZSTEP for c in plan):
         lines += ["", f"Series Z approach: every visit {APPROACH_FROM_BELOW} (back off {params.z_step_approach_overshoot_mm:g} mm "
                       "toward smaller Z, then move up onto the pose), so that backlash does not enter the A / B difference.",

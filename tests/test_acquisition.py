@@ -1230,49 +1230,61 @@ def plan_area_series_for_test(params: CharacterizationParameters) -> list[Planne
     return plan_area_series(params, GEOMETRY, np.random.default_rng(MASTER_SEED))
 
 
-def test_lateral_sweep_adds_42_poses_at_the_reference_station_and_is_off_by_default(tmp_path: Path):
-    """Section 6.1, Step 6: ``lateral_sweep=True`` adds the optional second pass of B-HV, 21 positions in H then 21 in V
-    (LATERAL_SWEEP_SPAN_PX / LATERAL_SWEEP_STEP_PX + 1, both ends included) of T3a at Z_REFERENCE_MM with
-    FRAMES_PER_EDGE_POSE frames, sub-series "lateral_sweep"; each step is LATERAL_SWEEP_STEP_PX p(Z) millimeters with
-    p(Z) = Z / f_x; the sweep is outside the main budget and absent by default."""
+def test_lateral_sweep_adds_40_poses_at_the_reference_station_and_is_off_by_default(tmp_path: Path):
+    """Section 6.1, Step 6: ``lateral_sweep=True`` adds the optional second pass of B-HV, 20 poses in H then 20 in V at the
+    offsets k x LATERAL_SWEEP_STEP_PX, k = 1 ... LATERAL_SWEEP_SPAN_PX / LATERAL_SWEEP_STEP_PX (the origin is the nominal
+    pose, not repeated), of T3a at Z_REFERENCE_MM with FRAMES_PER_EDGE_POSE frames, sub-series "lateral_sweep"; each step is
+    LATERAL_SWEEP_STEP_PX p(Z) millimeters with p(Z) = Z / f_x; odd-numbered poses are approached from the negative side and
+    even-numbered from the positive side; the sweep is outside the main budget and absent by default."""
     from sensorperf.acquisition.plan import lateral_sweep_budget, plan_summary_text
     default = plan_edge_series(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED))
     plan = plan_edge_series(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), lateral_sweep=True)
     assert not any(c.subseries == "lateral_sweep" for c in default)
     sweep = [c for c in plan if c.subseries == "lateral_sweep"]
-    assert len(sweep) == 42 == 2 * (round(PARAMS.lateral_sweep_span_px / PARAMS.lateral_sweep_step_px) + 1)
-    assert len(plan) == len(default) + 42
+    per_axis = round(PARAMS.lateral_sweep_span_px / PARAMS.lateral_sweep_step_px)
+    assert len(sweep) == 40 == 2 * per_axis and per_axis == 20
+    assert len(PARAMS.lateral_sweep_positions_px()) == 20
+    assert PARAMS.lateral_sweep_positions_px()[0] == pytest.approx(0.1)
+    assert PARAMS.lateral_sweep_positions_px()[-1] == pytest.approx(2.0)
+    assert len(plan) == len(default) + 40
     assert {(c.procedure, c.target_id, c.gap_mm, c.station_z_mm, c.field) for c in sweep} \
         == {(PROCEDURE_EDGES, "T3a", PARAMS.gap_small_mm, PARAMS.z_reference_mm, 0)}
-    assert all(c.frames == PARAMS.frames_per_edge_pose for c in sweep)
+    assert all(c.frames == PARAMS.frames_per_edge_pose == 30 for c in sweep)
     pitch = PARAMS.z_reference_mm / GEOMETRY.sensor_fx_px                            # p(Z) = Z / f_x
     step_mm = PARAMS.lateral_sweep_step_px * pitch
     assert step_mm == pytest.approx(0.1163, abs=1e-4)
-    for axis, members in (("H", sweep[:21]), ("V", sweep[21:])):
+    for axis, members in (("H", sweep[:20]), ("V", sweep[20:])):
         assert all(c.notes["lateral_sweep_axis"] == axis for c in members)
         offsets = np.array([c.offset_h_mm if axis == "H" else c.offset_v_mm for c in members])
         other = np.array([c.offset_v_mm if axis == "H" else c.offset_h_mm for c in members])
-        assert np.allclose(np.diff(offsets), step_mm) and np.all(other == 0.0)
-        span_mm = PARAMS.lateral_sweep_span_px * pitch
-        assert offsets[0] == pytest.approx(-span_mm / 2.0) and offsets[-1] == pytest.approx(span_mm / 2.0)
+        # Offsets k x step for k = 1 ... 20: no pose at the origin, the last at the full span.
+        assert np.allclose(offsets, step_mm * np.arange(1, 21)) and np.all(other == 0.0)
+        assert offsets[-1] == pytest.approx(PARAMS.lateral_sweep_span_px * pitch)
         translation = np.array([c.target_to_camera.translation for c in members])
         assert np.allclose(translation[:, 2], PARAMS.z_reference_mm)
         assert np.allclose(translation[:, 0 if axis == "H" else 1], offsets)
+        # Alternating approach: 1st, 3rd, ... from the negative side, 2nd, 4th, ... from the positive side.
+        assert [c.notes["approach_direction"] for c in members] == [("-" if k % 2 == 0 else "+") + axis
+                                                                    for k in range(20)]
     # Pose indices stay unique within the configuration (the sweep continues after the main poses).
     keys = [c.pose_key() for c in plan]
     assert len(set(keys)) == len(keys)
     # Outside the main budget.
     args = (GEOMETRY.frame_rate_hz, PARAMS.move_and_settle_time_s)
     assert capture_budget(plan, *args) == capture_budget(default, *args)
-    assert [r.poses for r in lateral_sweep_budget(plan, *args)] == [42] and lateral_sweep_budget(default, *args) == []
-    assert "optional B-HV lateral sweep" in plan_summary_text(plan, PARAMS, GEOMETRY)
-    # The full plan and the command line.
+    sweep_budget = lateral_sweep_budget(plan, *args)
+    assert [(r.poses, r.frames) for r in sweep_budget] == [(40, 1200)] and lateral_sweep_budget(default, *args) == []
+    text = plan_summary_text(plan, PARAMS, GEOMETRY)
+    assert "optional B-HV lateral sweep" in text and "approach ALTERNATES" in text and "approach_direction" in text
+    assert "lateral sweep approach" not in plan_summary_text(default, PARAMS, GEOMETRY)
+    # The full plan and the command line (the direction survives the CSV round trip in the notes).
     full = plan_full_session(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), series=["B"], lateral_sweep=True)
-    assert sum(1 for c in full if c.subseries == "lateral_sweep") == 42
+    assert sum(1 for c in full if c.subseries == "lateral_sweep") == 40
     assert plan_cli.main(["--out", str(tmp_path / "plain"), "--series", "B"]) == 0
     assert plan_cli.main(["--out", str(tmp_path / "sweep"), "--series", "B", "--lateral-sweep"]) == 0
     assert not any(c.subseries == "lateral_sweep" for c in read_plan_csv(tmp_path / "plain" / PLAN_CSV_NAME))
-    assert sum(1 for c in read_plan_csv(tmp_path / "sweep" / PLAN_CSV_NAME) if c.subseries == "lateral_sweep") == 42
+    from_csv = [c for c in read_plan_csv(tmp_path / "sweep" / PLAN_CSV_NAME) if c.subseries == "lateral_sweep"]
+    assert len(from_csv) == 40 and [c.notes["approach_direction"] for c in from_csv[:3]] == ["-H", "+H", "-H"]
 
 
 def test_post_diameter_is_derived_from_the_detection_rule():

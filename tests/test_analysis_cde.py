@@ -428,7 +428,7 @@ def test_d5_measured_on_synthetic_counts():
     bound = PARAMS.detection_low_probability
     assert bound == pytest.approx(0.05)
     result = detection.empirical_d5(levels, np.array([0, 0, 30]), trials, gamma=0.01, confidence=0.95, bound=bound)
-    assert result["d5"] == pytest.approx(2.0) and result["d5_next"] == pytest.approx(4.0)
+    assert result["d5_empirical"] == pytest.approx(2.0) and result["d5_empirical_next"] == pytest.approx(4.0)
     # Each passing level has its corrected bound within 0.05, the failing one above it.
     assert [r["within_bound"] for r in result["levels"]] == [True, True, False]
     assert all(r["p_star_upper"] <= bound for r in result["levels"] if r["within_bound"])
@@ -436,17 +436,17 @@ def test_d5_measured_on_synthetic_counts():
     # A raw detection rate of 3 of 300 (the false-alarm rate, 1 percent) is within the 5 percent bound; 3 in 300
     # at the smallest level does not make the smaller levels fail.
     result = detection.empirical_d5(levels, np.array([3, 0, 30]), trials, gamma=0.01, confidence=0.95, bound=bound)
-    assert result["d5"] == pytest.approx(2.0)
+    assert result["d5_empirical"] == pytest.approx(2.0)
     # The smallest level already above the bound: D_5 is not demonstrated (NaN) and the bracket starts at that level.
     result = detection.empirical_d5(levels, np.array([30, 0, 0]), trials, gamma=0.01, confidence=0.95, bound=bound)
-    assert math.isnan(result["d5"]) and result["d5_next"] == pytest.approx(1.0)
+    assert math.isnan(result["d5_empirical"]) and result["d5_empirical_next"] == pytest.approx(1.0)
     # Every level within the bound: D_5 is the largest level, with no level above it.
     result = detection.empirical_d5(levels, np.array([0, 0, 0]), trials, gamma=0.01, confidence=0.95, bound=bound)
-    assert result["d5"] == pytest.approx(4.0) and math.isnan(result["d5_next"])
+    assert result["d5_empirical"] == pytest.approx(4.0) and math.isnan(result["d5_empirical_next"])
     # The smallest level whose corrected probability is at or below 5 percent is reported, whatever the input order.
     shuffled = detection.empirical_d5(levels[::-1], np.array([30, 0, 0]), trials, gamma=0.01, confidence=0.95,
                                       bound=bound)
-    assert shuffled["d5"] == pytest.approx(2.0)
+    assert shuffled["d5_empirical"] == pytest.approx(2.0)
 
 
 def test_d0_is_predicted_from_the_fitted_curve():
@@ -490,7 +490,7 @@ def test_d_step5_to_7_minimums_are_ordered(detection_result):
         assert pooled["d10_px"] <= pooled["d50_px"]
         # The measured 5 percent point follows the rule of Step 6, not a lucky draw: D_5 is the largest level such that
         # it and every smaller level have a corrected upper bound within DETECTION_LOW_PROBABILITY.
-        levels = _pooled_detail(detection_result, FEATURE_CUTOUT, rule)["d5_measured"]["levels"]
+        levels = _pooled_detail(detection_result, FEATURE_CUTOUT, rule)["d5_empirical"]["levels"]
         assert levels, "the far-station trials must give at least one level with trials"
         passing = []
         for level in sorted(levels, key=lambda r: r["d_px"]):
@@ -498,12 +498,12 @@ def test_d_step5_to_7_minimums_are_ordered(detection_result):
                 break
             passing.append(level["d_px"])
         if passing:
-            assert pooled["d5_px"] == pytest.approx(max(passing))
-            assert pooled["d5_px"] <= pooled["d10_px"]
-            assert pooled["d5_px"] < pooled["d5_next_px"]                           # the bracket
+            assert pooled["d5_empirical_px"] == pytest.approx(max(passing))
+            assert pooled["d5_empirical_px"] <= pooled["d10_px"]
+            assert pooled["d5_empirical_px"] < pooled["d5_empirical_next_px"]                           # the bracket
         else:
-            assert math.isnan(pooled["d5_px"])
-            assert pooled["d5_next_px"] == pytest.approx(min(r["d_px"] for r in levels))
+            assert math.isnan(pooled["d5_empirical_px"])
+            assert pooled["d5_empirical_next_px"] == pytest.approx(min(r["d_px"] for r in levels))
         # The predicted 0 percent point: the best fitted curve at DETECTION_ZERO_PREDICTION_LEVEL, flagged.
         assert pooled["d0_is_prediction"] is True and "PREDICTION" in pooled["d0_predicted_note"]
         assert math.isfinite(pooled["d0_predicted_px"]) and pooled["d0_predicted_px"] < pooled["d10_px"]
@@ -521,11 +521,64 @@ def test_d_step5_to_7_minimums_are_ordered(detection_result):
             assert row["d0_predicted_px"] == pytest.approx(pooled["d0_predicted_px"])
             assert row["d0_predicted_mm"] == pytest.approx(pooled["d0_predicted_px"] * station / cde_fixture_fx())
             if passing:
-                assert row["d5_px"] == pytest.approx(pooled["d5_px"])
-                assert row["d5_mm"] == pytest.approx(pooled["d5_px"] * station / cde_fixture_fx())
-                assert row["d5_mm"] < row["d5_next_mm"]
+                assert row["d5_empirical_px"] == pytest.approx(pooled["d5_empirical_px"])
+                assert row["d5_empirical_mm"] == pytest.approx(pooled["d5_empirical_px"] * station / cde_fixture_fx())
+                assert row["d5_empirical_mm"] < row["d5_empirical_next_mm"]
             else:
-                assert math.isnan(row["d5_px"])
+                assert math.isnan(row["d5_empirical_px"])
+
+
+def test_fitted_d5_against_the_empirical_bracket_on_synthetic_counts():
+    """On a fixed count table (300 trials per level, a logistic with gamma = 0.01 whose expected counts are used) the
+    fitted D_5 is the inverse of the best fitted curve at 0.05 (the corrected probability there is 0.05), lies in the
+    tested range, and is at or above the empirical level, which is the largest level whose corrected one-sided upper
+    bound is at most 0.05. The empirical bracket is CONSERVATIVE: the upper bound is above the point estimate, so the
+    first level that fails the bound can lie below the fitted D_5 (the next level is not an upper limit of it)."""
+    levels = np.geomspace(0.8, 30.0, 14)
+    gamma, alpha, beta = 0.01, math.log(6.0), 0.5
+    corrected = 1.0 / (1.0 + np.exp(-(np.log(levels) - alpha) / beta))
+    trials = np.full(levels.shape, PARAMS.detection_low_trials)
+    successes = np.rint(trials * (gamma + (1.0 - gamma) * corrected))
+    with np.errstate(all="ignore"):
+        fits = fit_all_curves(levels, successes, trials, gamma, PsychometricFitParameters(lapse_rate_max=0.05))
+    best = best_fit(fits)
+    fitted = best.threshold(PARAMS.detection_low_probability)
+    assert best.corrected_probability(fitted) == pytest.approx(PARAMS.detection_low_probability, abs=1e-9)
+    assert levels[0] < fitted < levels[-1]
+    empirical = detection.empirical_d5(levels, successes, trials, gamma, PARAMS.confidence_level,
+                                       PARAMS.detection_low_probability)
+    assert empirical["d5_empirical"] <= fitted
+    assert empirical["d5_empirical"] < empirical["d5_empirical_next"]
+    # The model range over the three shapes brackets the best fit's value.
+    shapes = [f.threshold(PARAMS.detection_low_probability) for f in fits.values()]
+    assert min(shapes) <= fitted <= max(shapes)
+
+
+def test_d5_fitted_sits_above_the_empirical_level_and_has_intervals(detection_result):
+    """Section 13: D_5 is read from the best fitted curve at DETECTION_LOW_PROBABILITY (with its model range over the
+    three shapes and a bootstrap interval) and the empirical bracket is reported beside it: the fitted D_5 is at or above
+    the empirical level (a demonstrated at-most-5-percent level); the predicted D_0 lies below D_5; both bootstrap
+    intervals are finite and contain their point estimates when the fit converges."""
+    for rule in (RULE_PRIMARY, RULE_INCLUSIVE):
+        pooled = _pooled_row(detection_result, FEATURE_CUTOUT, rule)
+        assert pooled["d5_status"] == "ok" and math.isfinite(pooled["d5_px"])
+        low = pooled["d5_empirical_px"]
+        if math.isfinite(low):
+            assert low <= pooled["d5_px"]
+        assert pooled["d5_model_min_px"] <= pooled["d5_px"] <= pooled["d5_model_max_px"]
+        assert pooled["d0_predicted_px"] < pooled["d5_px"] < pooled["d10_px"]
+        for name in ("d5", "d0_predicted"):
+            lower, upper, value = pooled[f"{name}_lower_px"], pooled[f"{name}_upper_px"], pooled[f"{name}_px"]
+            assert math.isfinite(lower) and math.isfinite(upper) and lower < upper, name
+            assert lower <= value <= upper, name
+        # The per-station rows carry the same values converted to mm.
+        for station in cde_fixture.STATIONS_MM:
+            row = _d_row(detection_result, FEATURE_CUTOUT, station, rule)
+            assert row["d5_mm"] == pytest.approx(pooled["d5_px"] * station / cde_fixture_fx())
+            assert row["d5_lower_mm"] < row["d5_mm"] < row["d5_upper_mm"]
+            assert row["d0_predicted_lower_mm"] < row["d0_predicted_mm"] < row["d0_predicted_upper_mm"]
+    names = _pooled_detail(detection_result, FEATURE_CUTOUT, RULE_PRIMARY)["bootstrap"]["names"]
+    assert names == list(detection.BOOTSTRAP_STAT_NAMES) and "d5_px" in names and "d0_predicted_px" in names
 
 
 def cde_fixture_fx() -> float:
@@ -582,7 +635,7 @@ def test_d_step11_csv_and_figures(detection_result):
     rows = _read_csv(detection_result.out_dir / detection.SUMMARY_FILE_NAME)
     assert len(rows) == 3 * len(cde_fixture.STATIONS_MM)
     assert list(rows[0].keys()) == list(detection.SUMMARY_COLUMNS)
-    for name in ("d50_mm", "d50_px", "d50_mrad", "d10_px", "d5_mm", "d5_next_px", "d0_predicted_mm", "d0_predicted_px", "d0_is_prediction",
+    for name in ("d50_mm", "d50_px", "d50_mrad", "d10_px", "d5_mm", "d5_px", "d5_mrad", "d5_lower_px", "d5_upper_px", "d5_empirical_mm", "d5_empirical_next_px", "d0_predicted_lower_px", "d0_predicted_upper_mm", "d5_status", "d0_predicted_mm", "d0_predicted_px", "d0_is_prediction",
                  "d0_predicted_note", "d0_model_mrad",
                  "d0_geometric_px", "gamma_lower", "tau_mm", "independence_ok"):
         assert name in rows[0]
