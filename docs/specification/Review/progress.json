@@ -7,9 +7,9 @@
  },
  "C02": {
   "title": "Parameters and relations",
-  "reviewed": null,
-  "tier": null,
-  "note": "not yet reviewed"
+  "reviewed": "2026-10-05",
+  "tier": "fable",
+  "note": "R1–R9 executed (30 parameter rows added, 9 cell edits); gate PASS; scope diff §2 only; literal replacements deferred to their chunks"
  },
  "C03": {
   "title": "Equipment and targets",

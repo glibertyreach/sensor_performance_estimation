@@ -1,6 +1,6 @@
 {
   "document": "VSX3000_characterization_specification.docx",
-  "built": "2026-10-05T13:02:24",
+  "built": "2026-10-05T13:13:33",
   "source_of_truth": "https://claude.ai/code/artifact/20fd839b-0e95-4210-9e8f-959da07ce6c2",
   "elements": [
     {
@@ -59,6 +59,7 @@
         "registration_residual_accept_mm": "0.15"
       },
       "refs": [
+        "Section 10",
         "Section 3.1",
         "Step 4.4",
         "Step 4.5"
@@ -82,8 +83,10 @@
         "registration_residual_accept_mm": "0.15"
       },
       "refs": [
+        "Section 10",
         "Section 3.1",
-        "Step 4.4"
+        "Step 4.4",
+        "Step 4.5"
       ]
     },
     {
