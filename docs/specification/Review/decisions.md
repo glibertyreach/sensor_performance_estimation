@@ -161,3 +161,28 @@ Awaiting the person's decisions on P2 and P3 before closing the chunk.
   budget table is refilled from the plan tool once the code lands. Gate: ALL CHECKS PASSED against baseline
   20261005_131333, scope diff = 1, 2, 3.1, 3.2, 3.3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 15 (all intended).
   Figures: flow diagram ("9 Z × 5 fields", "post check"), setup diagram (400–1600 mm volume, enclosed laboratory).
+
+## C04 — Section 3.3 Chamfered (knife-edge) boundaries (opened 2026-10-05)
+
+Reviewer findings (proposals; nothing executed until the person closes the chunk):
+- C04-R1 (serious, stale worked value): the paragraph still reasons from "70° FOV, 50 mm baseline" and the old Z_MIN,
+  giving 32° + 10° = 42° so that a 45° bevel passes. With Z_MIN = 400 mm the same conservative construction (a
+  chamfered target at the off-axis field position at Z_MIN) gives about 38° + 10° = 48° at the indicative geometry
+  (f_x ≈ 688 px, 640 × 480, 75 mm baseline), and a 45° bevel fails. But that pose never occurs: chamfered targets
+  are off-axis only in the C field sub-series at Z_REFERENCE_MM (800 mm), and at Z_MIN they are centered (B-HV
+  edges). Worst real cases: the raised square centered at 400 mm, about 24°; the arrays off-axis at 800 mm, about
+  29°; plus the 10° margin, 39°, so 45° passes with margin. Proposal: rewrite the worked value around the poses
+  the plan actually uses, name the indicative geometry, keep "recompute once the VSX3000 geometry is known", and
+  keep the escape clause (steeper bevel or smaller FIELD_OFFSET_FRACTION).
+- C04-R2 (consistency with 3.2): the as-built record lists "plate position" but 3.2 now relies on it for the
+  datum-to-feature offsets and the measured reflectance. Proposal: "position relative to the dowel datum" and
+  "the measured reflectance at the projector wavelength" named explicitly.
+- C04-R3 (code/spec): the plan tool's nominal post diameter is 0.5 mm while the rule gives "2 mm or less"; the
+  code constant should be derived from POST_DIAMETER_FRACTION_OF_D0 × the expected D_0 rather than fixed.
+  Code follow-up, no document change.
+- C04-R4 (low): state that chamfered targets are never tilted (the tilt sub-series uses T2), so the max over poses
+  in the bevel formula runs over fronto-parallel poses only; and that the 45° in the figure is the example value,
+  not a requirement.
+- C04-N1 (note): the bevel formula exports as raw LaTeX in the review PDF; verify the live rendering.
+
+Person's comments: (pending)
