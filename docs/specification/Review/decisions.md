@@ -127,3 +127,10 @@ Person's comments (2026-10-05):
   4 post-only sites over T4-S/T4-L, 17 holes + 17 blank sites over T5-S/T5-L, 74 sites in all; reduction options
   offered (12 rungs keeping √2 only over 0.5–8 mm, or 8 rungs at ratio 2).
 Awaiting the person's decisions on P2 and P3 before closing the chunk.
+- C03-P3 decision (2026-10-05): the person rejects the 17-rung ladder. Directive: radically reduce the number of
+  disks and cutouts and use robot motion in Z to vary the subtended angle. Reviewer proposal put to the person:
+  6 disks and 6 holes (a 5-rung ratio-2 ladder 0.44–6.98 mm whose D_px ranges tile 0.3–9.6 px over Z_MIN..Z_MAX,
+  plus one 27.9 mm asymptote feature), one disk plate and one cutout plate, blank and post-only sites as named
+  parameters, C and D sampled at the 11 A stations in Z, θ-scaling tested where adjacent disks overlap.
+  Propagation when adopted: Section 2 rows (DIAMETER_*), 3.2 T4/T5 rows and ladder paragraph, Sections 7, 8, 9
+  (budget), 12, 13, the code (targets, plan, analyses C and D, simulator, tests) and the technician procedure.
