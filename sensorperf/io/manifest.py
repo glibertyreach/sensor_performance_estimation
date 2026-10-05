@@ -123,6 +123,17 @@ FIELD_FRACTION_ACHIEVED_KEY = "field_fraction_achieved"
 (1 when the requested off-axis position fits the field; smaller when the planner pulled the pose inward). Poses that
 are not placed at a field position do not carry it."""
 
+SENTINEL_MOUNT_REFERENCE_KEY = "sentinel_mount_reference"
+"""Manifest metadata column marking the first drift sentinel after a target was mounted, the reference of that target's
+drift (Section 5, Step 3). The value is ``true`` or ``false`` (:func:`format_flag`; :func:`parse_flag` reads it) on a
+sentinel row and empty on every other row. Like ``field_fraction_achieved`` it is an extra column: the metadata columns come
+after MANIFEST_COLUMNS in alphabetical order, so this one follows ``field_fraction_achieved``. The plan carries it in
+``notes["mount_reference"]`` of the sentinel pose."""
+
+FLAG_TRUE_TEXT = "true"
+FLAG_FALSE_TEXT = "false"
+"""Text of a boolean manifest metadata value."""
+
 OPTIONAL_FLOAT_COLUMNS = ("gap_mm", "sensor_temp_c", "air_temp_c", "step_mm", "tilt_deg")
 """Float columns that may be empty."""
 
@@ -131,12 +142,37 @@ FILE_NAME_PATTERN = re.compile(
     r"_F(?P<field>[0-9])_P(?P<pose>[0-9]+)_f(?P<frame>[0-9]+)\.mc$")
 """The Section 9 file-name rule as a regular expression."""
 
-FILE_NAME_FORMAT = "{proc}_{target}_G{gap}_Z{z:04d}_F{field}_P{pose:03d}_f{frame:02d}.mc"
-"""The Section 9 file-name rule as a format string (see format_file_name)."""
+FILE_NAME_FORMAT = "{proc}_{target}_G{gap}_Z{z:04d}_F{field}_P{pose}_f{frame:02d}.mc"
+"""The Section 9 file-name rule as a format string (see format_file_name). The pose field is pre-formatted by
+:func:`format_pose_index` because its width depends on the index."""
 
 POSE_INDEX_DIGITS = 3
+POSE_INDEX_DIGITS_OPTIONAL = 4
 FRAME_INDEX_DIGITS = 2
-"""Digit counts of the pose and frame fields in file names (more digits are accepted on read)."""
+"""Digit counts of the pose and frame fields in file names (more digits are accepted on read). The pose index has
+POSE_INDEX_DIGITS digits, and POSE_INDEX_DIGITS_OPTIONAL digits for the optional repeats planned outside the budget."""
+
+# The pose-index ranges. Poses of the main plan use 0 to OPTIONAL_POSE_INDEX_RANGE_SIZE - 1 (three digits). Each optional set
+# outside the Section 9 budget has its own four-digit range of OPTIONAL_POSE_INDEX_RANGE_SIZE indices, so that the ranges can
+# never overlap and the set of a capture is recognizable from its file name:
+#     main plan                  P000 to P999
+#     filters-off repeat         P1000 to P1999   (A, B-HV and B-Z; Section 4, Step 4.2)
+#     optional B-Z staircase     P2000 to P2999   (Section 6.2, second pass)
+#     optional B-HV lateral sweep P3000 to P3999  (Section 6.1, Step 6)
+OPTIONAL_POSE_INDEX_RANGE_SIZE = 1000
+"""Number of pose indices reserved for the main plan and for each optional set. The B-Z series has up to about 150 poses at
+one station (ladder, ramp), the staircase about 30 and the lateral sweep 40, so each range is wide enough."""
+FILTERS_OFF_POSE_INDEX_BASE = OPTIONAL_POSE_INDEX_RANGE_SIZE
+"""First pose index of the filters-off repeat of series A, B-HV and B-Z (Section 4, Step 4.2). The file-name rule has no
+field for the filter state, so the repeat takes pose indices above those of the filters-on series at the same station."""
+STAIRCASE_POSE_INDEX_BASE = 2 * OPTIONAL_POSE_INDEX_RANGE_SIZE
+"""First pose index of the optional B-Z staircase (Section 6.2, second pass; ``plan_stations --staircase``)."""
+LATERAL_SWEEP_POSE_INDEX_BASE = 3 * OPTIONAL_POSE_INDEX_RANGE_SIZE
+"""First pose index of the optional B-HV lateral sweep (Section 6.1, Step 6; ``plan_stations --lateral-sweep``)."""
+OPTIONAL_POSE_INDEX_BASES = (FILTERS_OFF_POSE_INDEX_BASE, STAIRCASE_POSE_INDEX_BASE, LATERAL_SWEEP_POSE_INDEX_BASE)
+"""The first pose index of each optional set; the lowest of them is where file names switch to four digits."""
+FOUR_DIGIT_POSE_INDEX_MIN = min(OPTIONAL_POSE_INDEX_BASES)
+"""Pose indices from this one on are written with POSE_INDEX_DIGITS_OPTIONAL digits in file names."""
 
 
 # ---------------------------------------------------------------------------
@@ -151,11 +187,34 @@ def _format_gap(gap_mm: float | None) -> str:
     return f"{gap_mm:g}"
 
 
+def format_flag(value: bool) -> str:
+    """The manifest text of a boolean metadata value (FLAG_TRUE_TEXT or FLAG_FALSE_TEXT)."""
+    return FLAG_TRUE_TEXT if value else FLAG_FALSE_TEXT
+
+
+def parse_flag(text: str | None) -> bool | None:
+    """The boolean of a manifest metadata text (case-insensitive ``true`` or ``false``); None when the text is absent,
+    empty or neither."""
+    lowered = (text or "").strip().lower()
+    if lowered == FLAG_TRUE_TEXT:
+        return True
+    if lowered == FLAG_FALSE_TEXT:
+        return False
+    return None
+
+
+def format_pose_index(pose_index: int) -> str:
+    """The pose field of a file name without the leading P: three digits for the main plan and four for any index of
+    an optional set (at or above FOUR_DIGIT_POSE_INDEX_MIN), zero-padded."""
+    digits = POSE_INDEX_DIGITS_OPTIONAL if pose_index >= FOUR_DIGIT_POSE_INDEX_MIN else POSE_INDEX_DIGITS
+    return f"{int(pose_index):0{digits}d}"
+
+
 def format_file_name(procedure: str, target_id: str, gap_mm: float | None, station_z_mm: float, field: int,
                      pose_index: int, frame_index: int) -> str:
     """The capture file name of Section 9 for these fields."""
     return FILE_NAME_FORMAT.format(proc=procedure, target=target_id, gap=_format_gap(gap_mm),
-                                   z=int(round(station_z_mm)), field=int(field), pose=int(pose_index),
+                                   z=int(round(station_z_mm)), field=int(field), pose=format_pose_index(pose_index),
                                    frame=int(frame_index))
 
 

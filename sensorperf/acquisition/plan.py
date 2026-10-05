@@ -83,35 +83,27 @@ from sensorperf.geometry.targets import (
 )
 from sensorperf.geometry.transforms import RigidTransform
 from sensorperf.io.manifest import (
-    FIELD_FRACTION_ACHIEVED_KEY, SUBSERIES_EXTENDED, SUBSERIES_FIELD, SUBSERIES_FILTERS_OFF, SUBSERIES_JITTER, SUBSERIES_LATERAL_SWEEP, SUBSERIES_LADDER, SUBSERIES_MAIN,
+    FIELD_FRACTION_ACHIEVED_KEY, FILTERS_OFF_POSE_INDEX_BASE, LATERAL_SWEEP_POSE_INDEX_BASE, SENTINEL_MOUNT_REFERENCE_KEY,
+    STAIRCASE_POSE_INDEX_BASE, SUBSERIES_EXTENDED, SUBSERIES_FIELD, SUBSERIES_FILTERS_OFF, SUBSERIES_JITTER, SUBSERIES_LATERAL_SWEEP, SUBSERIES_LADDER, SUBSERIES_MAIN,
     SUBSERIES_NOMINAL, SUBSERIES_OPEN, SUBSERIES_RAMP, SUBSERIES_REMOUNT, SUBSERIES_SENTINEL, SUBSERIES_STAIRCASE, SUBSERIES_TILT,
-    TARGET_POSE_COLUMNS, TILT_AXIS_H, TILT_AXIS_V, VISIT_A, VISIT_B, format_file_name, pose_to_six,
+    TARGET_POSE_COLUMNS, TILT_AXIS_H, TILT_AXIS_V, VISIT_A, VISIT_B, format_file_name, format_flag, pose_to_six,
     six_to_pose,
 )
 from sensorperf.parameters import (
     CharacterizationParameters, FIELD_POSITION_CENTER, FIELD_POSITION_CODES, FIELD_POSITION_SIGNS,
     PROCEDURE_AREA, PROCEDURE_DETECTION, PROCEDURE_EDGES, PROCEDURE_NOISE,
     PROCEDURE_REGISTRATION, PROCEDURE_SENTINEL, PROCEDURE_ZSTEP, SensorGeometry, TARGET_CUTOUTS,
-    TARGET_DISKS, TARGET_NOISE_PLATE, TARGET_RAISED_SQUARE, TARGET_SQUARE_WINDOW,
+    TARGET_DISKS, TARGET_NOISE_PLATE, TARGET_RAISED_SQUARE, TARGET_SQUARE_WINDOW, TIER_A_DISPARITY_QUANTUM_PX,
 )
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
+# The pose-index bases of the optional sets outside the budget (FILTERS_OFF_POSE_INDEX_BASE, STAIRCASE_POSE_INDEX_BASE and
+# LATERAL_SWEEP_POSE_INDEX_BASE) and the file-name widths are defined together in ``sensorperf.io.manifest``.
 SEED_UPPER_BOUND = 2 ** 31 - 1
 """Exclusive upper bound of the seeds drawn from the master generator (a 31-bit
 integer, so a seed survives a CSV round trip and any 32-bit consumer)."""
-FILTERS_OFF_POSE_INDEX_BASE = 1000
-"""First pose index of the filters-off repeat of series A, B-HV and B-Z (Section 4, Step 4.2; the
-repeat of Section 5, Step 7 extended to the edge and depth-step series). The file-name rule has no
-field for the filter state, so the repeat takes pose indices above those of the filters-on series at
-the same station. The B-Z series has up to about 150 poses at one station (ladder, ramp and optional staircase), so
-the base must clear that; the four-digit index (P1000) is accepted by the file-name pattern."""
-TIER_A_DISPARITY_QUANTUM_PX = 0.125
-"""Disparity quantum q assumed for the expected depth quantum dZ_q = q Z^2 / k of the
-B-Z staircase until Analysis A measures one (Section 6.2, Step 3: "using the Tier-A q").
-The value (1/8 px) is the indicative one of the synthetic sensor model and is NOT a
-datasheet value."""
 FIELD_PULL_TOLERANCE = 1.0e-3
 """Resolution of the fraction of the requested field offset kept when a pose is pulled
 inward (bisection stops when the bracket is narrower than this)."""
@@ -266,9 +258,17 @@ class PlannedCapture:
 
     def manifest_metadata(self) -> dict[str, str]:
         """The plan quantities the manifest carries as extra columns (string metadata of the FrameRecord): the achieved
-        fraction of the requested field offset, for a pose placed at a field position (empty for any other pose)."""
+        fraction of the requested field offset, for a pose placed at a field position, and the mount-reference flag of a
+        drift sentinel (``sentinel_mount_reference``: true for the first sentinel after its target was mounted, false for
+        a later one). Any other pose has neither, so the cell stays empty."""
+        metadata: dict[str, str] = {}
         fraction = self.notes.get(FIELD_FRACTION_ACHIEVED_KEY)
-        return {} if fraction is None else {FIELD_FRACTION_ACHIEVED_KEY: repr(float(fraction))}
+        if fraction is not None:
+            metadata[FIELD_FRACTION_ACHIEVED_KEY] = repr(float(fraction))
+        reference = self.notes.get(SENTINEL_REFERENCE_KEY)
+        if self.procedure == PROCEDURE_SENTINEL and reference is not None:
+            metadata[SENTINEL_MOUNT_REFERENCE_KEY] = format_flag(bool(reference))
+        return metadata
 
 
 # ---------------------------------------------------------------------------
@@ -745,8 +745,8 @@ def plan_edge_series(params: CharacterizationParameters, geometry: SensorGeometr
     k x step for k = 1 ... span / step (20 per axis, 40 poses, ``params.lateral_sweep_positions_px``; the origin is the
     nominal B pose already captured and is not repeated). Each step is converted to millimeters at the reference station with the pixel pitch p(Z) = Z / f_x, so the step is 0.1 px x p(Z_REFERENCE_MM)
     (0.116 mm at the indicative geometry). Each pose has FRAMES_PER_EDGE_POSE frames and the sub-series "lateral_sweep";
-    the pose indices continue after the main poses of the same configuration (as the staircase of series B-Z), the
-    sweep is placed right after the stations of T3a with the small gap, while that target is still mounted, and the
+    the pose indices start at LATERAL_SWEEP_POSE_INDEX_BASE (a four-digit range of their own, so that they cannot be
+    confused with the main poses of the same configuration), the sweep is placed right after the stations of T3a with the small gap, while that target is still mounted, and the
     sweep axis, position index and offset in pixels are in ``notes``. The approach direction ALTERNATES on purpose, so
     that lateral hysteresis shows (Section 6.1, Step 6): the odd-numbered poses (1st, 3rd, ...) of an axis are approached
     from the negative side (``notes["approach_direction"]`` is "-H" or "-V", the robot arrives moving toward positive
@@ -760,6 +760,7 @@ def plan_edge_series(params: CharacterizationParameters, geometry: SensorGeometr
     counter = _PoseCounter(FILTERS_OFF_POSE_INDEX_BASE if filters_off else 0)
     nominal_label = SUBSERIES_FILTERS_OFF if filters_off else SUBSERIES_NOMINAL
     jitter_label = SUBSERIES_FILTERS_OFF if filters_off else SUBSERIES_JITTER
+    sweep_counter = _PoseCounter(LATERAL_SWEEP_POSE_INDEX_BASE)       # the optional lateral sweep's own index range
     camera = camera_of(geometry)
     plan: list[PlannedCapture] = []
     for target_id in (TARGET_RAISED_SQUARE, TARGET_SQUARE_WINDOW):
@@ -780,7 +781,7 @@ def plan_edge_series(params: CharacterizationParameters, geometry: SensorGeometr
             # target is still mounted (Section 6.1, Step 6: "where the target is already mounted").
             if (lateral_sweep and not filters_off and target_id == TARGET_RAISED_SQUARE
                     and gap == params.gap_small_mm):
-                plan += _plan_lateral_sweep(counter, params, geometry, diagnostics)
+                plan += _plan_lateral_sweep(sweep_counter, params, geometry, diagnostics)
     return _renumber(plan)
 
 
@@ -842,8 +843,8 @@ def _jitter_capture(counter: _PoseCounter, params: CharacterizationParameters, g
 # ---------------------------------------------------------------------------
 def default_expected_quantum_mm(geometry: SensorGeometry,
                                 disparity_quantum_px: float = TIER_A_DISPARITY_QUANTUM_PX) -> Callable[[float], float]:
-    """The expected depth quantum dZ_q(Z) = q Z^2 / k (Section 2) with the Tier-A disparity
-    quantum, as a function of the station depth in mm."""
+    """The expected depth quantum dZ_q(Z) = q Z^2 / k (Section 2) with the disparity quantum q (default: the Tier-A
+    value; the planner passes ``params.tier_a_disparity_quantum_px``), as a function of the station depth in mm."""
     return lambda depth_mm: geometry.depth_quantum_mm(disparity_quantum_px, depth_mm)
 
 
@@ -903,12 +904,13 @@ def staircase_step_mm(params: CharacterizationParameters, expected_quantum_mm: f
     return max(expected_quantum_mm / params.z_staircase_subdivision, params.robot_min_resolvable_move_mm)
 
 
-def _quantum_function(geometry: SensorGeometry,
+def _quantum_function(params: CharacterizationParameters, geometry: SensorGeometry,
                       expected_quantum_mm: Callable[[float], float] | float | None) -> Callable[[float], float]:
     """The expected depth quantum as a function of the station depth: the given function, the given constant (mm) or,
-    by default, the Tier-A disparity quantum (:func:`default_expected_quantum_mm`)."""
+    by default, the one of the Tier-A disparity quantum ``params.tier_a_disparity_quantum_px``
+    (:func:`default_expected_quantum_mm`), which a parameters.json override can replace by a measured value."""
     if expected_quantum_mm is None:
-        return default_expected_quantum_mm(geometry)
+        return default_expected_quantum_mm(geometry, params.tier_a_disparity_quantum_px)
     if callable(expected_quantum_mm):
         return expected_quantum_mm
     constant = float(expected_quantum_mm)
@@ -923,7 +925,8 @@ def plan_zstep_series(params: CharacterizationParameters, geometry: SensorGeomet
     """Section 6.2 (Series B-Z, procedure letter Z), target T2 fronto-parallel (ladder, staircase) or tilted about H (ramp).
 
     The expected depth quantum at a station is dZ_q(Z0) = q Z0^2 / k from ``expected_quantum_mm`` (a function of Z, or one
-    number in mm; default: the Tier-A disparity quantum, TIER_A_DISPARITY_QUANTUM_PX, until Analysis A has measured one).
+    number in mm; default: the Tier-A disparity quantum, ``params.tier_a_disparity_quantum_px`` (default
+    TIER_A_DISPARITY_QUANTUM_PX), until Analysis A or the ramp has measured one and it is passed in the parameters.json).
 
     Step 2, step ladder, at the reduced stations (``params.z_reduced_stations_mm()``), centered: the rungs of a station are
     the multiples Z_STEP_LADDER_QUANTA of dZ_q(Z0), each raised to at least ROBOT_MIN_RESOLVABLE_MOVE_MM
@@ -954,7 +957,8 @@ def plan_zstep_series(params: CharacterizationParameters, geometry: SensorGeomet
 
     Section 4, Step 4.2 (``filters_off=True``): returns the filters-off repeat of the whole series instead (the ladder, the
     ramp and, when asked for, the staircase; visit and step_mm are kept), with the sub-series "filters_off" on every pose and
-    pose indices from FILTERS_OFF_POSE_INDEX_BASE, as the A repeat of :func:`plan_noise_series`.
+    pose indices from FILTERS_OFF_POSE_INDEX_BASE, as the A repeat of :func:`plan_noise_series`. The staircase of the
+    filters-on pass has its own pose indices from STAIRCASE_POSE_INDEX_BASE.
 
     No random draws occur in this series; ``rng`` is accepted so all planners share one signature."""
     del rng                                # no randomness needed here
@@ -964,7 +968,7 @@ def plan_zstep_series(params: CharacterizationParameters, geometry: SensorGeomet
     ladder_label = SUBSERIES_FILTERS_OFF if filters_off else SUBSERIES_LADDER
     ramp_label = SUBSERIES_FILTERS_OFF if filters_off else SUBSERIES_RAMP
     staircase_label = SUBSERIES_FILTERS_OFF if filters_off else SUBSERIES_STAIRCASE
-    quantum_at = _quantum_function(geometry, expected_quantum_mm)
+    quantum_at = _quantum_function(params, geometry, expected_quantum_mm)
     approach = {"approach": APPROACH_FROM_BELOW, "approach_overshoot_mm": params.z_step_approach_overshoot_mm}
     counter = _PoseCounter(FILTERS_OFF_POSE_INDEX_BASE if filters_off else 0)
     plan: list[PlannedCapture] = []
@@ -974,7 +978,7 @@ def plan_zstep_series(params: CharacterizationParameters, geometry: SensorGeomet
         rungs = z_step_rungs_mm(params, quantum)
         if diagnostics is not None:
             diagnostics.note(f"B-Z ladder at Z0 = {z0:g} mm: expected depth quantum {quantum:.3f} mm "
-                             f"(Tier-A q = {TIER_A_DISPARITY_QUANTUM_PX:g} px unless a measured value was given), rungs "
+                             f"(Tier-A q = {params.tier_a_disparity_quantum_px:g} px unless a measured value was given), rungs "
                              + ", ".join(f"{r:.3g}" for r in rungs) + " mm")
             if z0 + rungs[-1] > params.z_max_mm:
                 diagnostics.note(f"B-Z ladder at Z0 = {z0:g} mm: the largest rung ({rungs[-1]:.3g} mm) moves the plate to "
@@ -1012,7 +1016,9 @@ def plan_zstep_series(params: CharacterizationParameters, geometry: SensorGeomet
                 camera, plate, fronto_parallel_pose(0.0, 0.0, z0), margin) + RAMP_FIT_WORSENING_TOLERANCE_PX:
             _warn(diagnostics, f"B-Z: the T2 plate tilted {tilt:.2f} deg about H at Z = {z0:g} mm (ramp) fits the field "
                                "of view worse than the untilted plate; check that it covers the analysis region")
-    # Optional second pass: the staircase.
+    # Optional second pass: the staircase. Outside the budget, it has its own four-digit pose-index range (the filters-off
+    # repeat keeps its own range for all of its poses, the staircase included).
+    staircase_counter = counter if filters_off else _PoseCounter(STAIRCASE_POSE_INDEX_BASE)
     if staircase:
         for z0 in params.z_reduced_stations_mm():
             quantum = float(quantum_at(z0))
@@ -1025,7 +1031,7 @@ def plan_zstep_series(params: CharacterizationParameters, geometry: SensorGeomet
             for k in range(steps + 1):
                 displacement = k * step
                 plan.append(_new_capture(
-                    counter, PROCEDURE_ZSTEP, TARGET_NOISE_PLATE, None, z0, FIELD_POSITION_CENTER,
+                    staircase_counter, PROCEDURE_ZSTEP, TARGET_NOISE_PLATE, None, z0, FIELD_POSITION_CENTER,
                     params.z_staircase_frames, staircase_label, fronto_parallel_pose(0.0, 0.0, z0 + displacement),
                     step_mm=displacement, notes={"displacement_mm": displacement, "staircase_step": k,
                                                  "expected_quantum_mm": quantum, **approach}))
@@ -1251,7 +1257,8 @@ SENTINEL_GAP_KEY = "sentinel_gap_mm"
 SENTINEL_REFERENCE_KEY = "mount_reference"
 """Keys of the ``notes`` of a sentinel pose: an explanatory note, the mounted target and its gap (also the pose row's
 ``target_id`` and ``gap_mm``), and whether this is the first sentinel after the target was mounted (the reference of
-that target's drift, see ``analysis.noise``)."""
+that target's drift, see ``analysis.noise``). The last one is also carried into the manifest, as its column
+``sentinel_mount_reference`` (:meth:`PlannedCapture.manifest_metadata`)."""
 
 
 def _mounted_target_id(plan: Sequence[PlannedCapture], position: int) -> str | None:
@@ -1628,6 +1635,28 @@ def _subseries_lines(plan: Sequence[PlannedCapture]) -> list[str]:
     return lines
 
 
+OPTIONAL_POSE_INDEX_BASES = {SUBSERIES_FILTERS_OFF: FILTERS_OFF_POSE_INDEX_BASE,
+                             SUBSERIES_STAIRCASE: STAIRCASE_POSE_INDEX_BASE,
+                             SUBSERIES_LATERAL_SWEEP: LATERAL_SWEEP_POSE_INDEX_BASE}
+"""The pose-index base of each optional sub-series (all of them outside the Section 9 budget; ranges in ``io.manifest``)."""
+
+
+def _pose_index_range_lines(plan: Sequence[PlannedCapture]) -> list[str]:
+    """The pose-index range in use by each optional set the plan contains (empty when there is none): the main poses
+    have three-digit indices (P000 to P999), each optional set its own four-digit range (``io.manifest``)."""
+    lines = []
+    for label, base in OPTIONAL_POSE_INDEX_BASES.items():
+        indices = [c.pose_index for c in plan if c.subseries == label]
+        if indices:
+            lines.append(f"  {label:<14} pose indices P{min(indices):04d} to P{max(indices):04d} (four digits; "
+                         f"the range starts at P{base:04d})")
+    if lines:
+        lines.insert(0, "Pose indices of the optional sets outside the budget (the main poses use three digits, P000 up to "
+                        f"P{FILTERS_OFF_POSE_INDEX_BASE - 1:03d}):")
+        lines.insert(0, "")
+    return lines
+
+
 def _adjustment_lines(plan: Sequence[PlannedCapture]) -> list[str]:
     """One line per distinct field placement that was pulled inward or could not fit (module docstring)."""
     seen: dict[tuple, dict] = {}
@@ -1703,6 +1732,7 @@ def plan_summary_text(plan: Sequence[PlannedCapture], params: CharacterizationPa
               "Poses per station depth and series (R, the registration poses, span Z_MIN to Z_MAX and are not listed by station):"]
     lines += _station_table(plan)
     lines += ["", "Poses and frames per sub-series:"] + _subseries_lines(plan)
+    lines += _pose_index_range_lines(plan)
     lines.append("")
     rate = None if geometry is None else geometry.frame_rate_hz
     if rate is None:

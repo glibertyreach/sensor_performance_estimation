@@ -43,7 +43,8 @@ Inputs
                           (640 x 480, f about 688 px, 10 frames/s); a loud note is
                           printed and written to the summary, because the Section 9
                           budget and the field fit depend on it.
-    --parameters PATH     parameters.json with overrides of the Section 2 table.
+    --parameters PATH     parameters.json with overrides of the Section 2 table (any parameter, for example
+                          tier_a_disparity_quantum_px, the measured quantum behind the B-Z step sizes).
 
 Outputs (in --out)
     poses.csv, plan_summary.txt, plan.png, targets.json, parameters.json
@@ -111,7 +112,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--staircase", action="store_true",
                         help="add the optional second pass of the B-Z series, the fine staircase (Section 6.2), at the "
                              "reduced stations; its poses are labeled staircase and are listed outside the main budget "
-                             "in plan_summary.txt (the ramp and the step ladder are always planned)")
+                             "in plan_summary.txt (the ramp and the step ladder are always planned). To use the disparity quantum "
+                             "measured by the ramp instead of the assumed one (0.125 px), pass it as "
+                             "tier_a_disparity_quantum_px in the --parameters JSON.")
     parser.add_argument("--reuse-c-first-frames", action="store_true",
                         help="let the first frame of each C pose of the same target, gap and station count as a D trial "
                              "(Section 8, Reuse: 30 of the 60 per configuration and station), so that the D main series "

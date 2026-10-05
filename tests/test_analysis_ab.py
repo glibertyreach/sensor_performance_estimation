@@ -321,6 +321,38 @@ def test_mount_epochs_count_changes_of_the_mounted_target():
     assert noise.a_mount_epochs(sequence, epochs) == {0}
 
 
+def test_mount_epochs_and_drift_reference_read_the_manifest_flag_when_present():
+    """The manifest column ``sentinel_mount_reference`` (the planner's flag of the first sentinel after each mount) refines the
+    mounts: a flagged sentinel in a mount that already has its reference starts a new mount (T2 mounted again with no other
+    target in between, which the target ids alone cannot show), and the drift offsets are relative to the flagged sentinel.
+    Without the column both fall back to the target changes and the earliest sentinel."""
+    from sensorperf.io.manifest import FrameRecord, SENTINEL_MOUNT_REFERENCE_KEY, format_flag
+    pose = RigidTransform.identity()
+
+    def record(procedure, index, reference=None):
+        metadata = {} if reference is None else {SENTINEL_MOUNT_REFERENCE_KEY: format_flag(reference)}
+        return FrameRecord(path=Path("x"), procedure=procedure, target_id="T2", gap_mm=None, station_z_mm=800.0, field=0,
+                           pose_index=index, frame_index=0, robot_pose=pose, target_pose_camera=pose, metadata=metadata)
+
+    flagged = [record("S", 0, True), record("A", 0), record("S", 1, False), record("S", 2, True), record("A", 1)]
+    epochs = noise.mount_epochs(flagged)
+    assert [epochs[r.pose_key()] for r in flagged] == [0, 0, 0, 1, 1]
+    unflagged = [dataclasses.replace(r, metadata={}) for r in flagged]
+    epochs = noise.mount_epochs(unflagged)
+    assert [epochs[r.pose_key()] for r in unflagged] == [0, 0, 0, 0, 0]
+
+    def frame(pose_id, hour, value, reference):
+        return {"pose_id": pose_id, "target_id": "T2", "gap_mm": None, "epoch": 0, "time_s": hour * 3600.0,
+                "temperature_c": None, "registered_mm": value, "raw_mm": value, "station_z_mm": 800.0,
+                "reference": reference}
+
+    values = [(0, 0.0, 1.0), (1, 1.0, 1.5), (2, 2.0, 2.0)]
+    for flagged_pose, expected in ((None, [0.0, 0.5, 1.0]), (1, [-0.5, 0.0, 0.5])):
+        frames = [frame(i, h, v, None if flagged_pose is None else i == flagged_pose) for i, h, v in values]
+        (drift,) = noise.target_drifts(frames, noise.NoiseOptions(), 0.0, set())
+        assert drift.pose_offset_mm == pytest.approx(expected)
+
+
 def test_a_summary_carries_the_achieved_field_fraction(result_a, analysis_dir, session):
     """Section 5, Step 1 and Section 10, Step 13: A_noise_summary.csv has a ``field_fraction_achieved`` column, filled from
     the manifest for the poses the planner placed at a field position (1 for the center and any off-axis position that fit)

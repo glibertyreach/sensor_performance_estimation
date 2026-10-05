@@ -28,7 +28,7 @@ from sensorperf.acquisition.check import (
     FLAG_FRONT_OFFSET, FLAG_FRONT_TILT, FLAG_LOW_VALID, check_session, pilot_post_check,
 )
 from sensorperf.acquisition.plan import (
-    DOCUMENT_ESTIMATE_FRAMES, DOCUMENT_ESTIMATE_HOURS, DOCUMENT_ESTIMATE_POSES, FILTERS_OFF_POSE_INDEX_BASE, PLAN_CSV_NAME, PLAN_FIGURE_NAME, PLAN_SUMMARY_NAME, PlanDiagnostics,
+    DOCUMENT_ESTIMATE_FRAMES, DOCUMENT_ESTIMATE_HOURS, DOCUMENT_ESTIMATE_POSES, PLAN_CSV_NAME, PLAN_FIGURE_NAME, PLAN_SUMMARY_NAME, PlanDiagnostics,
     PlannedCapture, SERIES_ORDER, TIER_A_DISPARITY_QUANTUM_PX, budget_total, capture_budget, capture_duration_s,
     camera_of, fit_violation_px, format_budget_table, insert_sentinels, jitter_offset_mm, place_in_field,
     plan_detection_series, plan_edge_series, plan_full_session, plan_noise_series, plan_registration,
@@ -44,7 +44,9 @@ from sensorperf.geometry.registration import Registration, plane_of_pose
 from sensorperf.geometry.targets import fronto_parallel_pose, make_standard_target_set
 from sensorperf.geometry.transforms import RigidTransform
 from sensorperf.io.manifest import (
-    FIELD_FRACTION_ACHIEVED_KEY, FrameRecord, SUBSERIES_FIELD, SUBSERIES_JITTER, VISIT_A, VISIT_B, write_manifest_csv,
+    FIELD_FRACTION_ACHIEVED_KEY, FILTERS_OFF_POSE_INDEX_BASE, FOUR_DIGIT_POSE_INDEX_MIN, FrameRecord,
+    LATERAL_SWEEP_POSE_INDEX_BASE, OPTIONAL_POSE_INDEX_RANGE_SIZE, SENTINEL_MOUNT_REFERENCE_KEY, STAIRCASE_POSE_INDEX_BASE,
+    SUBSERIES_FIELD, SUBSERIES_JITTER, VISIT_A, VISIT_B, format_file_name, parse_file_name, parse_flag, write_manifest_csv,
 )
 from sensorperf.features.planes import plane_depth_image
 from sensorperf.io.matcloud import write_matcloud
@@ -579,6 +581,45 @@ def test_zstep_ramp_poses_are_in_the_default_plan_and_the_staircase_is_optional(
     assert len(plan_zstep_series(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), filters_off=True)) == len(default)
 
 
+def test_optional_sets_have_their_own_four_digit_pose_index_ranges():
+    """Section 9 (file names): the pose index has three digits, and four for the optional repeats planned outside the budget.
+    The filters-off repeat, the staircase and the lateral sweep each have a range of their own (P1000 up, P2000 up and
+    P3000 up) that cannot overlap, the main plan stays below P1000, and the file names use the matching width."""
+    assert (FILTERS_OFF_POSE_INDEX_BASE, STAIRCASE_POSE_INDEX_BASE, LATERAL_SWEEP_POSE_INDEX_BASE) == (1000, 2000, 3000)
+    assert FOUR_DIGIT_POSE_INDEX_MIN == FILTERS_OFF_POSE_INDEX_BASE
+    plan = plan_full_session(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), series=["A", "B", "Z"],
+                             filters_off=True, staircase=True, lateral_sweep=True)
+    assert len({c.pose_key() for c in plan}) == len(plan)
+    ranges = {"filters_off": (FILTERS_OFF_POSE_INDEX_BASE, STAIRCASE_POSE_INDEX_BASE),
+              "staircase": (STAIRCASE_POSE_INDEX_BASE, LATERAL_SWEEP_POSE_INDEX_BASE),
+              "lateral_sweep": (LATERAL_SWEEP_POSE_INDEX_BASE, LATERAL_SWEEP_POSE_INDEX_BASE + OPTIONAL_POSE_INDEX_RANGE_SIZE)}
+    for label, (low, high) in ranges.items():
+        members = [c for c in plan if c.subseries == label]
+        assert members, label
+        assert all(low <= c.pose_index < high for c in members), label
+        assert min(c.pose_index for c in members) == low, label                  # each range starts at its base
+        for c in members:
+            name = format_file_name(c.procedure, c.target_id, c.gap_mm, c.station_z_mm, c.field, c.pose_index, 0)
+            assert f"_P{c.pose_index:04d}_" in name and len(name.split("_P")[1].split("_")[0]) == 4
+            assert parse_file_name(name)["pose_index"] == c.pose_index
+    # Everything else (main poses, sentinels) is below the first optional base and keeps three digits.
+    main = [c for c in plan if c.subseries not in ranges]
+    assert main and all(c.pose_index < FOUR_DIGIT_POSE_INDEX_MIN for c in main)
+    for c in main[:200]:
+        name = format_file_name(c.procedure, c.target_id, c.gap_mm, c.station_z_mm, c.field, c.pose_index, 0)
+        assert len(name.split("_P")[1].split("_")[0]) == 3
+    # The widths at the boundaries.
+    assert format_file_name("A", "T2", None, 800, 0, 999, 0).endswith("_P999_f00.mc")
+    assert format_file_name("A", "T2", None, 800, 0, 1000, 0).endswith("_P1000_f00.mc")
+    assert format_file_name("Z", "T2", None, 800, 0, 2000, 1).endswith("_P2000_f01.mc")
+    assert format_file_name("B", "T3a", 15, 800, 0, 3039, 1).endswith("_P3039_f01.mc")
+    # plan_summary.txt states the ranges that are in use.
+    from sensorperf.acquisition.plan import plan_summary_text
+    summary = plan_summary_text(plan, PARAMS, GEOMETRY)
+    for label, (low, _) in ranges.items():
+        assert any(line.strip().startswith(label) and f"P{low:04d}" in line for line in summary.splitlines()), label
+
+
 def test_staircase_flag_of_the_full_plan_and_the_command_line(tmp_path: Path):
     """Section 6.2: ``plan_full_session(staircase=True)`` and ``plan_stations --staircase`` add the staircase poses (outside
     the main budget, so the totals of the document's estimate do not change); without the flag there is none."""
@@ -591,6 +632,39 @@ def test_staircase_flag_of_the_full_plan_and_the_command_line(tmp_path: Path):
     stairs = read_plan_csv(tmp_path / "stairs" / PLAN_CSV_NAME)
     assert not any(c.subseries == "staircase" for c in plain) and any(c.subseries == "staircase" for c in stairs)
     assert sum(1 for c in plain if c.subseries == "ramp") == sum(1 for c in stairs if c.subseries == "ramp") == 9
+
+
+def test_measured_quantum_overrides_the_staircase_step(tmp_path: Path):
+    """Section 6.2, Step 3: the expected depth quantum behind the staircase step comes from the Tier-A disparity quantum, the
+    parameter ``tier_a_disparity_quantum_px``. Like every other parameter it can be overridden in the parameters.json given to
+    ``plan_stations --parameters``; doubling the quantum doubles the quantum in millimeters and so the step (where the robot
+    floor does not apply), and the plan_summary.txt and the pose notes carry the value in use."""
+    assert PARAMS.tier_a_disparity_quantum_px == TIER_A_DISPARITY_QUANTUM_PX
+    measured_px = 2.0 * TIER_A_DISPARITY_QUANTUM_PX
+    override = tmp_path / "parameters.json"
+    override.write_text(json.dumps({"tier_a_disparity_quantum_px": measured_px}))
+    assert CharacterizationParameters.from_json(override).tier_a_disparity_quantum_px == measured_px
+    z0 = 800.0                                                  # a station where the step is above the robot floor
+    assert plan_cli.main(["--out", str(tmp_path / "default"), "--series", "Z", "--staircase"]) == 0
+    assert plan_cli.main(["--out", str(tmp_path / "measured"), "--series", "Z", "--staircase",
+                          "--parameters", str(override)]) == 0
+
+    def steps_at_z0(folder: str) -> list[float]:
+        """The step_mm values of the staircase poses at Z0, in order."""
+        plan = read_plan_csv(tmp_path / folder / PLAN_CSV_NAME)
+        return [c.step_mm for c in plan if c.subseries == "staircase" and c.station_z_mm == z0]
+
+    default_steps, measured_steps = steps_at_z0("default"), steps_at_z0("measured")
+    default_step, measured_step = np.diff(default_steps)[0], np.diff(measured_steps)[0]
+    assert default_step == pytest.approx(GEOMETRY.depth_quantum_mm(TIER_A_DISPARITY_QUANTUM_PX, z0)
+                                         / PARAMS.z_staircase_subdivision)
+    assert measured_step == pytest.approx(2.0 * default_step)
+    assert "tier_a_disparity_quantum_px" in (tmp_path / "measured" / PARAMETERS_FILE_NAME).read_text()
+    # The same through the planner's own parameters (the parameter, not the ``expected_quantum_mm`` argument).
+    plan = plan_zstep_series(dataclasses.replace(PARAMS, tier_a_disparity_quantum_px=measured_px), GEOMETRY,
+                             np.random.default_rng(MASTER_SEED), staircase=True)
+    stairs = [c.step_mm for c in plan if c.subseries == "staircase" and c.station_z_mm == z0]
+    assert np.diff(stairs)[0] == pytest.approx(measured_step)
 
 
 def test_zstep_visits_are_approached_from_below():
@@ -812,6 +886,32 @@ def test_manifest_carries_the_achieved_field_fraction(tmp_path: Path):
         else:
             assert FIELD_FRACTION_ACHIEVED_KEY not in record.metadata
             assert np.isnan(_metadata_float(record, FIELD_FRACTION_ACHIEVED_KEY))
+
+
+def test_manifest_carries_the_sentinel_mount_reference_flag(tmp_path: Path):
+    """Section 5, Step 3: the flag of the first sentinel after each mount travels from the plan notes (poses.csv) through the
+    pose-log manifest builder into the manifest column ``sentinel_mount_reference`` (true or false) and back through
+    ``load_manifest``; rows that are not sentinels leave it empty (no metadata value)."""
+    from sensorperf.io.manifest import load_manifest
+    registration = random_registration()
+    plan = plan_noise_series(SMALL_PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED))
+    sentinels = [c for c in plan if c.procedure == PROCEDURE_SENTINEL]
+    assert sentinels and any(c.notes["mount_reference"] for c in sentinels)
+    root = tmp_path / "session"
+    write_empty_captures(root, plan)
+    write_plan(tmp_path / "plan", plan, None, SMALL_PARAMS, GEOMETRY)
+    per_frame_log(tmp_path / "pose_log.csv", plan, registration)
+    records = build_manifest(tmp_path / "pose_log.csv", root, tmp_path / "plan" / PLAN_CSV_NAME, registration, strict=True)
+    write_manifest_csv(root / "manifest.csv", records)
+    with (root / "manifest.csv").open(newline="") as handle:
+        assert SENTINEL_MOUNT_REFERENCE_KEY in csv.DictReader(handle).fieldnames
+    by_key = {c.pose_key(): c for c in plan}
+    for record in load_manifest(root / "manifest.csv"):
+        planned = by_key[record.pose_key()]
+        if planned.procedure == PROCEDURE_SENTINEL:
+            assert parse_flag(record.metadata[SENTINEL_MOUNT_REFERENCE_KEY]) is planned.notes["mount_reference"]
+        else:
+            assert SENTINEL_MOUNT_REFERENCE_KEY not in record.metadata
 
 
 def test_build_manifest_warns_when_the_series_z_log_is_rounded(tmp_path: Path):

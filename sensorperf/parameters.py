@@ -68,6 +68,11 @@ FIELD_OFFSET_FRACTION times the half field at the station depth."""
 FIELD_POSITION_CODES = (FIELD_POSITION_CENTER,) + tuple(FIELD_POSITION_SIGNS)
 """All field position codes, center first."""
 
+TIER_A_DISPARITY_QUANTUM_PX = 0.125
+"""Default of ``CharacterizationParameters.tier_a_disparity_quantum_px``: the disparity quantum q assumed for the expected
+depth quantum dZ_q = q Z^2 / k of the B-Z series until Analysis A (or the ramp) measures one (Section 6.2, Step 3: "using
+the Tier-A q"). The value (1/8 px) is the indicative one of the synthetic sensor model and is NOT a datasheet value."""
+
 # Numerical guards.
 MIN_POSITIVE_DEPTH_MM = 1.0e-6
 """A depth smaller than this is treated as zero in the relations below."""
@@ -254,6 +259,11 @@ class CharacterizationParameters:
     """Random-offset poses per array at each off-axis field position (Section 7, Step 3)."""
 
     # Z-step test
+    tier_a_disparity_quantum_px: float = TIER_A_DISPARITY_QUANTUM_PX
+    """Disparity quantum q (pixels) from which the planner derives the expected depth quantum dZ_q(Z0) = q Z0^2 / k of the
+    B-Z series (ladder rungs, ramp tilt and the optional staircase step). The default is an indicative value, not a
+    datasheet value; once the ramp (or Analysis A) has measured the quantum, override this parameter in the
+    ``plan_stations --parameters`` JSON and re-plan."""
     z_step_ladder_quanta: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
     """Commanded rungs of the B-Z step ladder, as multiples of the expected depth quantum at the station,
     dZ_q(Z0) = q Z0^2 / k with the Tier-A q until Analysis A has measured one (Section 6.2). Each rung is raised to at

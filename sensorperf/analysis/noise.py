@@ -73,7 +73,8 @@ from sensorperf.features.depth_features import temporal_statistics
 from sensorperf.features.planes import fit_plane_robust, plane_depth_image
 from sensorperf.io.capture_set import PoseStack, load_stack
 from sensorperf.io.manifest import (
-    FIELD_FRACTION_ACHIEVED_KEY, FrameRecord, SUBSERIES_MAIN, SUBSERIES_TILT, TILT_AXIS_H, TILT_AXIS_V, group_by_pose, select,
+    FIELD_FRACTION_ACHIEVED_KEY, FrameRecord, SENTINEL_MOUNT_REFERENCE_KEY, SUBSERIES_MAIN, SUBSERIES_TILT, TILT_AXIS_H,
+    TILT_AXIS_V, group_by_pose, parse_flag, select,
 )
 from sensorperf.io.session import Session
 from sensorperf.parameters import FIELD_POSITION_CENTER, PROCEDURE_NOISE, PROCEDURE_SENTINEL, TARGET_NOISE_PLATE
@@ -731,15 +732,25 @@ def mount_epochs(records: Sequence[FrameRecord]) -> dict[tuple, int]:
     capture that is not a sentinel to the next (registration poses count: they use T2); a sentinel belongs to the mount
     it is captured in, because a sentinel is captured on the target mounted at that point of the plan
     (``acquisition.plan.insert_sentinels``). The records must be in acquisition order, which both manifest writers
-    (``simulate.session`` and ``acquisition.pose_log``) guarantee. Mount 0 is the first."""
+    (``simulate.session`` and ``acquisition.pose_log``) guarantee. Mount 0 is the first.
+
+    When the manifest has the column ``sentinel_mount_reference`` (the planner's flag of the first sentinel after each
+    mount), it adds what the target ids alone cannot show: a sentinel flagged as a reference in a mount that already has
+    its reference sentinel starts a new mount (the same target mounted again). Without the column, or in a manifest
+    where every flagged sentinel is the first of its mount, the epochs are those of the target changes alone."""
     epochs: dict[tuple, int] = {}
     mounted: str | None = None
     epoch = 0
+    referenced_epoch: int | None = None          # the mount whose reference sentinel has been seen
     for record in records:
         if record.procedure != PROCEDURE_SENTINEL:
             if mounted is not None and record.target_id != mounted:
                 epoch += 1
             mounted = record.target_id
+        elif parse_flag(record.metadata.get(SENTINEL_MOUNT_REFERENCE_KEY)):
+            if referenced_epoch == epoch and record.pose_key() not in epochs:
+                epoch += 1                       # a second reference in one mount: the target was mounted again
+            referenced_epoch = epoch
         epochs.setdefault(record.pose_key(), epoch)
     return epochs
 
@@ -767,6 +778,7 @@ def _frame_means(session: Session, records: list[FrameRecord], options: NoiseOpt
             stamp = _parse_time(frame_record.timestamp)
             out.append({"pose_id": pose_id, "target_id": frame_record.target_id, "gap_mm": frame_record.gap_mm,
                         "epoch": epochs.get(key, 0),
+                        "reference": parse_flag(frame_record.metadata.get(SENTINEL_MOUNT_REFERENCE_KEY)),
                         "time_s": None if stamp is None else stamp.timestamp(),
                         "temperature_c": frame_record.sensor_temp_c,
                         "registered_mm": float(np.mean((frame - geometry.z_front_gt)[ok])),
@@ -774,14 +786,17 @@ def _frame_means(session: Session, records: list[FrameRecord], options: NoiseOpt
     return out
 
 
-def _pose_means(hours: np.ndarray, values: np.ndarray, pose_ids: np.ndarray) -> tuple[list[float], list[float]]:
-    """(time in hours, mean value) of every sentinel pose, in order of time, with the values relative to the first pose:
-    the drift of the target relative to its first sentinel after mounting."""
+def _pose_means(hours: np.ndarray, values: np.ndarray, pose_ids: np.ndarray,
+                reference_pose_id: int | None = None) -> tuple[list[float], list[float]]:
+    """(time in hours, mean value) of every sentinel pose, in order of time, with the values relative to the reference
+    pose: the one the manifest flags as the reference of the mount (``reference_pose_id``) or, when none is flagged, the
+    first pose in time, the first sentinel after mounting."""
     ids = sorted(set(pose_ids.tolist()))
     pose_hours = [float(np.mean(hours[pose_ids == p])) for p in ids]
     pose_values = [float(np.mean(values[pose_ids == p])) for p in ids]
     order = np.argsort(pose_hours)
-    return [pose_hours[i] for i in order], [pose_values[i] - pose_values[order[0]] for i in order]
+    reference_value = pose_values[order[0]] if reference_pose_id not in ids else pose_values[ids.index(reference_pose_id)]
+    return [pose_hours[i] for i in order], [pose_values[i] - reference_value for i in order]
 
 
 def _line_rate(hours: np.ndarray, values: np.ndarray, pose_ids: np.ndarray) -> float:
@@ -795,10 +810,11 @@ def _line_rate(hours: np.ndarray, values: np.ndarray, pose_ids: np.ndarray) -> f
 def target_drifts(frames: list[dict[str, Any]], options: NoiseOptions, time_origin_s: float,
                   correction_epochs: set[int]) -> list[TargetDrift]:
     """The drift of every mounted target (Step 11): the sentinel frames are grouped by (target, mount), and each group's
-    drift is the sentinel line relative to its first sentinel after the mount (the reference of that mount, so a
-    re-mount of the target, whose repeatability is ADAPTER_REMOUNT_REPEATABILITY_MM, does not enter). A group with one
-    sentinel pose has only its reference (offset 0, no rate). ``correction_epochs`` are the mounts of series A; the T2
-    groups among them are the ones the A drift correction uses."""
+    drift is the sentinel line relative to the reference of that mount, so that a re-mount of the target, whose
+    repeatability is ADAPTER_REMOUNT_REPEATABILITY_MM, does not enter. The reference is the sentinel that the manifest
+    column ``sentinel_mount_reference`` flags when the manifest has it, and the first sentinel after the mount otherwise.
+    A group with one sentinel pose has only its reference (offset 0, no rate). ``correction_epochs`` are the mounts of
+    series A; the T2 groups among them are the ones the A drift correction uses."""
     groups: dict[tuple, list[dict[str, Any]]] = {}
     for f in frames:
         groups.setdefault((f["epoch"], f["target_id"]), []).append(f)
@@ -807,7 +823,10 @@ def target_drifts(frames: list[dict[str, Any]], options: NoiseOptions, time_orig
         hours = np.array([(f["time_s"] - time_origin_s) / SECONDS_PER_HOUR for f in members])
         key = "registered_mm" if options.sentinel_reference == "registered" else "raw_mm"
         values = np.array([f[key] for f in members])
-        pose_hours, pose_offsets = _pose_means(hours, values, np.array([f["pose_id"] for f in members]))
+        # The reference pose is the sentinel the manifest flags as such; without the flag it is the first one in time.
+        flagged = [f["pose_id"] for f in members if f.get("reference")]
+        pose_hours, pose_offsets = _pose_means(hours, values, np.array([f["pose_id"] for f in members]),
+                                               min(flagged) if flagged else None)
         rate = _line_rate(hours, values, np.array([f["pose_id"] for f in members]))
         span_hours = float(np.ptp(pose_hours)) if len(pose_hours) > 1 else 0.0
         result.append(TargetDrift(

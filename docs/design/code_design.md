@@ -410,8 +410,9 @@ settle). Per series (poses / frames / hours): registration 30 / 300 / 0.03, A 64
 B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentinels 11 / 330 / 0.02.
 - *B-Z step ladder in quanta* (`z_step_rungs_mm`; parameters `z_step_ladder_quanta` = (0.25, 0.5, 1, 2, 4, 8) and
   `robot_min_resolvable_move_mm` = 0.1, which replace `z_step_ladder_mm`). At a reduced station Z0 the commanded rungs are the
-  multiples of the expected depth quantum dZ_q(Z0) = q Z0^2 / k (Tier-A q, `TIER_A_DISPARITY_QUANTUM_PX`, or the
-  `expected_quantum_mm` the caller passes once A has measured one), each raised to at least 0.1 mm (the smallest Z move the
+  multiples of the expected depth quantum dZ_q(Z0) = q Z0^2 / k (Tier-A q, the parameter `tier_a_disparity_quantum_px`, default
+  `TIER_A_DISPARITY_QUANTUM_PX` = 0.125, which `plan_stations --parameters` can override with the quantum the ramp measured, or the
+  `expected_quantum_mm` the caller passes), each raised to at least 0.1 mm (the smallest Z move the
   robot is trusted to execute) and merged if the floor makes two equal: 0.1 to 3.1 mm at 400 mm, 0.39 to 12.4 mm at 800 mm,
   1.55 to 50 mm at 1600 mm (the 50 mm rung moves the plate to 1650 mm, beyond Z_MAX; a planner note says so). 6 rungs x 10
   cycles x 2 visits x 3 stations = 360 poses, 3,600 frames. `plan_summary.txt` lists the millimeter rungs per station with the
@@ -430,7 +431,9 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
   `z_staircase_quanta` (3) quanta in steps of max(dZ_q / `z_staircase_subdivision`, `robot_min_resolvable_move_mm`) (10 steps per
   quantum at 800 and 1600 mm, 0.1 mm = 3.9 steps per quantum at 400 mm), `z_staircase_frames` frames per step, outside the main
   budget like the filters-off repeat (`staircase_budget`, `OPTIONAL_SUBSERIES`; 75 poses, 750 frames, 0.08 h with the default
-  seed); the filters-off repeat of B-Z then includes it. The three `z_staircase_*` parameters are the optional second pass.
+  seed); the filters-off repeat of B-Z then includes it. The three `z_staircase_*` parameters are the optional second pass. The
+  step follows the expected quantum, so to use the quantum measured by the ramp pass it as `tier_a_disparity_quantum_px` in the
+  `--parameters` JSON. Pose indices start at `STAIRCASE_POSE_INDEX_BASE` (2000; see *Pose-index ranges* below).
 - *Optional B-HV lateral sweep* (`plan_edge_series(lateral_sweep=True)`, `plan_full_session(lateral_sweep=True)`,
   `plan_stations --lateral-sweep`; parameters `lateral_sweep_step_px` = 0.1 and `lateral_sweep_span_px` = 2, positions from
   `lateral_sweep_positions_px()`). Off by default. For T3a (small gap) already mounted, placed right after its stations, at
@@ -440,7 +443,14 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
   approach alternates on purpose so that lateral hysteresis shows: odd-numbered poses are approached from the negative side,
   even-numbered from the positive side (`notes["approach_direction"]` = -H, +H, -V or +V; plan_summary.txt says so). Outside the
   main budget like the staircase (`lateral_sweep_budget`, `OPTIONAL_SUBSERIES`; 40 poses, 1,200 frames); the lateral-resolution analysis leaves
-  these poses out of its pooled edge spread function.
+  these poses out of its pooled edge spread function. Pose indices start at `LATERAL_SWEEP_POSE_INDEX_BASE` (3000).
+- *Pose-index ranges* (`io/manifest.py`: `OPTIONAL_POSE_INDEX_RANGE_SIZE` = 1000 and the three bases). The pose index of the file name
+  has three digits for the main plan (P000 to P999) and four for each optional set planned outside the budget, each in a
+  range of its own so that the ranges cannot overlap: filters-off repeat from `FILTERS_OFF_POSE_INDEX_BASE` = 1000 (P1000 to
+  P1999), staircase from `STAIRCASE_POSE_INDEX_BASE` = 2000, lateral sweep from `LATERAL_SWEEP_POSE_INDEX_BASE` = 3000.
+  `format_pose_index` writes four digits from `FOUR_DIGIT_POSE_INDEX_MIN` (the lowest base) on, and plan_summary.txt lists the
+  range in use by each optional set. (The staircase of the filters-off repeat, labeled `filters_off`, stays in the filters-off
+  range.)
 - *Optional reuse of the C first frames* (`plan_detection_series(reuse_c_first_frames=True)`, `plan_stations --reuse-c-first-frames`).
   Off by default. The first frame of each centered C "jitter" pose of the same target, gap and station counts as a D trial
   (`c_first_frame_counts`; 30 of the 60 per configuration and station), so the D main series plans that many fewer poses
@@ -464,7 +474,9 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
   after the registration (T2, with A first), after the last pose of each series (T2 after A and after B-Z, so the T2
   sentinels bracket A; T3b, T5 and T5 after B-HV, C and D), and whenever `drift_sentinel_interval_min` of estimated clock has
   passed. The first sentinel after each mount (a change of `target_id`) is that target's reference
-  (`mount_reference` True). The 11 sentinels of the default plan are T2 x 3, T3b x 1, T4 x 2, T5 x 5.
+  (`mount_reference` True); the manifest builders copy that flag into the manifest column `sentinel_mount_reference` (`true` or
+  `false`, empty for rows that are not sentinels; an extra string metadata column like `field_fraction_achieved`, so it follows
+  it in the alphabetical order of the extra columns). The 11 sentinels of the default plan are T2 x 3, T3b x 1, T4 x 2, T5 x 5.
 - *Achieved field fraction and fit margin.* A pose placed at a field position is pulled inward until the plate fits
   (`place_in_field`); the fraction of the requested offset it keeps is the "kept N%" of the summary and is also written to the
   pose row's notes JSON as `field_fraction_achieved` (1 when the request fits). The margin of the fit is
@@ -475,8 +487,9 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
 
 **Analyses.**
 - A: sentinels are grouped by mounted target and mount (`noise.mount_epochs`: a mount is a change of `target_id` between
-  non-sentinel captures) and each group's drift (`TargetDrift`: offsets, rate, drift over its span) is computed relative to its
-  first sentinel after the mount; all groups are in `DriftResult.targets` and the details JSON. The bias correction of A uses
+  non-sentinel captures; with the manifest column `sentinel_mount_reference`, a second flagged reference in one mount also starts
+  a new mount) and each group's drift (`TargetDrift`: offsets, rate, drift over its span) is computed relative to the flagged
+  reference sentinel of the mount, or to its first sentinel after the mount when the manifest has no such column; all groups are in `DriftResult.targets` and the details JSON. The bias correction of A uses
   the T2 sentinels of the mount of A (`used_for_a_correction`), its drift allowance uses the span of A and those sentinels, and
   a mount with a single sentinel has only its reference (no rate). `A_noise_summary.csv` has a `field_fraction_achieved`
   column per pose (station and field), read from the manifest metadata and NaN when the manifest does not provide it.
