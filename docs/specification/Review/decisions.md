@@ -344,3 +344,11 @@ Neil's comments: (pending)
   in parentheses at its first mention in a section; the Section 2 table, equations and code keep the names.
   Applied to every chunk from C07 on as it is executed; Sections 1, 3 and 4 (already closed) get a style pass with
   the gate at the end of the review, declared as intended.
+- C07-P1 addendum (Neil, 2026-10-05): if the measured quantum is 0.1 mm or larger, the staircase may be used as a
+  second-pass option. Reviewer note: with the staircase step at one tenth of the quantum, a 0.1 mm quantum would
+  ask for 0.01 mm moves, below the 0.1 mm the robot resolves; so the optional staircase keeps its step at the larger
+  of quantum / Z_STAIRCASE_SUBDIVISION and a new ROBOT_MIN_RESOLVABLE_MOVE_MM = 0.1 (Neil's figure), which makes it
+  useful where the quantum is at least about 1 mm (800 mm and beyond at the indicative geometry) and a coarse but
+  valid temporal cross-check elsewhere. Section 6.2 therefore keeps the staircase as an optional second pass, run
+  only after the ramp has measured the quantum, outside the main budget; the Z_STAIRCASE_* parameters stay, marked
+  optional.

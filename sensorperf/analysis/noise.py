@@ -777,9 +777,12 @@ def _pose_means(hours: np.ndarray, values: np.ndarray, pose_ids: np.ndarray) -> 
     return [pose_hours[i] for i in order], [pose_values[i] - pose_values[order[0]] for i in order]
 
 
-def _line_rate(hours: np.ndarray, values: np.ndarray) -> float:
-    """Slope of the least-squares line of values against hours (mm per hour); NaN without a spread in time."""
-    return float(np.polyfit(hours, values, 1)[0]) if np.ptp(hours) > 0 else float("nan")
+def _line_rate(hours: np.ndarray, values: np.ndarray, pose_ids: np.ndarray) -> float:
+    """Slope of the least-squares line of values against hours (mm per hour). NaN with a single sentinel pose (only the
+    frame noise would set the slope: the reference of a mount alone has no drift) or without a spread in time."""
+    if len(set(pose_ids.tolist())) < 2 or not np.ptp(hours) > 0:
+        return float("nan")
+    return float(np.polyfit(hours, values, 1)[0])
 
 
 def target_drifts(frames: list[dict[str, Any]], options: NoiseOptions, time_origin_s: float,
@@ -798,7 +801,7 @@ def target_drifts(frames: list[dict[str, Any]], options: NoiseOptions, time_orig
         key = "registered_mm" if options.sentinel_reference == "registered" else "raw_mm"
         values = np.array([f[key] for f in members])
         pose_hours, pose_offsets = _pose_means(hours, values, np.array([f["pose_id"] for f in members]))
-        rate = _line_rate(hours, values)
+        rate = _line_rate(hours, values, np.array([f["pose_id"] for f in members]))
         span_hours = float(np.ptp(pose_hours)) if len(pose_hours) > 1 else 0.0
         result.append(TargetDrift(
             target_id=target_id, mount=epoch, gap_mm=members[0]["gap_mm"], sentinel_poses=len(pose_hours),
@@ -834,8 +837,9 @@ def analyze_sentinels(session: Session, rows: list[StationNoise], model: NoiseMo
     registered = np.array([f["registered_mm"] for f in frames])
     raw = np.array([f["raw_mm"] for f in frames])
     chosen = registered if options.sentinel_reference == "registered" else raw
-    rate_registered = _line_rate(hours, registered)
-    rate_raw = _line_rate(hours, raw)
+    frame_poses = np.array([f["pose_id"] for f in frames])
+    rate_registered = _line_rate(hours, registered, frame_poses)
+    rate_raw = _line_rate(hours, raw, frame_poses)
     rate = rate_registered if options.sentinel_reference == "registered" else rate_raw
     temperatures = [f["temperature_c"] for f in frames]
     slope_temperature = None
@@ -849,7 +853,7 @@ def analyze_sentinels(session: Session, rows: list[StationNoise], model: NoiseMo
     threshold = params.warmup_drift_fraction_of_sigma * sigma_here
     apply = bool(math.isfinite(drift_over_session) and drift_over_session > threshold)
     # Per-sentinel-pose offsets relative to the first sentinel after the mount, for the time interpolation.
-    pose_hours, pose_offsets = _pose_means(hours, chosen, np.array([f["pose_id"] for f in frames]))
+    pose_hours, pose_offsets = _pose_means(hours, chosen, frame_poses)
     if apply:
         for row in rows:
             if math.isfinite(row.mean_time_hours):
