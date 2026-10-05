@@ -170,7 +170,7 @@ def test_cutout_array_depths_and_no_reads(params, model):
     shadows fill a small hole completely, a large one only along one edge)."""
     rng = np.random.default_rng(TEST_SEED)
     target = make_feature_array(TARGET_CUTOUTS, TARGET_KIND_CUTOUT_ARRAY, list(CUTOUT_DIAMETERS_MM),
-                                CUTOUT_ISOLATION_MM, GAP_LARGE_MM, blank_diameter_mm=0.0, blank_sites=0)
+                                CUTOUT_ISOLATION_MM, GAP_LARGE_MM)
     station = params.z_min_mm                      # the near station has the widest occlusion shadows
     pose = fronto_parallel_pose(0.0, 0.0, station)
     stereo = StereoGeometry.from_sensor_geometry(model.geometry)

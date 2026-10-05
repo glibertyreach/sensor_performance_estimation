@@ -360,12 +360,19 @@ class CharacterizationParameters:
     feature_count: int = 3
     """Features per disk plate and per cutout plate."""
     blank_sites_per_plate: int = 3
-    """Blank sites per plate, each sized to the largest search window (the guess rate gamma of the detection fit)."""
+    """Blank sites per plate (the guess rate gamma of the detection fit). Blank site i serves feature i and is sized to
+    that feature's search window at Z_MAX, D_i + 2 DETECTION_WINDOW_MARGIN_PX p(Z_MAX); at most FEATURE_COUNT."""
     post_sites_per_plate: int = 1
     """Post-only sites per disk plate (the post check: a bare post must not be detected)."""
     feature_isolation_px: float = 30.0
     """Minimum edge-to-edge spacing between features, pixels at Z_MAX (evaluated at the far station so that
-    neighbors stay separated there, where a pixel covers the most millimeters)."""
+    neighbors stay separated there, where a pixel covers the most millimeters). Applies edge to edge between every
+    pair of sites of a plate, in both directions (along a row and between rows)."""
+    feature_plate_margin_px: float = 8.0
+    """Front-plate margin beyond the outermost sites of a disk or cutout plate, pixels at Z_MAX (equal to the boundary
+    band BOUNDARY_BAND_HALF_WIDTH_PX, so that the analysis band of an outer cutout edge lies on front material at the
+    far station). The plate (sites plus margin) must fit the field of view at Z_MIN with the phase-jitter span and
+    the boundary band on every side; make_standard_target_set raises an error when it does not."""
     post_diameter_fraction_of_d0: float = 0.5
     """Disk support posts must be thinner than this fraction of the expected D_0 (the post check of the D pilot
     confirms that a bare post is not detected)."""

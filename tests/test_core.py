@@ -6,6 +6,7 @@ registration solves (Section 4).
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -89,19 +90,25 @@ def test_feature_ladder_diameters_cover_three_to_ninety_six_pixels():
 
 def test_standard_target_set_has_one_disk_plate_and_one_cutout_plate():
     """Redesign note, Section 2: T1 is gone; T4 (disks) and T5 (cutouts) each carry three features and three blank
-    sites sized to the largest search window, the disk plate also one post-only site; the isolation is 30 px at Z_MAX."""
+    sites, blank site i sized to the search window of feature i at Z_MAX (about 21, 34 and 70 mm), the disk plate also
+    one post-only site; the isolation is 30 px at Z_MAX between every pair of sites, and the plate fits the field of
+    view at Z_MIN with room for the phase-jitter span and the boundary band."""
     targets = make_standard_target_set(PARAMS, GEOMETRY)
     assert set(targets.targets) == {"T2", "T3a", "T3b", "T4", "T5"}
     p_far = GEOMETRY.pixel_footprint_mm(PARAMS.z_max_mm)
     diameters = PARAMS.feature_diameters_mm(GEOMETRY)
-    window_mm = max(diameters) + 2.0 * PARAMS.detection_window_margin_px * p_far
+    windows_mm = [d + 2.0 * PARAMS.detection_window_margin_px * p_far for d in diameters]
+    assert windows_mm == pytest.approx([20.9, 33.7, 69.8], abs=0.1)
     for target_id, kind, posts in (("T4", "disk", PARAMS.post_sites_per_plate), ("T5", "cutout", 0)):
         target = targets.get(target_id)
         features = [f for f in target.features if f.kind == kind]
         blanks = [f for f in target.features if f.kind == "blank"]
         assert sorted(f.diameter_mm for f in features) == pytest.approx(sorted(diameters))
         assert len(blanks) == PARAMS.blank_sites_per_plate == 3
-        assert all(b.diameter_mm == pytest.approx(window_mm) for b in blanks)
+        # Blank site i serves feature i: its diameter is that feature's search window at Z_MAX.
+        blanks = sorted(blanks, key=lambda b: b.level_index)
+        assert [b.level_index for b in blanks] == [0, 1, 2]
+        assert [b.diameter_mm for b in blanks] == pytest.approx(windows_mm)
         assert sum(f.kind == "post" for f in target.features) == posts
         # Edge-to-edge spacing of every pair of sites is at least the isolation of 30 px at Z_MAX.
         isolation = PARAMS.feature_isolation_px * p_far
@@ -110,6 +117,22 @@ def test_standard_target_set_has_one_disk_plate_and_one_cutout_plate():
             for b in sites[i + 1:]:
                 centers = np.hypot(a.x_mm - b.x_mm, a.y_mm - b.y_mm)
                 assert centers - (a.diameter_mm + b.diameter_mm) / 2.0 >= isolation - 1.0e-6
+        # The plate fits the field at Z_MIN with the jitter span and a boundary band on every side, and holds its sites.
+        p_near = GEOMETRY.pixel_footprint_mm(PARAMS.z_min_mm)
+        reserve = (PARAMS.phase_jitter_span_px + 2.0 * PARAMS.boundary_band_half_width_px) * p_near
+        field_w, field_h = (2.0 * h for h in GEOMETRY.half_field_mm(PARAMS.z_min_mm))
+        assert 2.0 * target.half_width_mm <= field_w - reserve and 2.0 * target.half_height_mm <= field_h - reserve
+        for f in target.features:
+            assert abs(f.x_mm) + f.diameter_mm / 2.0 <= target.half_width_mm
+            assert abs(f.y_mm) + f.diameter_mm / 2.0 <= target.half_height_mm
+
+
+def test_standard_target_set_raises_when_a_plate_cannot_fit_the_field_at_z_min():
+    """A ladder whose largest blank site alone is wider than the usable field width cannot be laid out: the target set
+    raises an error that names the plate and the sizes (it is not just a planner warning)."""
+    too_wide = replace(PARAMS, feature_min_px_at_z_max=6.0)          # features of 14, 39 and 112 mm
+    with pytest.raises(ValueError, match=r"plate T4 is \d+ x \d+ mm but only \d+ x \d+ mm fit the field of view at Z_MIN"):
+        make_standard_target_set(too_wide, GEOMETRY)
 
 
 def test_file_name_rule_round_trip():

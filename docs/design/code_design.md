@@ -371,10 +371,24 @@ The pixel-footprint ladder rules and the pilot-based detection-level rules (`dia
 
 **Targets** (`geometry/targets.py`). `make_standard_target_set` builds T2 (noise plate, also the registration target), T3a,
 T3b, one disk plate T4 and one cutout plate T5 (T1 and the S/L arrays are gone). Each array carries `feature_count`
-features, `blank_sites_per_plate` (3) blank sites sized to the largest search window (`blank_site_diameter_mm`: the largest
-feature plus 2 `detection_window_margin_px` pixels at Z_MAX; blank site i serves feature i, its window is cut to that
-feature's size in the analysis) and, for disks, `post_sites_per_plate` (1) post-only site. Rows of an array are limited to
-the width of the field of view at Z_MIN.
+features, `blank_sites_per_plate` (3) blank sites and, for disks, `post_sites_per_plate` (1) post-only site.
+- *Blank sizing* (`blank_site_diameters_mm`). Blank site i serves feature i and is sized to THAT feature's search window at
+  the far station: D_i + 2 `detection_window_margin_px` p(Z_MAX), about 21, 34 and 70 mm for the 7.0, 19.7 and 55.8 mm
+  features (not the largest window for every blank). The analysis cuts the blank's window to its feature's size
+  (`analysis/detection.py`, `targets.window_diameter_mm`, also used by the post check of `acquisition/check.py`), so the
+  window at any station lies inside the blank site and the same D_px gives the same window on feature and blank.
+- *Layout* (`make_feature_array`, `_layout_rows`). Neighboring sites are `feature_isolation_px` at Z_MAX (about 70 mm)
+  apart edge to edge in both directions: sites of a row are that far apart, and rows are that far apart (a row is as high
+  as its largest site, so any two sites of different rows are separated vertically by at least the isolation). The sites
+  (blanks, features, posts) are packed by first-fit-decreasing into as few rows as fit the usable width at Z_MIN, the field
+  width minus the phase-jitter span `phase_jitter_span_px` and twice `boundary_band_half_width_px`, in mm at Z_MIN, less the
+  plate margin on each side. The plate is the bounding box of the sites plus `feature_plate_margin_px` (8 px at Z_MAX, 19 mm)
+  on every side. At the indicative geometry this gives two rows (large blank, large feature, medium blank / small blank,
+  medium feature, small feature, post) and a plate of 336 x 198 mm, inside the 358 x 265 mm usable at Z_MIN (field 372 x
+  279 mm). The earlier layout sized every blank to the largest window (69.8 mm) and gave 488 x 335 mm plates that did not fit.
+- *Fit check* (`check_array_fits_field`). `make_standard_target_set` raises `ValueError` (not a planner warning) naming the
+  plate, its size and the usable size when T4 or T5 does not fit the field at Z_MIN with room for the jitter span and the
+  boundary band; the remedies named are fewer or smaller features, less isolation or margin, or a larger Z_MIN.
 
 **Registration** (`cli/register.py`, `acquisition/plan.py`). With no pattern plate the default method is the plane-only
 hand-eye solve (`solve_from_planes`): camera_to_base is observable; the in-plane position of T2 on the flange and its

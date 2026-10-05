@@ -217,9 +217,9 @@ class DetectionOptions:
 
 @dataclass
 class LevelSpec:
-    """One feature of a plate (a detection level at each station): the feature, the blank site that serves its window
-    size, and their diameters (the blank site is as large as the largest search window; its window is cut to the
-    feature's size)."""
+    """One feature of a plate (a detection level at each station): the feature, the blank site that serves it (same
+    level index), and their diameters (the blank site is as large as the feature's search window at Z_MAX, so
+    its window at any station, cut to the feature's size, lies inside it)."""
 
     target_id: str
     level_index: int | None
@@ -382,7 +382,8 @@ def frame_statistics(session: Session, record: FrameRecord, levels: Sequence[Lev
             if site_id is None:
                 continue
             # The window of a feature has radius D_px/2 + margin of its OWN diameter. A blank site is as large as the
-            # largest search window, so it is cut to the size of the feature it serves: same D_px, same window.
+            # window of the feature it serves at Z_MAX, so it is cut to that feature's size (the same rule as
+            # targets.window_diameter_mm): same D_px, same window, and it never extends beyond the blank site.
             feature = replace(target.feature(site_id), diameter_mm=level.diameter_mm)
             if not _window_inside_image(geometry, feature, margin):
                 continue

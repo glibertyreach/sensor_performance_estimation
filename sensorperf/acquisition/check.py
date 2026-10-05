@@ -59,7 +59,7 @@ from sensorperf.features.planes import PlaneFit, fit_plane_robust, plane_depth_i
 from sensorperf.geometry.camera import PinholeCamera
 from sensorperf.geometry.targets import (
     FEATURE_BLANK, FEATURE_POST, SURFACE_BACK, SURFACE_FRONT, SURFACE_NONE,
-    TARGET_KIND_DISK_ARRAY, TARGET_KIND_PLATE, TwoPlaneTarget,
+    TARGET_KIND_DISK_ARRAY, TARGET_KIND_PLATE, TwoPlaneTarget, window_diameter_mm,
 )
 from sensorperf.io.capture_set import load_frame_depth
 from sensorperf.io.manifest import FrameRecord, SUBSERIES_JITTER, format_file_name, group_by_pose
@@ -487,7 +487,8 @@ def _count_posts(session: Session, params: CharacterizationParameters, geometry:
             u0, v0, in_front = camera.project(center)
             if not bool(in_front):
                 continue
-            radius_px = geometry.diameter_in_pixels(feature.diameter_mm, float(center[2])) / 2.0 \
+            # A blank site is cut to the size of the feature it serves, as in the detection analysis.
+            radius_px = geometry.diameter_in_pixels(window_diameter_mm(target, feature), float(center[2])) / 2.0 \
                 + params.detection_window_margin_px
             crop, touches = _window_deviation(depth, deviation, float(u0), float(v0), radius_px)
             if touches:
