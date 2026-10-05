@@ -186,3 +186,13 @@ Reviewer findings (proposals; nothing executed until the person closes the chunk
 - C04-N1 (note): the bevel formula exports as raw LaTeX in the review PDF; verify the live rendering.
 
 Person's comments: (pending)
+Person's comments (2026-10-05):
+- C04-P1: the LaTeX math in Section 3.3 is not formatted. Finding: the bevel formula is stored in the live document as
+  a code block (as are the relations in Section 2, the noise model in Section 10, the psychometric model in Section
+  13, and the two boundary-bias formulas in Section 14), so it is unformatted in the live document too, not only in
+  the review PDF. To execute: convert each to the document's math block type if the editor has one; otherwise
+  typeset each as a figure (SVG) or as Unicode text.
+- C04-P2: the figures in the PDF should be numbered. Finding: the live document's figure captions carry no numbers.
+  To execute: number the three figures in document order in their captions (Figure 1 flow diagram §1, Figure 2
+  chamfer cross-section §3.3, Figure 3 setup side view §4), add the in-text references, and let the renderer and the
+  gate's cross-reference check pick them up.
