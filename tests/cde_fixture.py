@@ -58,10 +58,9 @@ DETECTION_POSES_FAR = 300
 EDGE_STATIONS_MM = (566.0, 800.0)
 """The B stations: the square must stay wide enough on the test sensor for the one-edge-near rule (49 and 35 px)."""
 ROBOT_REPEATABILITY_MM = 0.05
-SESSION_SEED = 2
-"""Seed of the synthetic session. The zero-detection test (D_0,emp finite) needs 0 detections of the smallest feature
-in the 300 far-station trials, while the false-alarm rate per window is about 1 percent by construction of tau, so it
-passes by chance for about one seed in four; this seed gives the zero count with the standard layout of the target set."""
+SESSION_SEED = 7
+"""Seed of the synthetic session. No test may depend on a lucky draw: the zero-detection test checks the rule
+that ties the D_0 bracket to the per-level counts, not the counts themselves."""
 
 
 def test_geometry() -> SensorGeometry:

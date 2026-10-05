@@ -404,6 +404,29 @@ def test_d_step4_the_pooled_curve_uses_the_blank_sites_of_the_stations(detection
     assert _pooled_row(detection_result, FEATURE_DISK, RULE_PRIMARY)["d50_px"] < pooled["d50_px"]
 
 
+def _pooled_detail(result, kind, rule):
+    """The pooled detail that belongs to the pooled row of a kind and rule (the details are appended in the same
+    order as the rows; a detail that carries its own keys is matched by them)."""
+    for detail in result.pooled_details:
+        if detail.get("kind") == kind and detail.get("rule") == rule and detail.get("field", 0) == 0:
+            return detail
+    index = next(i for i, r in enumerate(result.pooled_rows)
+                 if r["kind"] == kind and r["rule"] == rule and r["field"] == 0)
+    return result.pooled_details[index]
+
+
+def test_empirical_d0_rule_on_synthetic_counts():
+    """Step 6 on fixed counts: with gamma = 0.01 and 300 trials, 0 detections pass the 1 percent corrected bound and
+    3 detections (the expected false-alarm count) do not; the bracket is [largest passing level, next level]."""
+    levels = np.array([1.0, 2.0, 4.0]); trials = np.array([300, 300, 300])
+    result = detection.empirical_d0(levels, np.array([0, 0, 3]), trials, gamma=0.01, confidence=0.95, bound=0.01)
+    assert result["d0_emp_mm"] == pytest.approx(2.0) and result["d0_emp_next_mm"] == pytest.approx(4.0)
+    result = detection.empirical_d0(levels, np.array([3, 0, 0]), trials, gamma=0.01, confidence=0.95, bound=0.01)
+    assert math.isnan(result["d0_emp_mm"]) and result["d0_emp_next_mm"] == pytest.approx(1.0)
+    result = detection.empirical_d0(levels, np.array([0, 0, 0]), trials, gamma=0.01, confidence=0.95, bound=0.01)
+    assert result["d0_emp_mm"] == pytest.approx(4.0) and math.isnan(result["d0_emp_next_mm"])
+
+
 def test_d_step5_to_7_minimums_are_ordered(detection_result):
     """Steps 5 to 7: D_10 <= D_50; D_0,emp <= D_10 (the 300 trials at the farthest station demonstrate zero detection
     of the smallest feature there), reported as a D_px bracket [D_0,emp, next level] and converted to mm per station; the
@@ -412,8 +435,22 @@ def test_d_step5_to_7_minimums_are_ordered(detection_result):
     for rule in (RULE_PRIMARY, RULE_INCLUSIVE):
         pooled = _pooled_row(detection_result, FEATURE_CUTOUT, rule)
         assert pooled["d10_px"] <= pooled["d50_px"]
-        assert math.isfinite(pooled["d0_emp_px"]) and pooled["d0_emp_px"] <= pooled["d10_px"]
-        assert pooled["d0_emp_px"] < pooled["d0_emp_next_px"]                       # the bracket
+        # The empirical 0 percent point follows the rule of Step 6, not a lucky draw: D_0,emp is the largest level
+        # such that it and every smaller level have a corrected upper bound within DETECTION_ZERO_PROBABILITY_BOUND.
+        levels = _pooled_detail(detection_result, FEATURE_CUTOUT, rule)["d0_empirical"]["levels"]
+        assert levels, "the far-station trials must give at least one level with trials"
+        passing = []
+        for level in sorted(levels, key=lambda r: r["d_mm"]):
+            if not level["within_bound"]:
+                break
+            passing.append(level["d_mm"])
+        if passing:
+            assert pooled["d0_emp_px"] == pytest.approx(max(passing))
+            assert pooled["d0_emp_px"] <= pooled["d10_px"]
+            assert pooled["d0_emp_px"] < pooled["d0_emp_next_px"]                   # the bracket
+        else:
+            assert math.isnan(pooled["d0_emp_px"])
+            assert pooled["d0_emp_next_px"] == pytest.approx(min(r["d_mm"] for r in levels))
         assert pooled["d10_model_min_px"] <= pooled["d10_px"] + 1e-9 <= pooled["d10_model_max_px"] + 2e-9
         ratio = pooled["d50_isotonic_px"] / pooled["d50_px"]
         assert 1.0 / ISOTONIC_FACTOR < ratio < ISOTONIC_FACTOR
@@ -423,9 +460,12 @@ def test_d_step5_to_7_minimums_are_ordered(detection_result):
         for station in cde_fixture.STATIONS_MM:
             row = _d_row(detection_result, FEATURE_CUTOUT, station, rule)
             assert row["d10_mm"] <= row["d50_mm"]
-            assert row["d0_emp_px"] == pytest.approx(pooled["d0_emp_px"])
-            assert row["d0_emp_mm"] == pytest.approx(pooled["d0_emp_px"] * station / cde_fixture_fx())
-            assert row["d0_emp_mm"] < row["d0_emp_next_mm"]
+            if passing:
+                assert row["d0_emp_px"] == pytest.approx(pooled["d0_emp_px"])
+                assert row["d0_emp_mm"] == pytest.approx(pooled["d0_emp_px"] * station / cde_fixture_fx())
+                assert row["d0_emp_mm"] < row["d0_emp_next_mm"]
+            else:
+                assert math.isnan(row["d0_emp_px"])
 
 
 def cde_fixture_fx() -> float:

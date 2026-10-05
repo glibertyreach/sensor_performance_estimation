@@ -228,3 +228,13 @@ Reviewer findings (proposals; nothing executed until the person closes the chunk
   render_subsection.py during this chunk.
 
 Person's comments: (pending)
+
+Forward note for C14 (Analysis D), found while making the zero-detection test honest (2026-10-05): with the
+false-alarm target γ = 0.01 per window and 300 extended trials, a feature that is truly never detected still
+collects about 3 false detections; the one-sided 95% Clopper–Pearson upper bound on 3/300 is about 2.6%, and the
+corrected bound (ψ_U − γ)/(1 − γ) ≈ 1.6% exceeds DETECTION_ZERO_PROBABILITY_BOUND = 0.01. The bound is met only
+when at most 1 of the 300 trials fires, which happens about one time in five. So the 0% criterion of Section 13,
+Step 6 cannot be met reliably as specified. Options to put to the person in C14: raise the bound to about 0.02 or
+0.03, lower the false-alarm target for the extended trials, raise the trial count, or define the 0% point as
+"not distinguishable from the blank sites" with a two-sample bound. Also a code follow-up (C04-R3): derive the
+nominal post diameter from POST_DIAMETER_FRACTION_OF_D0 × the expected D_0 instead of a fixed 0.5 mm.

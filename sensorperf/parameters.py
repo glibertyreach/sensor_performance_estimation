@@ -374,7 +374,7 @@ class CharacterizationParameters:
     far station). The plate (sites plus margin) must fit the field of view at Z_MIN with the phase-jitter span and
     the boundary band on every side; make_standard_target_set raises an error when it does not."""
     post_diameter_fraction_of_d0: float = 0.5
-    """Disk support posts must be thinner than this fraction of the expected D_0 (the post check of the D pilot
+    """Disk support posts must be thinner than this fraction of the expected D_0 (the post check of Section 8, Step 1
     confirms that a bare post is not detected)."""
     frame_check_px: float = 0.5
     """IR-edge to depth-discontinuity agreement required in Step 4.5."""

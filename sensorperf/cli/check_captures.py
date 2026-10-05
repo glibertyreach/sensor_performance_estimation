@@ -18,7 +18,7 @@ What it checks, per pose (all frames of one commanded pose)
                     normals.
     back plane      the same for the back plate, where the target has one.
 
-``--pilot Z`` instead prints the D pilot of Section 8, Step 1, which keeps only the post
+``--pilot Z`` instead runs the post check of Section 8, Step 1 (formerly the D pilot), which keeps only the post
 check (the rule of Section 13, Step 2 on the first frame of each C pose at station Z, normally
 the reference station): per disk plate and gap the threshold and the fraction of post-only
 sites that are detected (a bare post must not be). The detection levels are no longer chosen
@@ -53,7 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
     d = CheckParameters()
     parser = argparse.ArgumentParser(
         description="Quick-look check of a capture session: valid fraction, border contact and the front and back "
-                    "plane fits against the registered target, or (with --pilot) the D pilot post check.")
+                    "plane fits against the registered target, or (with --pilot) the post check of Section 8, Step 1.")
     parser.add_argument("--session", required=True, type=Path, metavar="DIR",
                         help="session folder with sensor_config.json, targets.json and manifest.csv")
     parser.add_argument("--out", type=Path, metavar="PATH", help="write a JSON report here")
@@ -72,7 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-plane-pixels", type=int, default=d.min_plane_pixels,
                         help="fewest pixels a plane fit is attempted with")
     parser.add_argument("--pilot", type=float, metavar="Z_MM", default=None,
-                        help="print the D pilot post check for the C poses at this station (mm, normally Z_REFERENCE_MM) instead of the check")
+                        help="print the post check (Section 8, Step 1) for the C poses at this station (mm, normally Z_REFERENCE_MM) instead of the check")
     parser.add_argument("--pilot-subseries", nargs="+", default=[SUBSERIES_JITTER], metavar="LABEL",
                         help="sub-series of the C poses used by --pilot (default: jitter)")
     return parser
