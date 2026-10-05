@@ -58,7 +58,7 @@ Figure 3. Front views of T2, T3a, T3b, T4 and T5 to one scale, drawn from the co
 
 **Blank and control sites.** Each plate has {{DERIVED:blank_site_count}} blank sites, one for each feature: blank site i is a patch of plain surface sized to the search window of feature i at Z_MAX (the feature plus a margin of {{VALUE:detection_window_margin_px}} px on each side). These give the false-alarm rate in series D at every station. The disk plate also has {{DERIVED:post_site_count}} post-only site (a post with no disk). It shows whether the support post itself is detected.
 
-**Datum.** Every target mounts on the same dowel datum, and the as-built record (below) includes each feature's offset from that datum. Registration from the plane of T2 does not observe where a target sits sideways on the flange, so the once-per-mount check (Step 4.8) locates each mounted target against the left IR image and compares it with those offsets.
+**Datum.** Every target mounts on the same dowel datum, and the as-built record (below) includes each feature's offset from that datum. Registration from the plane of T2 does not observe where a target sits sideways on the flange, so the once-per-mount check (§4, step 7) locates each mounted target against the left IR image and compares it with those offsets.
 
 **Surface finish.** All front and back surfaces use one finish, for example bead-blasted aluminum or a matte coating, with mid-range IR reflectance. Record the finish and, if possible, its reflectance at the projector wavelength. A reflectance difference between plates would bias the edge and area results.
 
@@ -81,7 +81,7 @@ A rough worked value from the specification, assuming about a 70 degree horizont
 
 ### The as-built record
 
-Engineer, with the metrologist: measure each feature's front-face diameter, land width, bevel angle, and plate position with an optical comparator or a calibrated microscope, and its offset from the common dowel datum. Record each value with its measurement uncertainty in `targets_asbuilt.csv`. This is the file the analysis reads. All analyses use these as-built values, never the nominal ones. Table 3 lists the columns. The engineer can write a template with the nominal values for the metrologist to overwrite; an empty numeric cell keeps the nominal value. The datum offsets are the reference of the once-per-mount check (Step 4.8); the position columns of Table 3 are measured from the plate center.
+Engineer, with the metrologist: measure each feature's front-face diameter, land width, bevel angle, and plate position with an optical comparator or a calibrated microscope, and its offset from the common dowel datum. Record each value with its measurement uncertainty in `targets_asbuilt.csv`. This is the file the analysis reads. All analyses use these as-built values, never the nominal ones. Table 3 lists the columns. The engineer can write a template with the nominal values for the metrologist to overwrite; an empty numeric cell keeps the nominal value. The datum offsets are the reference of the once-per-mount check (§4, step 7); the position columns of Table 3 are measured from the plate center.
 
 | Column | Meaning |
 |---|---|
@@ -100,24 +100,19 @@ Table 3. Columns of `targets_asbuilt.csv`.
 
 ## 3. Before anything else
 
-Do these steps in order, once, before the first capture of any series. They fix the conditions of the whole session. Sections 3 and 4 together carry Section 4 of the specification (setup, warm-up, and registration), so their steps are numbered Step 4.1 to Step 4.8 as there, and "Step 4.N" anywhere in this document means those steps.
+Do these steps in order, once, before the first capture of any series. They fix the conditions of the whole session.
 
-**Step 4.1. Environment.** The laboratory is enclosed and its lighting is constant; keep it unchanged for the whole session. Start the temperature loggers (sensor housing and air, one sample every {{VALUE:temperature_log_interval_min}} minute) and log the temperatures in `environment_log.csv`.
+1. Environment. The laboratory is enclosed and its lighting is constant; keep it unchanged for the whole session. Start the temperature loggers (sensor housing and air, one sample every {{VALUE:temperature_log_interval_min}} minute) and log the temperatures in `environment_log.csv`.
+2. Sensor configuration (Engineer). Disable auto-exposure and fix exposure, gain, emitter power, and trigger mode. Record every depth-processing setting (temporal filter, spatial filter, hole filling, confidence threshold) in `sensor_config.json`, with its SDK name and value. Characterize the configuration that production will use. If the filters can be switched off, the engineer decides whether to run series A a second time with the filters off, so the sensor's own processing can be separated from its physics (§6, step 8). Give the configuration a short identifier (`config_id`); it goes into every manifest row.
+3. Warm-up. Power the sensor for at least {{VALUE:warmup_min_minutes}} minutes. Then put T2 fronto-parallel at Z = {{VALUE:z_reference_mm}} mm and capture {{VALUE:warmup_check_frames}} frames every {{VALUE:warmup_check_interval_min}} minute. The engineer computes the mean plane Z of each capture. Start testing once the mean plane Z has drifted less than {{VALUE:warmup_drift_fraction_of_sigma}} times sigma_t (the frame-to-frame depth noise at that Z) over {{VALUE:warmup_drift_window_min}} minutes.
+4. Settle and vibration check. With T2 at Z_MAX ({{VALUE:z_max_mm}} mm), capture {{VALUE:settle_check_frames}} frames twice: once with the servos on, after a move and the settle wait, and once with the brakes engaged. If the servo-on sigma_t exceeds the brakes-on sigma_t by more than {{VALUE:settle_sigma_excess_fraction}} times the brakes-on value, raise the settle time (now {{VALUE:robot_settle_time_s}} s) or stiffen the target mount, then repeat. Whatever settle time passes this check is the one the robot program uses in §5.
+5. Intrinsics and frame checks (Engineer).
+    - Read the left IR intrinsics, the depth-to-IR extrinsics, the stereo baseline, the depth LSB, and the projector offset from the SDK or datasheet. These are the values marked with a dagger in appendix A. Fill them in and write them into `sensor_config.json` under `geometry` (the focal lengths and principal point in pixels, the image size, the baseline and projector offset in mm, the depth LSB in mm, and the frame rate). Until this is done the planner and the code use indicative values.
+    - Confirm that the sensor returns valid depth on T2 at Z_MIN ({{VALUE:z_min_mm}} mm) and at Z_MAX ({{VALUE:z_max_mm}} mm). The range limits carry the dagger: if the sensor does not read at an end, tell the engineer, who tightens the limit and rebuilds the station ladder (§5).
+    - Confirm the depth image is registered to the left IR image. With T3a in view, overlay the square's edges from the IR image on the depth discontinuities. They must agree within {{VALUE:frame_check_px}} px.
+    - Confirm the baseline direction. The occlusion band (a strip of no-reads) appears beside vertical edges only if the baseline runs along H. If it appears beside horizontal edges, tell the engineer: H and V swap in series B and E. With the right camera at +H, the band lies outside the left edge of the raised square and inside the right edge of the window; if it lies on the other side, tell the engineer: the sign of H is reversed.
 
-**Step 4.2. Sensor configuration (Engineer).** Disable auto-exposure and fix exposure, gain, emitter power, and trigger mode. Record every depth-processing setting (temporal filter, spatial filter, hole filling, confidence threshold) in `sensor_config.json`, with its SDK name and value. Record the SDK version and the sensor firmware version in the same file (in its `notes` entry, as in the example below). Characterize the configuration that production will use. If the filters can be switched off, the engineer decides whether to run series A and series B a second time with the filters off, so the sensor's own processing can be separated from its physics (§6, step 8; §7, step 6). This filters-off repeat is outside the capture budget of §13. Give the configuration a short identifier (`config_id`); it goes into every manifest row.
-
-**Step 4.3. Warm-up.** Power the sensor for at least {{VALUE:warmup_min_minutes}} minutes. Then put T2 fronto-parallel at Z = {{VALUE:z_reference_mm}} mm and capture {{VALUE:warmup_check_frames}} frames every {{VALUE:warmup_check_interval_min}} minute. The engineer computes the mean plane Z of each capture. Here sigma_t is the temporal standard deviation of those warm-up frames themselves (not a value taken from another capture or from the datasheet). Start testing once the mean plane Z has drifted less than {{VALUE:warmup_drift_fraction_of_sigma}} times sigma_t over {{VALUE:warmup_drift_window_min}} minutes.
-
-**Step 4.4. Settle and vibration check.** With T2 at Z_MIN ({{VALUE:z_min_mm}} mm), not at Z_MAX, capture {{VALUE:settle_check_frames}} frames twice: once with the servos on, after a move and the settle wait, and once with the brakes engaged. The depth noise is smallest at Z_MIN, so a robot vibration of a given amplitude is easiest to see there. If the servo-on sigma_t exceeds the brakes-on sigma_t by more than {{VALUE:settle_sigma_excess_fraction}} times the brakes-on value, raise the settle time (now {{VALUE:robot_settle_time_s}} s) or stiffen the target mount, then repeat. Whatever settle time passes this check is the one the robot program uses in §5.
-
-**Step 4.5. Intrinsics and frame checks (Engineer).**
-
-- Read the left IR intrinsics, the depth-to-IR extrinsics, the stereo baseline, the depth LSB, and the projector offset from the SDK or datasheet. These are the values marked with a dagger in appendix A. Fill them in and write them into `sensor_config.json` under `geometry` (the focal lengths and principal point in pixels, the image size, the baseline and projector offset in mm, the depth LSB in mm, and the frame rate). Until this is done the planner and the code use indicative values.
-- Confirm that the sensor returns valid depth on T2 at Z_MIN ({{VALUE:z_min_mm}} mm) and at Z_MAX ({{VALUE:z_max_mm}} mm). The range limits carry the dagger: if the sensor does not read at an end, tell the engineer, who tightens the limit and rebuilds the station ladder (§5).
-- Confirm the depth image is registered to the left IR image. With T3a in view, overlay the square's edges from the IR image on the depth discontinuities. They must agree within {{VALUE:frame_check_px}} px.
-- Confirm the baseline direction. The occlusion band (a strip of no-reads) appears beside vertical edges only if the baseline runs along H. If it appears beside horizontal edges, tell the engineer: H and V swap in series B and E. With the right camera at +H, the band lies outside the left edge of the raised square and inside the right edge of the window; if it lies on the other side, tell the engineer: the sign of H is reversed.
-
-Example of `sensor_config.json` (the text in angle brackets is replaced by the real value; the keys are the ones the software reads, so the SDK and firmware versions go into `notes`):
+Example of `sensor_config.json` (the text in angle brackets is replaced by the real value; the keys are the ones the software reads):
 
 ```
 {
@@ -130,7 +125,7 @@ Example of `sensor_config.json` (the text in angle brackets is replaced by the r
   "geometry": {"sensor_fx_px": <>, "sensor_fy_px": <>, "sensor_cx_px": <>, "sensor_cy_px": <>,
                "image_width_px": <>, "image_height_px": <>, "sensor_baseline_mm": <>,
                "projector_offset_mm": [<H>, <V>, <Z>], "depth_lsb_mm": <>, "frame_rate_hz": <>},
-  "notes": "SDK <version>; firmware <version>"
+  "notes": ""
 }
 ```
 
@@ -138,32 +133,22 @@ Write the date, sensor serial number, firmware and SDK versions, robot model and
 
 ## 4. Robot-to-sensor registration
 
-Registration gives every later capture a ground-truth target pose in the sensor frame. Two things anchor it. Robot repeatability fixes relative motion. A plane-correspondence solve on the noise plate T2 fixes the camera's pose in the robot base, using the depth planes themselves: there is no pattern plate, no IR image to evaluate, and no emitter to switch. What the planes cannot observe, the sideways position of a target on the flange, comes from the as-built datum and a once-per-mount check against the left IR image (Step 4.8). After Step 4.7 below, the robot-base-to-sensor transform is known, so every commanded target pose is also a ground-truth pose in sensor coordinates (compare Figure 2).
+Registration gives every later capture a ground-truth target pose in the sensor frame. Two things anchor it. Robot repeatability fixes relative motion. A plane-correspondence solve on the noise plate T2 fixes the camera's pose in the robot base, using the depth planes themselves: there is no pattern plate, no IR image to evaluate, and no emitter to switch. What the planes cannot observe, the sideways position of a target on the flange, comes from the as-built datum and a once-per-mount check against the left IR image (step 7). After step 5 below, the robot-base-to-sensor transform is known, so every commanded target pose is also a ground-truth pose in sensor coordinates (compare Figure 2).
 
-**Step 4.6. Registration capture.** Mount T2 on the dowel-pinned adapter. Take the registration rows of the plan: {{VALUE:registration_poses}} poses (procedure letter `R`) that span Z_MIN ({{VALUE:z_min_mm}} mm) to Z_MAX ({{VALUE:z_max_mm}} mm) and cover the field of view, with tilts about H and about V, of both signs, up to plus or minus {{VALUE:registration_tilt_range_deg}} degrees (`REGISTRATION_TILT_RANGE_DEG`), so that the plate normals span all three directions. The plate must stay inside the field of view at every tilt (T2 must be fully visible). Registration comes first, so the robot cannot yet be commanded in sensor coordinates: jog the robot by hand to each pose, using the live depth image to reach about the planned depth, field position, and tilt. The exact pose is solved afterward, so hand-jogged poses are fine. At each pose, capture {{VALUE:frames_per_registration_pose}} depth frames and the read-back robot pose. Name the files as in §5. Leave the emitter on and the sensor configuration unchanged.
-
-**Step 4.7. Registration solve and acceptance.** Engineer: fit the plate plane in the mean depth frame of each pose (its normal and distance in the camera frame) and solve the hand-eye problem from the plane correspondences: a closed-form start, then joint nonlinear least squares on the plane-normal and plane-distance residuals. The solve gives the camera-to-robot-base transform and the plate's normal and offset on the flange. The plate's sideways position on the flange and its rotation about its normal are not observable from planes, and they are not needed for T2. Write one row per pose into an observations file: `pose_id`, the read-back flange pose (`x_mm`, `y_mm`, `z_mm`, `rotation_type`, `r1` to `r9`, as in §11), and the fitted plane (`nx`, `ny`, `nz`, `distance_mm`). Then run:
+1. Mount T2 on the dowel-pinned adapter.
+2. Take the registration rows of the plan: {{VALUE:registration_poses}} poses that span Z_MIN to Z_MAX, cover the field of view, and tilt within plus or minus {{VALUE:registration_tilt_range_deg}} degrees about H and V. In the plan they have procedure letter `R`. Registration comes first, so the robot cannot yet be commanded in sensor coordinates: jog the robot by hand to each pose, using the live depth image to reach about the planned depth, field position, and tilt (T2 must be fully visible). The exact pose is solved afterward, so hand-jogged poses are fine.
+3. At each pose, capture {{VALUE:frames_per_registration_pose}} depth frames and the read-back robot pose. Name the files as in §5. Leave the emitter on and the sensor configuration unchanged.
+4. Engineer: fit the plate plane in the mean depth frame of each pose (its normal and distance in the camera frame) and solve the hand-eye problem from the plane correspondences: a closed-form start, then joint nonlinear least squares on the plane-normal and plane-distance residuals. The solve gives the camera-to-robot-base transform and the plate's normal and offset on the flange. The plate's sideways position on the flange and its rotation about its normal are not observable from planes, and they are not needed for T2. Write one row per pose into an observations file: `pose_id`, the read-back flange pose (`x_mm`, `y_mm`, `z_mm`, `rotation_type`, `r1` to `r9`, as in §11), and the fitted plane (`nx`, `ny`, `nz`, `distance_mm`). Then run:
 
 ```
 python3 -m sensorperf.cli.register --observations observations.csv --out registration.json
 ```
 
-The plane form (`--method planes`) is the default. The tool prints the residual and the verdict.
-
-Accept the registration only if both of these hold:
-
-- The RMS plane-distance residual is {{VALUE:registration_residual_accept_mm}} mm or less (`REGISTRATION_RESIDUAL_ACCEPT_MM`). If it is more, the tool still writes `registration.json` but marks it not accepted, and its exit code is 1.
-- The standard error of the camera's Z offset, from the covariance of the fit, is reported next to the residual. About 0.1 mm is expected (Table 8). The register tool prints the residual only, so the engineer takes this standard error from the fit covariance and records it with the result.
-
-If either is too large, add poses with larger tilts, up to plus or minus {{VALUE:registration_tilt_range_deg}} degrees, or check the mount, then solve again. Save both transforms, the residual, and the standard error of the Z offset in `registration.json` in the session folder (the engineer adds the standard error to the file if the tool did not write it). Note the residual and the standard error in `session_log.md`.
-
-**Step 4.8. Station targets and mount check.** For every row of the plan, the robot pose that puts the target's reference point at the required (H, V, Z) in the camera frame, fronto-parallel unless the row says otherwise, comes from the registration. The planner computes it (§5). Re-mounting a target on the dowel-pinned adapter needs no new registration, provided the mount check passes. Once per mount of any target, at Z = {{VALUE:mount_check_depth_mm}} mm, fit the mounted target's front plane from the depth data and compare it with the registered pose:
-
-- Z within {{VALUE:registration_residual_accept_mm}} mm (`REGISTRATION_RESIDUAL_ACCEPT_MM`);
-- tilt within {{VALUE:mount_tilt_tolerance_deg}} degrees (`MOUNT_TILT_TOLERANCE_DEG`, a dagger parameter: {{VALUE:mount_tilt_tolerance_deg}} degrees moves a plate edge 200 mm from the center by about 0.17 mm);
-- for a target with features (T3a, T3b, T4, T5), also locate one feature edge or outline in the left IR image and compare its H and V position with the as-built datum offsets (§2): both within {{VALUE:frame_check_px}} px (`FRAME_CHECK_PX`).
-
-Otherwise re-seat the target or correct the datum record. This is what makes re-mounting on the dowel-pinned adapter safe without a new registration. Log the result in `session_log.md`.
+   The plane form (`--method planes`) is the default. The tool prints the residual and the verdict.
+5. Accept the registration only if the RMS plane-distance residual is {{VALUE:registration_residual_accept_mm}} mm or less. If it is more, the tool still writes `registration.json` but marks it not accepted, and its exit code is 1. Add poses with larger tilts, up to plus or minus {{VALUE:registration_tilt_range_deg}} degrees, or check the mount, then solve again. Keep the residual with every result.
+6. Save both transforms in `registration.json` in the session folder.
+7. Once per mount of any target: at Z = {{VALUE:mount_check_depth_mm}} mm, fit the mounted target's front plane from the depth data and compare its Z and tilt with the registered pose; for a target with features (T3a, T3b, T4, T5), also locate one feature edge or outline in the left IR image and compare its H and V position with the as-built datum offsets (§2). Both must agree within {{VALUE:frame_check_px}} px; otherwise re-seat the target or correct the datum record. This is what makes re-mounting on the dowel-pinned adapter safe without a new registration. Log the result in `session_log.md`.
+8. Station targets. For every row of the plan, the robot pose that puts the target's reference point at the required (H, V, Z) in the camera frame, fronto-parallel unless the row says otherwise, comes from the registration. The planner computes it (§5).
 
 ## 5. The plan
 
@@ -184,7 +169,7 @@ The planner writes five files in the output folder:
 - `targets.json`: the target definitions the plan was made with.
 - `parameters.json`: the parameter values the plan was made with (appendix A).
 
-One geometric ladder of Z stations serves the whole procedure: {{DERIVED:station_count}} stations of the ladder at a ratio of {{DERIVED:station_ratio_text}} (four per octave), {{DERIVED:ladder_text}} mm. Series A, C, and D visit all of them; A also adds the {{DERIVED:legacy_depth_count}} legacy depths {{DERIVED:legacy_depths_text}} mm, so that the existing metrics can be computed at the same depths as the existing data. Series B (edges) visits every second station, the {{DERIVED:shape_station_count}} shape stations ({{DERIVED:shape_stations_text}} mm). Series Z and the tilt sub-series of A visit every fourth station, the {{DERIVED:reduced_station_count}} reduced stations ({{DERIVED:reduced_stations_text}} mm). The extended trials of D run at the {{DERIVED:zero_station_count}} farthest stations ({{DERIVED:zero_stations_text}} mm). The reference station, {{VALUE:z_reference_mm}} mm (a station of the ladder), serves the warm-up check, the sentinels, the re-mount check, the field sub-series of C, the open-background variant, and the post check of D. The working range of {{VALUE:z_min_mm}} to {{VALUE:z_max_mm}} mm carries the dagger of appendix A, and Step 4.5 confirms it.
+One geometric ladder of Z stations serves the whole procedure: {{DERIVED:station_count}} stations of the ladder at a ratio of {{DERIVED:station_ratio_text}} (four per octave), {{DERIVED:ladder_text}} mm. Series A, C, and D visit all of them; A also adds the {{DERIVED:legacy_depth_count}} legacy depths {{DERIVED:legacy_depths_text}} mm, so that the existing metrics can be computed at the same depths as the existing data. Series B (edges) visits every second station, the {{DERIVED:shape_station_count}} shape stations ({{DERIVED:shape_stations_text}} mm). Series Z and the tilt sub-series of A visit every fourth station, the {{DERIVED:reduced_station_count}} reduced stations ({{DERIVED:reduced_stations_text}} mm). The extended trials of D run at the {{DERIVED:zero_station_count}} farthest stations ({{DERIVED:zero_stations_text}} mm). The reference station, {{VALUE:z_reference_mm}} mm (a station of the ladder), serves the warm-up check, the sentinels, the re-mount check, the field sub-series of C, the open-background variant, and the post check of D. The working range of {{VALUE:z_min_mm}} to {{VALUE:z_max_mm}} mm carries the dagger of appendix A, and §3, step 5 confirms it.
 
 The stations the plan visits, and the five field positions in the image, are in Figure 5. The whole plan is in Figure 6.
 
@@ -215,12 +200,12 @@ The planner checks that each target fits the field of view at its station. A tar
 **Robot program outline**, for each row of `poses.csv`, in `order`:
 
 1. Move to the pose. Use a joint move to a point short of it along the target normal, then a linear move onto it, so the approach is the same every time. For every visit of series Z the point short of the pose lies below it: back off by {{VALUE:z_step_approach_overshoot_mm}} mm toward smaller Z, then move up onto the pose, so that every visit of the series is approached from below and backlash does not enter the difference between visits (§8).
-2. Wait the settle time of Step 4.4 ({{VALUE:robot_settle_time_s}} s unless the check raised it).
+2. Wait the settle time of §3, step 4 ({{VALUE:robot_settle_time_s}} s unless the check raised it).
 3. Trigger the capture of `frames` frames. Name the files `<proc>_<target>_G<gap>_Z<zzzz>_F<field>_P<pose>_f<frame>.mc` from the row: for example `C_T5_G15_Z0800_F0_P017_f03.mc` is procedure C (area), target T5, gap 15 mm, station Z = 800 mm, field position 0 (center), pose 17, frame 3. A target without a back plate (T2) writes `G0`. The frame number runs from `f00`.
 4. Read the robot's actual reported (encoder-derived) flange pose, not the commanded one, and append it to the pose log (§11). Add the sensor and air temperature and a timestamp.
 5. Move on.
 
-Sentinel rows (letter `S`) appear in the plan every {{VALUE:drift_sentinel_interval_min}} minutes, by the planner's estimate of the clock. A sentinel is T2 at the center at Z = {{VALUE:z_reference_mm}} mm, {{DERIVED:sentinel_frames}} frames. It needs T2 on the robot. If T2 is not mounted when a sentinel row comes up, ask the engineer whether to swap targets now or to do the sentinel at the next target change, and write the actual time of the capture in the pose log. After the sentinel, mount the target of the series again and do the mount check of Step 4.8.
+Sentinel rows (letter `S`) appear in the plan every {{VALUE:drift_sentinel_interval_min}} minutes, by the planner's estimate of the clock. A sentinel is T2 at the center at Z = {{VALUE:z_reference_mm}} mm, {{DERIVED:sentinel_frames}} frames. It needs T2 on the robot. If T2 is not mounted when a sentinel row comes up, ask the engineer whether to swap targets now or to do the sentinel at the next target change, and write the actual time of the capture in the pose log. After the sentinel, mount the target of the series again and do the mount check of §4, step 7.
 
 Do the series in the order of the plan: A, then B, then Z, then C, then D. Do not move the sensor between them. Tell the engineer at once if a series stops early; the later series depend on the earlier ones (Figure 1).
 
@@ -228,26 +213,24 @@ Do the series in the order of the plan: A, then B, then Z, then C, then D. Do no
 
 This series captures the {{DERIVED:station_count}} stations of the ladder plus the {{DERIVED:legacy_depth_count}} legacy depths ({{DERIVED:legacy_depths_text}} mm) at {{DERIVED:field_position_count}} field positions each, {{DERIVED:noise_station_frames}} frames per pose, plus a tilt sub-series. The station order is randomized, with a logged seed, so that slow drift cannot masquerade as a Z dependence. The planner has already done this: follow the `order` column.
 
-1. Mount T2. Do the mount check (Step 4.8). The stations are every station of the ladder from Z_MIN ({{VALUE:z_min_mm}} mm) to Z_MAX ({{VALUE:z_max_mm}} mm), {{DERIVED:ladder_text}} mm, and the legacy depths {{DERIVED:legacy_depths_text}} mm. The five field positions are the center and four corners at {{VALUE:field_offset_fraction}} of the half field, all fronto-parallel (Figure 5).
+1. Mount T2. Do the mount check (§4, step 7). The stations are every station of the ladder from Z_MIN ({{VALUE:z_min_mm}} mm) to Z_MAX ({{VALUE:z_max_mm}} mm), {{DERIVED:ladder_text}} mm, and the legacy depths {{DERIVED:legacy_depths_text}} mm. The five field positions are the center and four corners at {{VALUE:field_offset_fraction}} of the half field, all fronto-parallel (Figure 5).
 2. Check that the plate fully covers the analysis region at every station. At Z_MIN off-axis this may limit the field offset. The planner has pulled such poses inward; see `plan_summary.txt`.
 3. Before the first station, capture a drift sentinel: center, Z = {{VALUE:z_reference_mm}} mm, {{DERIVED:sentinel_frames}} frames. The plan repeats the sentinel every {{VALUE:drift_sentinel_interval_min}} minutes and after the last station.
 4. At each station: move, wait the settle time, then capture the frames of the row. Log the read-back robot pose, the sensor temperature, and the timestamps.
 5. Tilt sub-series. At the center and at the {{DERIVED:reduced_station_count}} reduced stations ({{DERIVED:reduced_stations_text}} mm), T2 is tilted about V, then about H, through each angle of {{VALUE:tilt_angles_deg}} degrees. Capture {{VALUE:frames_per_tilt_pose}} frames per pose. Incidence angle changes both the per-pixel noise and the fill rate. These rows have sub-series `tilt`.
 6. Repeat-mount check. Dismount T2, re-mount it, and repeat the Z = {{VALUE:z_reference_mm}} mm center station (sub-series `remount`). The difference shows how much of the bias comes from re-mounting the target; the adapter repeats to {{VALUE:adapter_remount_repeatability_mm}} mm.
 7. Do not delete any frames. Tell the engineer if a pose shows a warning in §12.
-8. Engineer: if Step 4.2 calls for it, repeat the series with the sensor's filters off. This repeat is outside the capture budget of §13. Plan it with `--filters-off` and record the new configuration in `sensor_config.json` with a new `config_id`.
+8. Engineer: if step 2 of §3 calls for it, repeat the series with the sensor's filters off. Plan it with `--filters-off` and record the new configuration in `sensor_config.json` with a new `config_id`.
 
 ## 7. Series B: the edge targets
 
 The edge series gives lateral (H, V) resolution and most of the boundary-bias data. Both edge polarities are measured: T3a (front material inside the square) and T3b (back plate inside the window). At each station the target is moved by small random lateral offsets so that every sub-pixel phase of each edge is sampled.
 
-1. Mount T3a (raised square) with the gap at {{VALUE:gap_small_mm}} mm. Mount it square to the image: the slant of {{VALUE:edge_slant_deg}} degrees is part of the square (the as-built record gives it as `rotation_deg`), so all four edges are slanted relative to the pixel grid. The two near-vertical edges measure H resolution and the two near-horizontal edges measure V. Left and right edges have opposite occlusion geometry relative to the baseline, and so do top and bottom. Do the mount check (Step 4.8).
+1. Mount T3a (raised square) with the gap at {{VALUE:gap_small_mm}} mm. Mount it square to the image: the slant of {{VALUE:edge_slant_deg}} degrees is part of the square (the as-built record gives it as `rotation_deg`), so all four edges are slanted relative to the pixel grid. The two near-vertical edges measure H resolution and the two near-horizontal edges measure V. Left and right edges have opposite occlusion geometry relative to the baseline, and so do top and bottom. Do the mount check (§4, step 7).
 2. At each of the {{DERIVED:shape_station_count}} shape stations ({{DERIVED:shape_stations_text}} mm), centered and fronto-parallel: move, settle, and capture {{VALUE:frames_per_edge_pose}} frames at the nominal pose (sub-series `nominal`).
 3. At the same Z, capture {{VALUE:phase_jitter_poses_edge}} further poses, each with {{VALUE:frames_per_edge_pose}} frames (sub-series `jitter`). Each adds a logged random lateral offset, uniform over plus or minus half of the phase-jitter span ({{VALUE:phase_jitter_span_px}} px at the station Z) in both H and V. The plan holds the offsets in millimeters (`offset_h_mm`, `offset_v_mm`), so the robot only has to execute the row.
 4. Repeat steps 2 and 3 with the gap at {{VALUE:gap_large_mm}} mm. Comparing the two step heights tests whether the normalized edge response depends on step height. If it does, the depth pipeline is nonlinear and resolution must be quoted together with its step height.
 5. Repeat steps 1 to 4 with T3b (square window). The window has the opposite edge polarity: front plate outside, back plate inside.
-
-6. Engineer: if Step 4.2 calls for it, repeat series B with the sensor's filters off, as for series A (§6, step 8). This repeat is outside the capture budget of §13.
 
 Follow the order of the plan, which keeps each target mounted for as long as it can.
 
@@ -272,7 +255,7 @@ The smallest rung ({{DERIVED:zstep_smallest_mm}} mm) is twice the robot repeatab
 
 Each plate is captured at many random sub-pixel offsets and at every station of the ladder. Sensed area depends on where a feature's edge falls relative to the pixel grid and the projector dots, and on the subtended size D_px, which the Z sweep varies by a factor of 4 for each feature. The procedure averages over the phase and also measures its spread.
 
-1. The configuration list is both plates {T4, T5}, with both gaps, at each of the {{DERIVED:station_count}} stations of the ladder. Center the plate and keep it fronto-parallel. The plan randomizes the order within each mounting, so targets are re-mounted as rarely as possible. Mount one plate at a time and do the mount check (Step 4.8).
+1. The configuration list is both plates {T4, T5}, with both gaps, at each of the {{DERIVED:station_count}} stations of the ladder. Center the plate and keep it fronto-parallel. The plan randomizes the order within each mounting, so targets are re-mounted as rarely as possible. Mount one plate at a time and do the mount check (§4, step 7).
 2. At each configuration, capture {{VALUE:phase_jitter_poses_area}} poses, each with {{VALUE:frames_per_area_pose}} frames (sub-series `jitter`). Each has a logged random lateral offset, uniform over plus or minus half of the phase-jitter span in H and V.
 3. Field sub-series. At Z = {{VALUE:z_reference_mm}} mm and the small gap, repeat step 2 for each plate at the four corners, {{VALUE:field_subseries_poses_area}} poses each (sub-series `field`).
 4. Open-background variant (cutouts, optional). At Z = {{VALUE:z_reference_mm}} mm, remove the back plate so that nothing lies within the sensor's range behind the holes. Then repeat step 2. This separates the sensor's fill-in behavior from reads of a real back surface. Plan it with `--open-background`.
@@ -407,7 +390,7 @@ Figure 8. The session folder feeds the six analyses, which write into `analysis/
 - [ ] `session_log.md` with: date, sensor serial number, warm-up time, settle time, base frame name, plate flatness and finish, mount-check results, target changes with times, and anything unusual
 - [ ] Photos of the setup: sensor stand, each target on the adapter
 
-**Capture budget.** Table 7 is computed from the default plan. The estimate assumes {{DERIVED:budget_frame_rate_hz}} frames per second and {{VALUE:move_and_settle_time_s}} s per move plus settle. Both are assumptions; the VSX3000 frame rate in the chosen trigger mode should replace them. Target swaps, warm-up, the D post check, and the filters-off repeat of A and B (Step 4.2) are excluded. Allow two to three working days in total.
+**Capture budget.** Table 7 is computed from the default plan. The estimate assumes {{DERIVED:budget_frame_rate_hz}} frames per second and {{VALUE:move_and_settle_time_s}} s per move plus settle. Both are assumptions; the VSX3000 frame rate in the chosen trigger mode should replace them. Target swaps, warm-up, and the D post check are excluded. Allow two to three working days in total.
 
 {{BUDGET_TABLE}}
 
@@ -453,7 +436,7 @@ The smallest Z steps and the absolute bias are the measurements most limited by 
 | Plate flatness | {{VALUE:plate_flatness_mm}} mm | Fixed-pattern noise, bias | Keep the flatness report; map the plate on a CMM if available |
 | Thermal drift | Unknown until the sentinels run | Bias, series Z | Warm-up gate, sentinels, A, B, A, B order, randomized order |
 | Front-back interreflection | Unknown | Cutout and small-gap results | Matte finish; both gaps are captured |
-| Sensor temporal filter | Depends on the configuration | Noise (underestimated), trial independence | Discard frames after each move until the plane settles (Step 4.4); filters-off repeat if possible |
+| Sensor temporal filter | Depends on the configuration | Noise (underestimated), trial independence | Discard frames after each move until the plane settles (§3, step 4); filters-off repeat if possible |
 | Reflectance mismatch | Avoided by design | Edges, area | One finish on all surfaces |
 
 Table 8. Sources of error, their size, and what to do about them.
@@ -466,14 +449,14 @@ Things that spoil a session in practice:
 - Approaching a visit of series Z from above, or from different directions: backlash then enters the difference between visits.
 - A change in the laboratory lighting during a session (the laboratory is enclosed, with constant lighting, by design).
 - Skipping the warm-up or the settle check, or shortening the settle wait.
-- A loose adapter, a spacer that has moved, or a target that has shifted on its dowels: do the mount check (Step 4.8) after every swap.
+- A loose adapter, a spacer that has moved, or a target that has shifted on its dowels: do the mount check (§4, step 7) after every swap.
 - Fingerprints, dust, or gloss on a target: wipe with isopropyl alcohol. A shiny spot returns a bright highlight and a bad read.
 - Different finish on the front and back plates.
 - Using two frames of one pose as two detection trials in series D (§10, step 4).
 - Not recording a filter setting or a configuration change in `sensor_config.json`.
 - Losing the seed of the plan. Without it the offsets cannot be reproduced; the plan files keep it.
 
-Limitations. Results hold for one surface finish, static targets, mostly fronto-parallel poses, and the sensor configuration recorded in `sensor_config.json`. Registration from planes leaves the camera's depth offset conditioned by the registration tilt range (Table 8), so absolute bias carries that uncertainty; Z-scale and nonlinear bias do not, because a rigid transform cannot absorb them. The range limits of {{VALUE:z_min_mm}} and {{VALUE:z_max_mm}} mm assume the sensor reads there; Step 4.5 confirms this before any series runs. A "0 percent" minimum means below the stated bound with {{VALUE:confidence_level}} confidence, not proven zero. The smallest detectable Z step for the large patches may come out as a bound set by the robot's repeatability, or by the accuracy with which it reports its pose, not a measurement.
+Limitations. Results hold for one surface finish, static targets, mostly fronto-parallel poses, and the sensor configuration recorded in `sensor_config.json`. Registration from planes leaves the camera's depth offset conditioned by the registration tilt range (Table 8), so absolute bias carries that uncertainty; Z-scale and nonlinear bias do not, because a rigid transform cannot absorb them. The range limits of {{VALUE:z_min_mm}} and {{VALUE:z_max_mm}} mm assume the sensor reads there; §3, step 5 confirms this before any series runs. A "0 percent" minimum means below the stated bound with {{VALUE:confidence_level}} confidence, not proven zero. The smallest detectable Z step for the large patches may come out as a bound set by the robot's repeatability, or by the accuracy with which it reports its pose, not a measurement.
 
 ---
 
@@ -481,7 +464,7 @@ Limitations. Results hold for one surface finish, static targets, mostly fronto-
 
 Every arbitrary constant in the procedure is a named parameter. The table below is generated from the code (`sensorperf/parameters.py`), so it always shows the values the planner and the analyses use. The values are starting points for the VSX3000 at {{VALUE:z_min_mm}} to {{VALUE:z_max_mm}} mm.
 
-Values marked with a dagger in the specification depend on VSX3000 datasheet or SDK values that were not available when it was written. They are not in this table: the code leaves them empty until Step 4.5 fills them in `sensor_config.json`, and any computation that needs one stops with a clear message instead of guessing. They are: the left IR focal lengths (`SENSOR_FX_PX`, `SENSOR_FY_PX`) and principal point (`SENSOR_CX_PX`, `SENSOR_CY_PX`), the stereo baseline (`SENSOR_BASELINE_MM`), the projector offset (`PROJECTOR_OFFSET_MM`), the depth LSB (`DEPTH_LSB_MM`), and the frame rate in the chosen trigger mode. The range limits `Z_MIN_MM` and `Z_MAX_MM` are in the table with their suggested values and also carry the dagger: Step 4.5 confirms that the sensor reads at both ends. The tilt tolerance `MOUNT_TILT_TOLERANCE_DEG` of the mount check (Step 4.8) is in the table with its suggested value and also carries the dagger: 0.05 degrees moves a plate edge 200 mm from the center by about 0.17 mm. Where this document quotes a number that depends on the dagger values (the feature diameters, the field fit, the budget), it uses indicative values for a 640 by 480 sensor and says so. These are not datasheet values.
+Values marked with a dagger in the specification depend on VSX3000 datasheet or SDK values that were not available when it was written. They are not in this table: the code leaves them empty until §3, step 5 fills them in `sensor_config.json`, and any computation that needs one stops with a clear message instead of guessing. They are: the left IR focal lengths (`SENSOR_FX_PX`, `SENSOR_FY_PX`) and principal point (`SENSOR_CX_PX`, `SENSOR_CY_PX`), the stereo baseline (`SENSOR_BASELINE_MM`), the projector offset (`PROJECTOR_OFFSET_MM`), the depth LSB (`DEPTH_LSB_MM`), and the frame rate in the chosen trigger mode. The range limits `Z_MIN_MM` and `Z_MAX_MM` are in the table with their suggested values and also carry the dagger: §3, step 5 confirms that the sensor reads at both ends. Where this document quotes a number that depends on the dagger values (the feature diameters, the field fit, the budget), it uses indicative values for a 640 by 480 sensor and says so. These are not datasheet values.
 
 {{PARAMETER_TABLE}}
 
