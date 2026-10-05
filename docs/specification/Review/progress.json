@@ -31,9 +31,9 @@
  },
  "C06": {
   "title": "Acquisition A, noise plate",
-  "reviewed": null,
-  "tier": null,
-  "note": "not yet reviewed"
+  "reviewed": "2026-10-05",
+  "tier": "fable",
+  "note": "R1–R6 executed; P1 answered with the Part I definitions; P2 style decision pending (Section 5 is the sample)"
  },
  "C07": {
   "title": "Acquisition B, edges and Z steps",

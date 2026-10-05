@@ -289,3 +289,12 @@ technician executes.
   specification, with many shibboleths (the code-style parameter names and constructs in the prose); the plan
   documents (technician procedure Sections 5 and 6) are good. Style decision pending: how the prose should refer to
   parameters (plain words with the value, the code name only in the Section 2 table and at first mention).
+C06 closed 2026-10-05 ("closed."; R2 "accepted as written"). Executed (document rev 84): R1 tilt rule (near edge
+≥ Z_MIN; 400 mm skipped, 800 and 1600 kept); R2 sentinels on the mounted target's front plane with the first
+sentinel after each mount as its reference, T2 sentinels bracketing each series (Sections 5, 7 and 10 Step 11);
+R3 coverage rule (pulled inward with the BOUNDARY_BAND_HALF_WIDTH_PX margin, achieved fraction recorded and
+reported); R4 legacy depths at the center only; R5 air temperature from the loggers, filters-off repeat covers
+Steps 1–6; R6 Part I lead paragraph defining station, field position, pose and pose list and the division of
+labor with the technician procedure; Section 5 rewritten against those terms in a plain-language style (values in
+prose, the parameter name once in parentheses) as a sample for the P2 style decision. Code: planner changes
+delegated (sentinel target, tilt rule, legacy center, achieved fraction); the Section 9 budget row for A follows.
