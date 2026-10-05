@@ -1,8 +1,8 @@
 {
 "field_position_count": 5,
 "legacy_depth_count": 2,
+"low_station_count": 3,
 "reduced_station_count": 3,
 "shape_station_count": 5,
-"station_count": 9,
-"zero_station_count": 3
+"station_count": 9
 }

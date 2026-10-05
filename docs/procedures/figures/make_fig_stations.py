@@ -3,9 +3,10 @@ fig_stations.png -- where the targets are put: the Z stations (left) and the pos
 (right).
 
 Left panel: the Z axis from Z_MIN to Z_MAX with five rows of ticks: the one geometric ladder of
-stations (Z_STATION_RATIO, nine stations) that A, C and D visit, the two legacy depths that A adds,
-the shape stations of B-HV (every second station), the reduced stations of B-Z and the A tilt
-sub-series (every fourth station), and the farthest stations that carry the extended D trials. The
+stations (Z_STATION_RATIO, nine stations) that A, C and D visit (and the B-Z ramp, one tilted pose at
+every station), the two legacy depths that A adds (center only), the shape stations of B-HV (every
+second station), the reduced stations of the B-Z step ladder and the A tilt sub-series (every fourth
+station), and the farthest stations that carry the extended D trials (the measurement of D_5). The
 reference station Z_REFERENCE_MM is marked by a dotted line.
 
 Right panel: the image rectangle of the indicative sensor geometry with the five field positions
@@ -53,7 +54,7 @@ VERMILLION = "#D55E00"
 REDDISH_PURPLE = "#CC79A7"
 GRAY = "#595959"
 
-ROW_Y = {"ladder": 5.0, "legacy": 4.0, "shape": 3.0, "reduced": 2.0, "zero": 1.0}
+ROW_Y = {"ladder": 5.0, "legacy": 4.0, "shape": 3.0, "reduced": 2.0, "low": 1.0}
 TICK_HALF_HEIGHT = 0.28
 INSET_PIXELS = 4            # the inset shows this many pixels either side of the offset square
 FIELD_MARKER_SIZE = 9
@@ -64,12 +65,12 @@ def draw_z_stations(ax) -> dict[str, int]:
     legacy = tuple(z for z in PARAMS.noise_stations_mm() if z not in ladder)
     shape = PARAMS.z_shape_stations_mm()
     reduced = PARAMS.z_reduced_stations_mm()
-    zero = PARAMS.detection_zero_stations_mm()
-    rows = (("ladder", ladder, BLUE, f"A, C, D: ladder\n({len(ladder)} stations, ratio 2^(1/4))"),
-            ("legacy", legacy, REDDISH_PURPLE, f"A: legacy depths\n({len(legacy)} extra stations)"),
+    low = PARAMS.detection_low_stations_mm()
+    rows = (("ladder", ladder, BLUE, f"A, C, D, Z ramp: ladder\n({len(ladder)} stations, ratio 2^(1/4))"),
+            ("legacy", legacy, REDDISH_PURPLE, f"A: legacy depths, center only\n({len(legacy)} extra stations)"),
             ("shape", shape, BLUISH_GREEN, f"B-HV: shape stations\n(every {PARAMS.z_shape_station_stride}nd, {len(shape)} stations)"),
-            ("reduced", reduced, VERMILLION, f"B-Z, A tilt: reduced stations\n(every {PARAMS.z_reduced_station_stride}th, {len(reduced)} stations)"),
-            ("zero", zero, ORANGE, f"D extended trials:\n{len(zero)} farthest stations"))
+            ("reduced", reduced, VERMILLION, f"Z ladder, A tilt: reduced\n(every {PARAMS.z_reduced_station_stride}th, {len(reduced)} stations)"),
+            ("low", low, ORANGE, f"D extended trials (D_5):\n{len(low)} farthest stations"))
     for key, values, color, label in rows:
         y = ROW_Y[key]
         ax.plot([PARAMS.z_min_mm, PARAMS.z_max_mm], [y, y], color=GRAY, lw=0.8)
@@ -78,12 +79,12 @@ def draw_z_stations(ax) -> dict[str, int]:
             ax.text(z, y + TICK_HALF_HEIGHT + 0.04, f"{z:g}", ha="center", va="bottom", fontsize=6.5, color=color)
         ax.text(PARAMS.z_min_mm - 18, y, label, ha="right", va="center", fontsize=8, color=color)
     z_ref = PARAMS.z_reference_mm
-    ax.plot([z_ref, z_ref], [ROW_Y["zero"] - 0.45, ROW_Y["ladder"] + 0.75], color=BLACK, lw=0.9, linestyle=":")
-    ax.text(z_ref + 12, ROW_Y["zero"] - 0.42, f"Z_REFERENCE_MM = {z_ref:g}: warm-up, sentinels, re-mount check,\n"
+    ax.plot([z_ref, z_ref], [ROW_Y["low"] - 0.45, ROW_Y["ladder"] + 0.75], color=BLACK, lw=0.9, linestyle=":")
+    ax.text(z_ref + 12, ROW_Y["low"] - 0.42, f"Z_REFERENCE_MM = {z_ref:g}: warm-up, sentinels, re-mount check,\n"
             "C field sub-series, open background, D post check", fontsize=7.5, color=BLACK, va="bottom", ha="left")
     ax.set_xlim(PARAMS.z_min_mm - 330, PARAMS.z_max_mm + 40)
     ax.set_xticks(range(int(PARAMS.z_min_mm), int(PARAMS.z_max_mm) + 1, 200))
-    ax.set_ylim(ROW_Y["zero"] - 0.6, ROW_Y["ladder"] + 1.0)
+    ax.set_ylim(ROW_Y["low"] - 0.6, ROW_Y["ladder"] + 1.0)
     ax.set_xlabel("Z (mm), along the left IR camera's optical axis", fontsize=9)
     ax.set_yticks([])
     ax.spines["bottom"].set_bounds(PARAMS.z_min_mm, PARAMS.z_max_mm)
@@ -91,7 +92,7 @@ def draw_z_stations(ax) -> dict[str, int]:
         ax.spines[side].set_visible(False)
     ax.set_title("(a) Z stations", fontsize=10)
     return {"station_count": len(ladder), "shape_station_count": len(shape), "reduced_station_count": len(reduced),
-            "zero_station_count": len(zero), "legacy_depth_count": len(legacy)}
+            "low_station_count": len(low), "legacy_depth_count": len(legacy)}
 
 
 def field_positions_px() -> dict[int, tuple[float, float]]:

@@ -74,9 +74,7 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(FIGURES_DIR))
 import figfacts  # noqa: E402  (feature_diameters_text: the figure and the text format the diameters alike)
 
-from sensorperf.acquisition import plan as planning  # noqa: E402
 from sensorperf.acquisition.plan import MIN_POSE_LOG_DECIMALS  # noqa: E402
-from sensorperf.io import manifest as manifest_module  # noqa: E402
 from sensorperf.parameters import CharacterizationParameters, SensorGeometry, parameter_table_rows  # noqa: E402
 
 BUDGET_FRAME_RATE_HZ = 10.0
@@ -120,13 +118,12 @@ def default_plan_and_budget(params: CharacterizationParameters, geometry: Sensor
 
 BUDGET_ROWS = (
     ("Registration", {"R": None}),
-    ("A main + tilt", {"A": None}),
+    ("A main + tilt + sentinels", {"A": None, "S": None}),
     ("B-HV edges", {"B": None}),
-    ("B-Z ladder + ramp", {"Z": None}),
+    ("B-Z ladder + staircase", {"Z": None}),
     ("C main + field", {"C": None}),
     ("D main", {"D": ("jitter",)}),
-    ("D extended (5 % series)", {"D": ("extended",)}),
-    ("Sentinels", {"S": None}),
+    ("D extended (0% series)", {"D": ("extended",)}),
 )
 """The rows of Section 9 of the specification: label and {procedure letter: sub-series or None for all}.
 The robot time of a row is (poses x move-and-settle time + frames / frame rate) / 3600, the planner's own rule
@@ -137,7 +134,7 @@ def budget_rows(plan, frame_rate_hz: float, move_settle_s: float) -> list[tuple[
     """(label, poses, frames, robot hours) per row of BUDGET_ROWS, from the default plan."""
     rows = []
     for label, members in BUDGET_ROWS:
-        chosen = [c for c in plan if c.procedure in members and c.subseries not in planning.OPTIONAL_SUBSERIES
+        chosen = [c for c in plan if c.procedure in members
                   and (members[c.procedure] is None or c.subseries in members[c.procedure])]
         if label == "C main + field" and any(c.subseries == "open" for c in chosen):
             label = "C main + field + open"
@@ -207,74 +204,18 @@ def _and_text(values) -> str:
     return texts[0] if len(texts) == 1 else ", ".join(texts[:-1]) + " and " + texts[-1]
 
 
-CHECK_SUBSERIES = ("warmup", "settle_servo", "settle_brakes", "mount_check", "pilot")
-"""Sub-series labels the manifest module defines for the engineer's own checks (Steps 4.3, 4.4, 4.8 and the post check
-of series D). The planner never writes them into poses.csv, so Section 5 lists the others as the labels of a pose row."""
-
-
-def _confidence_half_width_percent(params: CharacterizationParameters, probability: float, trials: int) -> float:
-    """Half width, in percent, of the normal-approximation confidence interval of a detection probability measured
-    with this many trials, at the confidence level of the parameters (Section 8: 300 trials resolve 5 percent to about
-    plus or minus 2.5 percent at 95 percent confidence)."""
-    from statistics import NormalDist
-    z = NormalDist().inv_cdf(0.5 + 0.5 * params.confidence_level)
-    return 100.0 * z * (probability * (1.0 - probability) / trials) ** 0.5
-
-
-def optional_capture_values(params: CharacterizationParameters, geometry: SensorGeometry) -> dict:
-    """Poses, frames and robot hours of the optional captures that lie outside the capture budget (Section 13), and the
-    D poses the reuse option takes from C, from one plan made with every option switched on (the plan tool's own
-    counts). Hours follow the budget rule: (poses x move-and-settle time + frames / frame rate) / 3600."""
-    import numpy as np
-    diagnostics = planning.PlanDiagnostics()
-    plan = planning.plan_full_session(params, geometry, np.random.default_rng(0), filters_off=True,
-                                      open_background=True, staircase=True, lateral_sweep=True,
-                                      reuse_c_first_frames=True, diagnostics=diagnostics)
-    values = {}
-    for key, subseries in (("filters_off", "filters_off"), ("staircase", "staircase"),
-                           ("lateral_sweep", "lateral_sweep"), ("open", "open")):
-        chosen = [c for c in plan if c.subseries == subseries]
-        poses, frames = len(chosen), sum(c.frames for c in chosen)
-        hours = (poses * params.move_and_settle_time_s + frames / BUDGET_FRAME_RATE_HZ) / 3600.0
-        values[f"optional_{key}_poses"] = f"{poses:,}"
-        values[f"optional_{key}_frames"] = f"{frames:,}"
-        values[f"optional_{key}_hours"] = f"{hours:.2f}" if hours < 1.0 else f"{hours:.1f}"
-    values["reuse_d_poses_from_c"] = f"{diagnostics.c_reuse.poses:,}"
-    values["reuse_per_configuration"] = diagnostics.c_reuse.per_configuration
-    values["reuse_configurations"] = diagnostics.c_reuse.configurations
-    return values
-
-
-def derived_values(params: CharacterizationParameters, geometry: SensorGeometry, budget_totals: dict,
-                   plan=None) -> dict:
+def derived_values(params: CharacterizationParameters, geometry: SensorGeometry, budget_totals: dict) -> dict:
     ladder = params.z_stations_mm()
     shape = params.z_shape_stations_mm()
     reduced = params.z_reduced_stations_mm()
-    low = params.detection_low_stations_mm()
+    zero = params.detection_zero_stations_mm()
     legacy = tuple(z for z in params.noise_stations_mm() if z not in ladder)
     diameters = params.feature_diameters_mm(geometry)
-    if plan is None:
-        plan = default_plan_and_budget(params, geometry)[0]
 
     def px_range(diameter: float) -> str:
-        low_px = geometry.diameter_in_pixels(diameter, params.z_max_mm)
-        high_px = geometry.diameter_in_pixels(diameter, params.z_min_mm)
-        return f"{low_px:.2g} to {high_px:.2g}"
-
-    # Tilt sub-series of A: the stations of the plan that kept a tilted pose, and the reduced stations the near-edge
-    # rule dropped (C06-R1; the planner decides, the document only reports what it did).
-    tilt_stations = sorted({c.station_z_mm for c in plan if c.procedure == "A" and c.subseries == "tilt"})
-    tilt_dropped = [z for z in reduced if z not in tilt_stations]
-    # Step ladder rungs per reduced station (C07-R1), from the planner's own rule and the Tier-A expected quantum.
-    quantum_at = planning.default_expected_quantum_mm(geometry)
-    rung_texts = []
-    for z in reduced:
-        rungs = planning.z_step_rungs_mm(params, quantum_at(z))
-        rung_texts.append(f"{rungs[0]:.3g} to {rungs[-1]:.3g} mm at {z:g} mm")
-    # Ramp (C07-P1): one pose per station of the ladder, tilted about H.
-    ramp = [c for c in plan if c.procedure == "Z" and c.subseries == "ramp"]
-    shifted = [c for c in ramp if c.notes.get("ramp_center_shift_mm", 0.0) > 0.0]
-    low_probability = params.detection_low_probability
+        low = geometry.diameter_in_pixels(diameter, params.z_max_mm)
+        high = geometry.diameter_in_pixels(diameter, params.z_min_mm)
+        return f"{low:.2g} to {high:.2g}"
 
     values = {
         "build_date": dt.date.today().isoformat(),
@@ -283,15 +224,13 @@ def derived_values(params: CharacterizationParameters, geometry: SensorGeometry,
         "station_count": len(ladder),
         "shape_station_count": len(shape),
         "reduced_station_count": len(reduced),
-        "low_station_count": len(low),
+        "zero_station_count": len(zero),
         "legacy_depth_count": len(legacy),
         "ladder_text": _list_text(ladder),
         "shape_stations_text": _list_text(shape),
         "reduced_stations_text": _list_text(reduced),
-        "low_stations_text": _and_text(low),
+        "zero_stations_text": _and_text(zero),
         "legacy_depths_text": _and_text(legacy),
-        "tilt_stations_text": _and_text(tilt_stations),
-        "tilt_dropped_text": _and_text(tilt_dropped) if tilt_dropped else "none",
         "station_ratio_text": "2^(1/4)" if abs(params.z_station_ratio - 2.0 ** 0.25) < 1e-12 else f"{params.z_station_ratio:.4g}",
         "field_position_count": 5,
         "tilt_count": len(params.tilt_angles_deg),
@@ -305,36 +244,17 @@ def derived_values(params: CharacterizationParameters, geometry: SensorGeometry,
         "post_site_count": params.post_sites_per_plate,
         "isolation_mm_at_z_max": f"{params.feature_isolation_px * geometry.pixel_footprint_mm(params.z_max_mm):.0f}",
         "detection_trials_per_level": params.detection_trials_per_level,
-        "detection_low_trials": params.detection_low_trials,
-        "detection_low_trials_reduced": params.detection_low_trials // 2,
-        "low_probability_percent": f"{100.0 * low_probability:g}",
-        "low_half_width_percent": f"{_confidence_half_width_percent(params, low_probability, params.detection_low_trials):.1f}",
-        "low_half_width_reduced_percent": f"{_confidence_half_width_percent(params, low_probability, params.detection_low_trials // 2):.1f}",
-        "false_alarm_percent": f"{100.0 * params.detection_false_alarm_target:g}",
-        "zero_prediction_percent": f"{100.0 * params.detection_zero_prediction_level:g}",
-        "zstep_rung_count": len(params.z_step_ladder_quanta),
-        "zstep_quanta_text": ", ".join(f"{q:g}" for q in params.z_step_ladder_quanta[:-1]) + f" and {params.z_step_ladder_quanta[-1]:g}",
-        "zstep_rungs_text": ", ".join(rung_texts[:-1]) + f" and {rung_texts[-1]}",
-        "ramp_tilt_min_deg": f"{min(c.tilt_deg for c in ramp):.1f}",
-        "ramp_tilt_max_deg": f"{max(c.tilt_deg for c in ramp):.1f}",
-        "ramp_shift_mm": f"{max(c.notes['ramp_center_shift_mm'] for c in shifted):.2f}" if shifted else "0",
-        "ramp_shift_station_mm": _and_text([c.station_z_mm for c in shifted]) if shifted else "none",
-        "lateral_sweep_poses_per_axis": len(params.lateral_sweep_positions_px()),
-        "lateral_sweep_step_mm": f"{params.lateral_sweep_step_px * geometry.pixel_footprint_mm(params.z_reference_mm):.2f}",
-        "open_background_clearance_mm": f"{params.z_max_mm - params.z_reference_mm:g}",
+        "detection_zero_trials": params.detection_zero_trials,
+        "zstep_rung_count": len(params.z_step_ladder_mm),
+        "zstep_smallest_mm": f"{min(params.z_step_ladder_mm):g}",
+        "zstep_largest_mm": f"{max(params.z_step_ladder_mm):g}",
+        "zero_bound_percent": f"{100.0 * params.rule_of_three_bound(params.detection_zero_trials):.1f}",
         "indicative_fx_px": f"{geometry.sensor_fx_px:.0f}",
         "noise_station_frames": params.frames_per_noise_station,
         "sentinel_frames": params.sentinel_frames,
         "budget_frame_rate_hz": f"{BUDGET_FRAME_RATE_HZ:g}",
         "pose_log_min_decimals": MIN_POSE_LOG_DECIMALS,
-        "pose_index_digits": {3: "three", 4: "four"}.get(manifest_module.POSE_INDEX_DIGITS, manifest_module.POSE_INDEX_DIGITS),
-        "filters_off_first_pose": planning.FILTERS_OFF_POSE_INDEX_BASE,
-        "subseries_plan_text": ", ".join(
-            value for name, value in vars(manifest_module).items()
-            if name.startswith("SUBSERIES_") and value not in CHECK_SUBSERIES),
-        "subseries_check_text": ", ".join(CHECK_SUBSERIES),
     }
-    values.update(optional_capture_values(params, geometry))
     values.update(budget_totals)
     values["total_poses_text"] = f"{budget_totals['total_poses']:,}"
     values["total_frames_text"] = f"{budget_totals['total_frames']:,}"
@@ -417,7 +337,7 @@ INVARIANTS = [
     {"name": "Station count of the ladder agrees everywhere", "key": "station_count", "phrase": "stations of the ladder"},
     {"name": "Shape station count agrees everywhere", "key": "shape_station_count", "phrase": "shape station"},
     {"name": "Reduced station count agrees everywhere", "key": "reduced_station_count", "phrase": "reduced station"},
-    {"name": "Count of the farthest (extended-trial) stations agrees everywhere", "key": "low_station_count",
+    {"name": "Count of the farthest (extended-trial) stations agrees everywhere", "key": "zero_station_count",
      "phrase": "farthest station"},
     {"name": "Field position count agrees everywhere", "key": "field_position_count", "phrase": "field position"},
     {"name": "Features per plate agree everywhere", "key": "feature_count", "phrase": "features per plate"},
@@ -426,7 +346,7 @@ INVARIANTS = [
     {"name": "Z-step rung count agrees everywhere", "key": "zstep_rung_count", "phrase": "step size"},
     {"name": "Trials per feature and station agree everywhere", "key": "detection_trials_per_level",
      "phrase": "trials per feature and station"},
-    {"name": "Extended-series trials agree everywhere", "key": "detection_low_trials", "pattern": "{value} trials"},
+    {"name": "Extended-series trials agree everywhere", "key": "detection_zero_trials", "pattern": "{value} trials"},
     {"name": "Working range minimum agrees everywhere", "key": "z_min_mm", "pattern": "{value} mm"},
     {"name": "Working range maximum agrees everywhere", "key": "z_max_mm", "pattern": "{value} mm"},
     {"name": "Total planned poses agree everywhere", "key": "total_poses"},
@@ -453,9 +373,6 @@ STALE_TERMS = (
     (r"enclosure|blackout", "the laboratory is enclosed with constant lighting"),
     (r"\b750 mm|Z0750", "no station at 750 mm"),
     (r"\bdial\b", "the dial indicator is not used"),
-    (r"Z_STEP_LADDER_MM|DETECTION_ZERO_TRIALS|DETECTION_ZERO_STATION_COUNT|DETECTION_ZERO_PROBABILITY_BOUND|POST_NOMINAL_DIAMETER_MM",
-     "removed parameters (Z_STEP_LADDER_QUANTA, DETECTION_LOW_*, and the post diameter rule of Section 2 replace them)"),
-    (r"zero-detection|(?<![\d.])0 ?% point", "the 0 percent level is predicted, not measured; D_5 is the lowest measured point"),
 )
 """Terms of the old design that must not survive in the rendered Markdown (checked at every build)."""
 
@@ -476,32 +393,6 @@ def stale_term_hits(text: str) -> list[str]:
             for match in re.finditer(pattern, line):
                 hits.append(f"line {number}: {match.group(0)!r} ({why}): {line.strip()[:110]}")
     return hits
-
-
-MANIFEST_TABLE_HEADER = "| Group | Columns |"
-MANIFEST_TABLE_CAPTION = "Table 6."
-
-
-def manifest_table_problems(text: str) -> list[str]:
-    """Compare the columns listed in the manifest table of Section 11 (Table 6) with sensorperf.io.manifest.MANIFEST_COLUMNS:
-    the same names in the same order, so the document cannot drift from the module (specification Section 9, "in the order
-    the manifest module writes them")."""
-    start = text.find(MANIFEST_TABLE_HEADER)
-    end = text.find(MANIFEST_TABLE_CAPTION, start)
-    if start < 0 or end < 0:
-        return ["the manifest table (Table 6) was not found in the document"]
-    listed = []
-    for row in text[start:end].splitlines()[2:]:
-        cells = [c.strip() for c in row.strip().strip("|").split("|")]
-        if len(cells) == 2:
-            listed += re.findall(r"`([a-z_0-9]+)`", cells[1])
-    expected = list(manifest_module.MANIFEST_COLUMNS)
-    if listed == expected:
-        return []
-    missing = [c for c in expected if c not in listed]
-    extra = [c for c in listed if c not in expected]
-    return [f"Table 6 differs from MANIFEST_COLUMNS: missing {missing or 'none'}, not in the module {extra or 'none'}"
-            + ("" if (missing or extra) else ", order differs")]
 
 
 def section_elements(text: str, derived: dict) -> list[dict]:
@@ -630,9 +521,9 @@ def main(argv: list[str] | None = None) -> int:
     geometry = SensorGeometry.indicative()
     if not args.no_figures:
         regenerate_figures()
-    plan, budget = default_plan_and_budget(params, geometry)
+    _, budget = default_plan_and_budget(params, geometry)
     _, totals = budget_table(budget)
-    derived = derived_values(params, geometry, totals, plan)
+    derived = derived_values(params, geometry, totals)
     template = TEMPLATE_PATH.read_text(encoding="utf-8")
     text = render(template, params, geometry, budget, derived)
     MARKDOWN_PATH.write_text(text, encoding="utf-8")
@@ -640,10 +531,6 @@ def main(argv: list[str] | None = None) -> int:
     stale = stale_term_hits(text)
     for hit in stale:
         print("STALE:", hit)
-    table_problems = manifest_table_problems(text)
-    for problem in table_problems:
-        print("MANIFEST TABLE:", problem)
-    stale = stale + table_problems
     write_manifest(text, derived)
     print(f"wrote {MANIFEST_PATH}")
     if args.no_docx:

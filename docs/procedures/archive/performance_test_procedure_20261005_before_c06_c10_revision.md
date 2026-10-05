@@ -176,8 +176,6 @@ python3 -m sensorperf.cli.plan_stations --out plan/ --registration registration.
 
 Write the seed in `session_log.md`. The same seed and inputs give the same plan again. Without `--registration` the planner writes the target poses in the camera frame only; without `--sensor-config` it uses the indicative sensor geometry and says so loudly, because the field-of-view fit, the lateral offsets in millimeters, the expected depth quantum, and the capture budget (§13) all depend on the real values. Appendix B lists every option.
 
-The engineer decides which optional captures to plan: the filters-off repeat (`--filters-off`, §3 Step 4.2), the staircase (`--staircase`, §8), the lateral sweep (`--lateral-sweep`, §7), the open-background variant (`--open-background`, §9), and the reuse of C frames as D trials (`--reuse-c-first-frames`, §10). All are off by default and, except the reuse, add rows to the pose list. Decide before the first capture and plan once. Adding `--filters-off`, `--open-background`, or `--reuse-c-first-frames` to a later run changes the random offsets of later series, so its pose list cannot be mixed with the first. `--staircase` and `--lateral-sweep` only add rows, so the engineer can plan them later with the same seed and inputs; capture the added rows and keep working from the first list for everything else.
-
 The planner writes five files in the output folder:
 
 - `poses.csv`: one row per commanded pose.
@@ -186,26 +184,19 @@ The planner writes five files in the output folder:
 - `targets.json`: the target definitions the plan was made with.
 - `parameters.json`: the parameter values the plan was made with (appendix A).
 
-**Terms used in every series.** Four terms are used from here to §10, and each has one meaning.
-
-- Station: a commanded distance of the target center from the sensor, along the optical axis, in mm (the target's Z). The stations are listed below.
-- Field position: where the target center sits in the image. Code 0 is the center. Codes 1 to 4 are the four corners, at 0.6 of the half field (`FIELD_OFFSET_FRACTION`): 1 toward (-H, -V), 2 toward (+H, -V), 3 toward (+H, +V), and 4 toward (-H, +V). Figure 5 shows them. A corner is pulled inward when the target would not fit there (the coverage rule below).
-- Pose: one commanded target position and orientation. The registration (§4) turns it into the flange pose the robot is sent to. One pose is one move, one settle wait, and the capture of its frames.
-- Pose list: the planner's `poses.csv`, one row per pose, in the order to do them (`order`). The robot program executes it row by row. §6 to §10 say what the list holds for each series. You do not choose stations, positions, or order yourself: you follow the list.
-
-One geometric ladder of Z stations serves the whole procedure: 9 stations of the ladder at a ratio of 2^(1/4) (four per octave), 400, 476, 566, 673, 800, 951, 1131, 1345, 1600 mm. Series A, C, and D visit all of them; A also adds the 2 legacy depths 700 and 1000 mm, at the center field position only, so that the existing metrics can be computed at the same depths as the existing data. Series B (edges) visits every second station, the 5 shape stations (400, 566, 800, 1131, 1600 mm). The step ladder of series Z and the tilt sub-series of A visit every fourth station, the 3 reduced stations (400, 800, 1600 mm); the ramp of series Z visits every station of the ladder. The extended trials of D run at the 3 farthest stations (1131, 1345 and 1600 mm). The reference station, 800 mm (a station of the ladder), serves the warm-up check, the sentinels, the re-mount check, the field sub-series of C, the open-background variant, and the post check of D. The working range of 400 to 1600 mm carries the dagger of appendix A, and Step 4.5 confirms it.
+One geometric ladder of Z stations serves the whole procedure: 9 stations of the ladder at a ratio of 2^(1/4) (four per octave), 400, 476, 566, 673, 800, 951, 1131, 1345, 1600 mm. Series A, C, and D visit all of them; A also adds the 2 legacy depths 700 and 1000 mm, so that the existing metrics can be computed at the same depths as the existing data. Series B (edges) visits every second station, the 5 shape stations (400, 566, 800, 1131, 1600 mm). Series Z and the tilt sub-series of A visit every fourth station, the 3 reduced stations (400, 800, 1600 mm). The extended trials of D run at the 3 farthest stations (1131, 1345 and 1600 mm). The reference station, 800 mm (a station of the ladder), serves the warm-up check, the sentinels, the re-mount check, the field sub-series of C, the open-background variant, and the post check of D. The working range of 400 to 1600 mm carries the dagger of appendix A, and Step 4.5 confirms it.
 
 The stations the plan visits, and the five field positions in the image, are in Figure 5. The whole plan is in Figure 6.
 
 ![](figures/fig_stations.png)
 
-Figure 5. Left: the 9 stations of the ladder, used by A, C and D and by the ramp of Z (A adds the 2 legacy depths, at the center only), the 5 shape stations of B, the 3 reduced stations of the Z step ladder and the A tilt sub-series, and the 3 farthest stations of the extended D trials, along Z; the dotted line is the reference station. Right: the 5 field positions (codes 0 to 4) in the image, and the square span of the random lateral offsets (phase jitter) at one corner, true size and magnified.
+Figure 5. Left: the 9 stations of the ladder, used by A, C and D (A adds the 2 legacy depths), the 5 shape stations of B, the 3 reduced stations of Z and the tilt sub-series, and the 3 farthest stations of the extended D trials, along Z; the dotted line is the reference station. Right: the 5 field positions (codes 0 to 4) in the image, and the square span of the random lateral offsets (phase jitter) at one corner, true size and magnified.
 
 ![](figures/fig_plan.png)
 
 Figure 6. The default full plan: target centers in the sensor frame, side view (H against Z) and front view (H against V), colored by series, with the frustum. Each cloud around a station is a set of random lateral offsets.
 
-**What a row of `poses.csv` contains.** Table 4 lists the procedure letters. A row has the order to execute it in (`order`), the identity that names the files (`procedure`, `target_id`, `gap_mm`, `station_z_mm`, `field`, `pose_index`), the number of frames (`frames`), a sub-series label (`subseries`: main, tilt, remount, filters_off, sentinel, nominal, jitter, ladder, ramp, staircase, lateral_sweep, field, open, extended), the logged random seed (`seed`), the random lateral offset in mm at the station depth (`offset_h_mm`, `offset_v_mm`), the tilt (`tilt_axis`, `tilt_deg`), the commanded Z step and visit (`step_mm`, `visit`, series Z only), the feature index (`level_index`, usually empty, because one frame sees every feature of a plate), and the wanted target pose in the camera frame (`target_x_mm` to `target_rz_deg`: position in mm and a rotation vector in degrees). With a registration the row also holds the flange pose to command in the robot base frame: position and rotation vector (`base_x_mm` to `base_rz_deg`), the rotation matrix (`r00` to `r22`, row by row), and the quaternion (`quat_w`, `quat_x`, `quat_y`, `quat_z`). Use whichever form your robot program accepts. A last column (`notes`) holds extra detail as JSON: for example the achieved field fraction (`field_fraction_achieved`), the approach of a series Z pose (`approach`), the approach side of a lateral-sweep pose (`approach_direction`), and whether a sentinel is the reference of its mount (`mount_reference`).
+**What a row of `poses.csv` contains.** Table 4 lists the procedure letters. A row has the order to execute it in (`order`), the identity that names the files (`procedure`, `target_id`, `gap_mm`, `station_z_mm`, `field`, `pose_index`), the number of frames (`frames`), a sub-series label (`subseries`: for example `main`, `tilt`, `remount`, `nominal`, `jitter`, `ladder`, `staircase`, `field`, `extended`, `sentinel`), the logged random seed (`seed`), the random lateral offset in mm at the station depth (`offset_h_mm`, `offset_v_mm`), the tilt (`tilt_axis`, `tilt_deg`), the commanded Z step and visit (`step_mm`, `visit`, series Z only), the feature index (`level_index`, usually empty, because one frame sees every feature of a plate), and the wanted target pose in the camera frame (`target_x_mm` to `target_rz_deg`: position in mm and a rotation vector in degrees). With a registration the row also holds the flange pose to command in the robot base frame: position and rotation vector (`base_x_mm` to `base_rz_deg`), the rotation matrix (`r00` to `r22`, row by row), and the quaternion (`quat_w`, `quat_x`, `quat_y`, `quat_z`). Use whichever form your robot program accepts. A last column (`notes`) holds extra detail as JSON.
 
 | Letter | Series | Target | See |
 |---|---|---|---|
@@ -215,36 +206,36 @@ Figure 6. The default full plan: target centers in the sensor frame, side view (
 | Z | Depth steps (B-Z) | T2 | §8 |
 | C | Disk and cutout areas | T4, T5 | §9 |
 | D | Detection trials | T4, T5 | §10 |
-| S | Drift sentinels | whichever target is mounted | §5 |
+| S | Drift sentinels | T2 | §6, step 3 |
 
 Table 4. Procedure letters of the plan and of the file names.
 
-**Coverage rule.** The planner checks that each target fits the field of view at its station and field position, with a margin of 8 px (`BOUNDARY_BAND_HALF_WIDTH_PX`) between the plate and the image border (and half the phase-jitter span more for the series with random offsets). A target that would not fit, for example T2 at a corner at Z_MIN, is pulled inward along its field direction until it fits. The fraction of the requested offset that it kept is the achieved field fraction: 1 means no pull-in, and 0 means the target stays at the center. The fraction is in the `notes` of the row (`field_fraction_achieved`) and in the manifest (§11), and `plan_summary.txt` lists every adjustment and every target that does not fit even when centered. Do not override these. Tell the engineer about any plate that does not fit when centered. Keep `plan_summary.txt` with the session: the achieved fractions are reported with the results of series A (per station) and with the field comparison of series C (§14). The disk and cutout plates T4 and T5 are built to fit the field of view at Z_MIN with room for the random offsets; if the target set cannot be built that way, the planner stops with an error that names the plate, and the engineer changes the target design before anything is fabricated.
+The planner checks that each target fits the field of view at its station. A target that would not fit, for example T2 off-axis at Z_MIN, is pulled inward along its field direction until it fits. `plan_summary.txt` lists every such adjustment and every target that does not fit even when centered. Do not override these. Tell the engineer about any plate that does not fit when centered. The disk and cutout plates T4 and T5 are built to fit the field of view at Z_MIN with room for the random offsets; if the target set cannot be built that way, the planner stops with an error that names the plate, and the engineer changes the target design before anything is fabricated.
 
 **Robot program outline**, for each row of `poses.csv`, in `order`:
 
-1. Move to the pose. Use a joint move to a point short of it along the target normal, then a linear move onto it, so the approach is the same every time. For every pose of series Z (step ladder, ramp, and the optional staircase) the point short of the pose lies below it: back off by 2 mm toward smaller Z, then move up onto the pose, so that every pose of the series is approached from below and backlash does not enter the difference between visits (§8). The one exception is the optional lateral sweep of series B (§7), where the approach side alternates on purpose and the row says which side.
+1. Move to the pose. Use a joint move to a point short of it along the target normal, then a linear move onto it, so the approach is the same every time. For every visit of series Z the point short of the pose lies below it: back off by 2 mm toward smaller Z, then move up onto the pose, so that every visit of the series is approached from below and backlash does not enter the difference between visits (§8).
 2. Wait the settle time of Step 4.4 (2 s unless the check raised it).
-3. Trigger the capture of `frames` frames. Name the files `<proc>_<target>_G<gap>_Z<zzzz>_F<field>_P<pose>_f<frame>.mc` from the row: for example `C_T5_G15_Z0800_F0_P017_f03.mc` is procedure C (area), target T5, gap 15 mm, station Z = 800 mm, field position 0 (center), pose 17, frame 3. The pose number has three digits (`P017`); the filters-off repeat, which is planned outside the budget, numbers its poses from `P1000` and so has four. A target without a back plate (T2) writes `G0`. The frame number has two digits and runs from `f00`.
+3. Trigger the capture of `frames` frames. Name the files `<proc>_<target>_G<gap>_Z<zzzz>_F<field>_P<pose>_f<frame>.mc` from the row: for example `C_T5_G15_Z0800_F0_P017_f03.mc` is procedure C (area), target T5, gap 15 mm, station Z = 800 mm, field position 0 (center), pose 17, frame 3. A target without a back plate (T2) writes `G0`. The frame number runs from `f00`.
 4. Read the robot's actual reported (encoder-derived) flange pose, not the commanded one, and append it to the pose log (§11). Add the sensor and air temperature and a timestamp.
 5. Move on.
 
-**Drift sentinels.** A sentinel (letter `S`) is a capture of whatever target is mounted at that point of the pose list, centered at the reference station, Z = 800 mm (`Z_REFERENCE_MM`), fronto-parallel, with 30 frames (`SENTINEL_FRAMES`). The planner puts sentinel rows in the list before the first pose of series A, every 60 minutes by its estimate of the clock (`DRIFT_SENTINEL_INTERVAL_MIN`), and after the last pose of each series. The row names the target that is mounted at that point (`target_id`, `gap_mm`), so no target is swapped for a sentinel and T2 is never re-mounted for one. The first sentinel after each mount is that target's reference, and the analysis measures the drift of that target against it (the row's notes say `mount_reference`). The sentinels before and after series A and after series Z are on T2. Do each sentinel when its row comes up, even if the real time differs from the planner's estimate; the timestamp in the pose log is what the analysis uses. Name the files from the row and keep them in the `sentinels/` folder (§13).
+Sentinel rows (letter `S`) appear in the plan every 60 minutes, by the planner's estimate of the clock. A sentinel is T2 at the center at Z = 800 mm, 30 frames. It needs T2 on the robot. If T2 is not mounted when a sentinel row comes up, ask the engineer whether to swap targets now or to do the sentinel at the next target change, and write the actual time of the capture in the pose log. After the sentinel, mount the target of the series again and do the mount check of Step 4.8.
 
 Do the series in the order of the plan: A, then B, then Z, then C, then D. Do not move the sensor between them. Tell the engineer at once if a series stops early; the later series depend on the earlier ones (Figure 1).
 
 ## 6. Series A: the noise plate
 
-This series captures the 9 stations of the ladder at 5 field positions each, and the 2 legacy depths (700 and 1000 mm) at the center only, 100 frames per pose, plus a tilt sub-series. The order of the poses is randomized, with a logged seed, so that slow drift cannot masquerade as a Z dependence. The planner has already done this: follow the `order` column.
+This series captures the 9 stations of the ladder plus the 2 legacy depths (700 and 1000 mm) at 5 field positions each, 100 frames per pose, plus a tilt sub-series. The station order is randomized, with a logged seed, so that slow drift cannot masquerade as a Z dependence. The planner has already done this: follow the `order` column.
 
-1. Mount T2. Do the mount check (Step 4.8). The stations are every station of the ladder from Z_MIN (400 mm) to Z_MAX (1600 mm), 400, 476, 566, 673, 800, 951, 1131, 1345, 1600 mm, each at the five field positions: the center and four corners at 0.6 of the half field, all fronto-parallel (Figure 5). The legacy depths 700 and 1000 mm are at the center only, because the existing metrics use the center.
-2. The plate must cover the analysis region at every pose. Where a corner would carry part of the plate out of the image, the planner has pulled the pose inward by the coverage rule (§5) and recorded the achieved field fraction in the row. This happens at the near stations. Do not move such a pose back out. The results of series A report the fraction for each station.
-3. Before the first station, the pose list has a drift sentinel on T2 (center, Z = 800 mm, 30 frames). More follow every 60 minutes and after the last station (§5, drift sentinels).
-4. At each station: move, wait the settle time, then capture the frames of the row. Log the read-back robot pose, the sensor temperature, and the timestamps. The air temperature comes from the loggers of Step 4.1.
-5. Tilt sub-series. At the center of the reduced stations (400, 800, 1600 mm), T2 is tilted about V, then about H, through each angle of 0, 15, 30, 45 degrees. Capture 50 frames per pose. Incidence angle changes both the per-pixel noise and the fill rate. These rows have sub-series `tilt`. A tilt is planned only where the tilted plate's near edge stays at or beyond Z_MIN: the near edge is at Z minus half the plate width times the sine of the tilt. The planner checks this, leaves out the poses that fail, and lists them under "Skipped poses" in `plan_summary.txt`. With the 400, 400 mm plate (width, height) that rules out every tilt at 400 mm, so the tilt sub-series runs at 800 and 1600 mm. Do not add tilts at the skipped stations by hand.
+1. Mount T2. Do the mount check (Step 4.8). The stations are every station of the ladder from Z_MIN (400 mm) to Z_MAX (1600 mm), 400, 476, 566, 673, 800, 951, 1131, 1345, 1600 mm, and the legacy depths 700 and 1000 mm. The five field positions are the center and four corners at 0.6 of the half field, all fronto-parallel (Figure 5).
+2. Check that the plate fully covers the analysis region at every station. At Z_MIN off-axis this may limit the field offset. The planner has pulled such poses inward; see `plan_summary.txt`.
+3. Before the first station, capture a drift sentinel: center, Z = 800 mm, 30 frames. The plan repeats the sentinel every 60 minutes and after the last station.
+4. At each station: move, wait the settle time, then capture the frames of the row. Log the read-back robot pose, the sensor temperature, and the timestamps.
+5. Tilt sub-series. At the center and at the 3 reduced stations (400, 800, 1600 mm), T2 is tilted about V, then about H, through each angle of 0, 15, 30, 45 degrees. Capture 50 frames per pose. Incidence angle changes both the per-pixel noise and the fill rate. These rows have sub-series `tilt`.
 6. Repeat-mount check. Dismount T2, re-mount it, and repeat the Z = 800 mm center station (sub-series `remount`). The difference shows how much of the bias comes from re-mounting the target; the adapter repeats to 0.02 mm.
 7. Do not delete any frames. Tell the engineer if a pose shows a warning in §12.
-8. Engineer: if Step 4.2 calls for it, repeat steps 1 to 6 with the sensor's filters off. This repeat is outside the capture budget of §13. Plan it with `--filters-off` and record the new configuration in `sensor_config.json` with a new `config_id`.
+8. Engineer: if Step 4.2 calls for it, repeat the series with the sensor's filters off. This repeat is outside the capture budget of §13. Plan it with `--filters-off` and record the new configuration in `sensor_config.json` with a new `config_id`.
 
 ## 7. Series B: the edge targets
 
@@ -255,26 +246,25 @@ The edge series gives lateral (H, V) resolution and most of the boundary-bias da
 3. At the same Z, capture 25 further poses, each with 30 frames (sub-series `jitter`). Each adds a logged random lateral offset, uniform over plus or minus half of the phase-jitter span (8 px at the station Z) in both H and V. The plan holds the offsets in millimeters (`offset_h_mm`, `offset_v_mm`), so the robot only has to execute the row.
 4. Repeat steps 2 and 3 with the gap at 60 mm. Comparing the two step heights tests whether the normalized edge response depends on step height. If it does, the depth pipeline is nonlinear and resolution must be quoted together with its step height.
 5. Repeat steps 1 to 4 with T3b (square window). The window has the opposite edge polarity: front plate outside, back plate inside.
-6. Lateral sweep (optional; the engineer decides, §5). It maps the reported edge position against the true one more finely than the random offsets do. Plan it with `--lateral-sweep`. The pose list then holds 20 poses in H and then 20 in V of T3a with the gap at 15 mm, at the reference station (800 mm), with 30 frames each (sub-series `lateral_sweep`). Each pose moves the square sideways from its nominal pose by one more step of 0.1 px (`LATERAL_SWEEP_STEP_PX`), which is about 0.12 mm at 800 mm, up to 2 px (`LATERAL_SWEEP_SPAN_PX`); the offsets are in `offset_h_mm` and `offset_v_mm`. The rows come right after the other captures of T3a at that gap, so do them while T3a is still mounted, without re-mounting. Here the approach direction changes from pose to pose, on purpose: the first, third, and every odd-numbered pose of an axis is approached from the negative side (-H or -V), and the even-numbered poses from the positive side (+H or +V). The robot's lateral play then shows up in the data. The `notes` column (`approach_direction`) names the side for each row, so program the robot to arrive from that side. This is the only place where the approach is not the same every time (§5, step 1 of the robot program). The sweep is outside the capture budget of §13.
-7. Engineer: if Step 4.2 calls for it, repeat series B with the sensor's filters off, as for series A (§6, step 8). This repeat is outside the capture budget of §13.
+
+6. Engineer: if Step 4.2 calls for it, repeat series B with the sensor's filters off, as for series A (§6, step 8). This repeat is outside the capture budget of §13.
 
 Follow the order of the plan, which keeps each target mounted for as long as it can.
 
 ## 8. Series Z: depth steps
 
-The depth series gives the smallest Z step the sensor detects and the size of the quantum in which it reports depth. It uses the noise plate T2 in two captures: a step ladder of small Z moves, and a ramp, in which the plate is tilted by a small angle. This is the series most limited by the robot's repeatability, because the truth of each step is the read-back robot pose, carried into the sensor frame through the registration. The true step between two visits is the difference of their registered front-plane depths along the optical axis (the z component of the target pose, which is the front-plane depth for the fronto-parallel plate of the ladder). Because it is a difference of two registered poses, the registration's translation cancels and its rotation error enters only through the cosine of the angle error, which is negligible: only the robot's relative motion accuracy matters.
+The depth series gives the smallest Z step the sensor detects. It uses small Z moves of the noise plate. This is the series most limited by the robot's repeatability, because the truth of each step is the read-back robot pose, carried into the sensor frame through the registration. The true step between two visits is the difference of their registered front-plane depths along the optical axis (the z component of the target pose, which is the front-plane depth for the fronto-parallel plate of this series). Because it is a difference of two registered poses, the registration's translation cancels and its rotation error enters only through the cosine of the angle error, which is negligible: only the robot's relative motion accuracy matters.
 
 Design change: the specification of 2026-10-04 used a dial indicator on the target adapter as the step truth; this procedure uses the read-back robot pose instead, so the smallest rungs carry the robot's repeatability as their uncertainty, and the 0.02 and 0.05 mm rungs of that specification's ladder were removed because their truth would be no better than the robot.
 
 ![](figures/fig_zstep.png)
 
-Figure 7. The series Z captures at one station, 800 mm. Left: the step ladder, the 6 step sizes in turn, each with its A, B, A, B alternation. Right: the ramp, with the depth the sensor reports if it quantizes at the expected quantum (an illustration, not a measurement).
+Figure 7. The series Z visits at one Z0. Left: the step ladder, the 6 step sizes in turn, each with its A, B, A, B alternation. Right: the fine staircase.
 
-1. Mount T2 centered and fronto-parallel and do the mount check (Step 4.8). The step ladder visits the 3 reduced stations (400, 800, 1600 mm); the ramp visits all 9 stations of the ladder. Every pose of the series is approached from below (§5, step 1 of the robot program).
-2. Step ladder. The rungs are multiples of the expected depth quantum at the station: 0.25, 0.5, 1, 2, 4 and 8 times it (`Z_STEP_LADDER_QUANTA`). The expected quantum grows with the square of Z, so the rungs do too: at the indicative geometry they run from 0.1 to 3.1 mm at 400 mm, 0.388 to 12.4 mm at 800 mm and 1.55 to 49.6 mm at 1600 mm. The planner lists the rungs of each station in millimeters in `plan_summary.txt`; use those. No rung is smaller than 0.1 mm (`ROBOT_MIN_RESOLVABLE_MOVE_MM`), the smallest Z move the robot is trusted to make; a smaller multiple is raised to it. The expected quantum, listed in `plan_summary.txt`, uses the Tier-A disparity quantum until analysis A has measured the real one. For each of the 6 step sizes, alternate the target between Z0 (visit A) and Z0 plus the step (visit B) for 10 cycles (A, B, A, B, and so on). Capture 10 frames at each visit. The analysis uses the read-back pose of every visit, not the commanded step, as ground truth for the step. Alternating cancels linear drift. Rows have sub-series `ladder`, with `step_mm` and `visit` filled in. At the farthest station the largest rung carries the plate beyond Z_MAX; the planner notes this in `plan_summary.txt`. Capture it as planned and write in `session_log.md` whether the sensor returned valid depth there.
-3. Ramp. At every station of the ladder, T2 is centered and tilted about H (the horizontal axis, parallel to the stereo baseline) by a small angle, so that the true depth across the visible height of the plate spans 4 expected quanta (`RAMP_QUANTA`). Each image row then lies at one true depth, and the rows step through the quanta. The angle is in the row (`tilt_deg`) and is 0.3 degrees at the nearest station to 3.6 degrees at the farthest. The flange pose in the row already includes it. Capture 50 frames (`FRAMES_PER_RAMP_POSE`) and log the read-back pose (sub-series `ramp`). One capture per station replaces a staircase of small Z moves and does not depend on the robot resolving them. At 400 mm the tilted plate's near edge would come 1.11 mm closer than Z_MIN, so the planner moves the plate center 1.11 mm farther. The station label stays at that station, and the shift is in the row's `notes` (`ramp_center_shift_mm`) and in `plan_summary.txt`. Do not undo it.
+1. Mount T2 centered and fronto-parallel at each Z0 of the 3 reduced stations (400, 800, 1600 mm). Approach every visit of the series from below (§5, step 1).
+2. Step ladder. For each of the 6 step sizes (0.1, 0.2, 0.5, 1, 2, 4 mm), alternate the target between Z0 (visit A) and Z0 plus the step (visit B) for 10 cycles (A, B, A, B, and so on). Capture 10 frames at each visit. The analysis uses the read-back pose of every visit, not the commanded step, as ground truth for the step. Alternating cancels linear drift. Rows have sub-series `ladder`, with `step_mm` and `visit` filled in.
+3. Fine staircase. Sweep from Z0 to Z0 plus 3 times the expected depth quantum, in steps of one expected quantum divided by 10, with 10 frames per step (sub-series `staircase`). This reveals whether the output moves in quantized steps, or is smoothed by the sensor's interpolation. The expected quantum, listed in `plan_summary.txt`, uses the Tier-A disparity quantum until analysis A has measured the real one. If the engineer has re-planned the staircase with the measured quantum, use the new rows. The horizontal axis of the staircase is the read-back Z of each step, whose uncertainty is the robot repeatability of 0.05 mm; when the fine step is smaller than that, the analysis notes it and the plateau widths carry that uncertainty.
 4. No extra capture is needed for the blank windows: the Z0 frames of step 2 serve as the no-step reference for the false-alarm threshold.
-5. Staircase (optional second pass). The engineer decides after the ramp has been analyzed. It is run only when the ramp has measured a quantum of at least 0.1 mm, because the staircase step is never smaller than that. The engineer plans it with `--staircase` (§5). At each reduced station T2 is moved from Z0 to Z0 plus 3 expected quanta (`Z_STAIRCASE_QUANTA`), in steps of the larger of one expected quantum divided by 10 (`Z_STAIRCASE_SUBDIVISION`) and 0.1 mm, with 10 frames per step (sub-series `staircase`). It shows what the static ramp cannot: whether the output moves in quantized steps in time at one pixel, and the hysteresis or the temporal filter's response to motion. `plan_summary.txt` lists the step and the number of steps for each station and says where a step was raised to the floor. The horizontal axis of its analysis is the read-back Z of each step, whose uncertainty is the robot repeatability of 0.05 mm; when the step is smaller than that, the analysis notes it. The staircase is outside the capture budget of §13 (75 poses and 750 frames at the indicative geometry).
 
 The smallest rung (0.1 mm) is twice the robot repeatability of 0.05 mm; the ladder starts there because a rung below the repeatability would be captured and flagged rather than measured. Do not try to correct the robot pose by hand. Log the read-back pose as it is.
 
@@ -282,17 +272,17 @@ The smallest rung (0.1 mm) is twice the robot repeatability of 0.05 mm; the ladd
 
 Each plate is captured at many random sub-pixel offsets and at every station of the ladder. Sensed area depends on where a feature's edge falls relative to the pixel grid and the projector dots, and on the subtended size D_px, which the Z sweep varies by a factor of 4 for each feature. The procedure averages over the phase and also measures its spread.
 
-1. The pose list for C holds, for each plate (T4 and T5) and each gap (15 and 60 mm), the 9 stations of the ladder, each with the plate centered and fronto-parallel. The planner randomizes the order within each mounting, so targets are re-mounted as rarely as possible. Mount one plate at a time and do the mount check (Step 4.8).
-2. At each station, capture 30 poses, each with 10 frames (sub-series `jitter`). Each has a logged random lateral offset, uniform over plus or minus half of the phase-jitter span (8 px) in H and V.
-3. Field sub-series. At Z = 800 mm and the small gap, repeat step 2 for each plate at the four corners, 10 poses each (sub-series `field`). The plates may not fit at the full field offset there, so the planner pulls them inward by the coverage rule (§5) and logs the achieved field fraction in each row. Do not move them back out. The fraction is reported with the field comparison of C (§14).
-4. Open-background variant (cutouts, optional). At Z = 800 mm, remove the back plate so that nothing lies within the sensor's range behind the holes. That needs 800 mm of clear space behind the plate (Z_MAX minus the reference station), or a surface beyond the sensor's range. Check the space before you start. Then repeat step 2 (sub-series `open`). This separates the sensor's fill-in behavior from reads of a real back surface. The engineer plans it with `--open-background` (§5); it is outside the capture budget of §13.
-5. Drift sentinels appear in the pose list on the plate that is mounted (§5). Capture them where they come; no re-mount is needed.
+1. The configuration list is both plates {T4, T5}, with both gaps, at each of the 9 stations of the ladder. Center the plate and keep it fronto-parallel. The plan randomizes the order within each mounting, so targets are re-mounted as rarely as possible. Mount one plate at a time and do the mount check (Step 4.8).
+2. At each configuration, capture 30 poses, each with 10 frames (sub-series `jitter`). Each has a logged random lateral offset, uniform over plus or minus half of the phase-jitter span in H and V.
+3. Field sub-series. At Z = 800 mm and the small gap, repeat step 2 for each plate at the four corners, 10 poses each (sub-series `field`).
+4. Open-background variant (cutouts, optional). At Z = 800 mm, remove the back plate so that nothing lies within the sensor's range behind the holes. Then repeat step 2. This separates the sensor's fill-in behavior from reads of a real back surface. Plan it with `--open-background`.
+5. Capture the drift sentinels the plan lists (§5).
 
-The post check of §10 uses the first frame of each C pose at Z = 800 mm, so keep those frames. The first frame of each C pose can also count as a D trial (§10, step 5); a later frame of a C pose never does.
+The post check of §10 uses the first frame of each C pose at Z = 800 mm, so keep those frames.
 
 ## 10. Series D: detection trials
 
-A detection trial is one frame at a fresh random lateral offset. All features and blank sites sit on one plate, so a single frame yields one trial for every feature on that plate at once. There is nothing to choose before the trials: the detection levels are the (feature, station) pairs. the 9 stations of the ladder and the 3 features give 27 values of the subtended size D_px, spaced by the station ratio, with each feature spanning two octaves and overlapping its neighbors by half an octave. The 10 percent and 5 percent levels need many more trials than the 50 percent level, at the levels where detection is rare, which lie at the far stations. The 0 percent level is not measured: the analysis predicts it from the fitted curve, and reports it as a prediction (§14).
+A detection trial is one frame at a fresh random lateral offset. All features and blank sites sit on one plate, so a single frame yields one trial for every feature on that plate at once. There is nothing to choose before the trials: the detection levels are the (feature, station) pairs. the 9 stations of the ladder and the 3 features give 27 values of the subtended size D_px, spaced by the station ratio, with each feature spanning two octaves and overlapping its neighbors by half an octave. The 10 percent and 0 percent minimums need many more trials at the levels where detection disappears, which lie at the far stations.
 
 1. Post check (Engineer). Run the quick-look detection count on the first frame of each C pose at Z = 800 mm:
 
@@ -302,9 +292,9 @@ python3 -m sensorperf.cli.check_captures --session Characterization_20261014/ --
 
    The tool prints the detection count at each post-only control site against the false-alarm rate. If any post-only site shows detections above the false-alarm rate, the disk posts must be re-made thinner and the check repeated. The check selects nothing else.
 2. Main trials. For each configuration (disk or cutout, either gap, every ladder station), capture 60 poses, each with a new random lateral offset and 1 frame. That gives 60 trials per feature and station. The plan shuffles the pose order with a logged seed. Follow the `order` column. The plan treats each plate separately, because a frame sees only one plate.
-3. Extended trials for the 5 percent level. At the 3 farthest stations (1131, 1345 and 1600 mm; `DETECTION_LOW_STATION_COUNT`), where the smallest feature lies near and below the expected threshold, the plan raises the pose count of every configuration to 300 trials (`DETECTION_LOW_TRIALS`; sub-series `extended`, the poses beyond the main trials). Every feature, and every blank site, then has that many trials there. 300 trials measure a detection probability of 5 percent (`DETECTION_LOW_PROBABILITY`) to about plus or minus 2.5 percent at 0.95 confidence, and separate it from the 1 percent false-alarm rate. The 0 percent level is not measured. If time is short, the engineer can lower the number of extended trials: for example 150 trials still measure the 5 percent level, to about plus or minus 3.5 percent, and roughly halve that part of the budget.
-4. Independence rule. Never use two frames from the same pose as separate trials. The fixed projector pattern and the target's fixed position make them strongly correlated. Take one frame per pose, always at a new offset. Only the first frame of a C pose may serve as a D trial (step 5); a later frame of a C pose never does. The analysis checks independence after the fact.
-5. Reuse (optional). The first frame of each C pose at a matching configuration may count as a D trial: 30 of the 60 main trials of each configuration and station. The engineer asks for it with `--reuse-c-first-frames` (§5). The pose list then holds 30 main D poses instead of 60 for each of the 36 configurations and stations, 1,080 fewer in all (the extended trials are not changed). Capture series C as usual and keep frame `f00` of every C pose. The capture budget (§13) assumes no reuse.
+3. Extended trials for the 0 percent point. At the 3 farthest stations (1131, 1345 and 1600 mm), where the smallest feature lies below the expected threshold, the plan raises the pose count of every configuration to 300 trials (sub-series `extended`, the poses beyond the main trials). Every feature, and every blank site, then has that many trials there. With zero detections in n trials, the one-sided upper bound on detection probability at 0.95 confidence is about 3/n. So 300 trials bound a "never detected" level at 1.0 percent (0.01). If time is short, the engineer can lower the number of extended trials: for example 150 trials bound the 0 percent point at 2 percent and roughly halve that part of the budget.
+4. Independence rule. Never use two frames from the same pose as separate trials. The fixed projector pattern and the target's fixed position make them strongly correlated. Take one frame per pose, always at a new offset. The analysis checks independence after the fact.
+5. Reuse. The first frame of each C pose at a matching configuration may count as a D trial. The plan does not count it, so it does not reduce the number of D poses planned.
 
 ## 11. Recording the poses: the pose log and the manifest
 
@@ -319,7 +309,7 @@ x_mm, y_mm, z_mm, rotation_type, r1, r2, r3, r4, r5, r6, r7, r8, r9
 
 Optional columns that end up in the manifest: `timestamp`, `sensor_temp_c`, `air_temp_c` (logged every 1 minute). A one-row-per-frame form also exists: the first column is `file`, the Section 9 file name, followed by `x_mm` and the rest.
 
-- `procedure` to `pose_index`: exactly the values of the plan row, which also name the files (a sentinel row has procedure `S` and the target that is mounted). `gap_mm` is empty for a target without a back plate, which the file name writes as `G0`.
+- `procedure` to `pose_index`: exactly the values of the plan row, which also name the files. `gap_mm` is empty for a target without a back plate.
 - `x_mm`, `y_mm`, `z_mm`: the reported (actual, encoder-derived) flange position in the robot base frame, in mm, written with at least 2 decimals (a resolution of 0.01 mm). This is a requirement: for series Z the read-back pose is the step truth, and a log rounded to 0.1 mm makes the smallest rungs meaningless. `make_manifest` warns when every `z_mm` of series Z has fewer decimals.
 - `rotation_type` and `r1` to `r9`: the reported orientation, in whatever form the controller gives, named by one of the types of Table 5. Fill unused `r` columns with nothing.
 
@@ -364,11 +354,7 @@ What the manifest contains, one line per frame (Table 6):
 | Readings | `timestamp`, `sensor_temp_c`, `air_temp_c`, `sensor_config_id` |
 | Sub-series details | `subseries`, `tilt_axis`, `tilt_deg`, `step_mm`, `visit`, `level_index` |
 
-Table 6. Manifest columns, in the order the manifest module writes them. Rotations are rotation vectors in degrees.
-
-Further columns may follow the ones in Table 6. They carry extra metadata from the plan; at present the achieved field fraction (`field_fraction_achieved`) for a pose placed at a field position. The analysis of A reads it.
-
-The `subseries` column holds one of these labels: main, tilt, remount, filters_off, sentinel, nominal, jitter, ladder, ramp, staircase, lateral_sweep, field, open, extended. The labels `ladder`, `ramp`, and `staircase` belong to series Z, `nominal`, `jitter`, and `lateral_sweep` to series B, `field` and `open` to series C, `extended` and `jitter` to series D, and `main` to the main stations of the other series. The labels `filters_off`, `staircase`, `lateral_sweep`, and `open` mark the optional captures. The module also defines warmup, settle_servo, settle_brakes, mount_check, pilot for the engineer's own checks (Steps 4.3, 4.4, 4.8 and the post check of §10); the planner never writes them. The pose index of the filters-off repeat starts at 1000, so its file names have four digits (§5).
+Table 6. Manifest columns. Rotations are rotation vectors in degrees.
 
 ## 12. Checking the captures
 
@@ -421,34 +407,22 @@ Figure 8. The session folder feeds the six analyses, which write into `analysis/
 - [ ] `session_log.md` with: date, sensor serial number, warm-up time, settle time, base frame name, plate flatness and finish, mount-check results, target changes with times, and anything unusual
 - [ ] Photos of the setup: sensor stand, each target on the adapter
 
-**Capture budget.** Table 7 is computed from the default plan. The estimate assumes 10 frames per second and 3 s per move plus settle. Both are assumptions; the VSX3000 frame rate in the chosen trigger mode should replace them. The table has a separate row for the drift sentinels.
+**Capture budget.** Table 7 is computed from the default plan. The estimate assumes 10 frames per second and 3 s per move plus settle. Both are assumptions; the VSX3000 frame rate in the chosen trigger mode should replace them. Target swaps, warm-up, the D post check, and the filters-off repeat of A and B (Step 4.2) are excluded. Allow two to three working days in total.
 
 | Series | Poses | Frames | Robot time (h) |
 |---|---:|---:|---:|
 | Registration | 30 | 300 | 0.03 |
-| A main + tilt | 64 | 5,600 | 0.21 |
+| A main + tilt + sentinels | 89 | 7,070 | 0.27 |
 | B-HV edges | 520 | 15,600 | 0.87 |
-| B-Z ladder + ramp | 369 | 4,050 | 0.42 |
+| B-Z ladder + staircase | 453 | 4,530 | 0.50 |
 | C main + field | 1,160 | 11,600 | 1.29 |
 | D main | 2,160 | 2,160 | 1.86 |
-| D extended (5 % series) | 2,880 | 2,880 | 2.48 |
-| Sentinels | 11 | 330 | 0.02 |
-| **Total** | **7,194** | **42,520** | **7.2** |
+| D extended (0% series) | 2,880 | 2,880 | 2.48 |
+| **Total** | **7,292** | **44,140** | **7.3** |
 
 Table 7. Capture budget of the default plan: poses, frames, and robot time per series.
 
-The plan has 7,194 poses and 42,520 frames, about 7.2 hours of robot time. The extended 5 percent series takes about a third of the robot time. Check storage before starting: multiply the size of one `.mc` frame by 42,520 frames.
-
-Outside the budget, and not in Table 7, are the optional captures, which the engineer plans only when needed (§5):
-
-- the filters-off repeat of A, B-HV, and B-Z (Step 4.2): 1,027 poses, 25,900 frames, about 1.6 hours;
-- the staircase of series Z (§8, step 5): 75 poses, 750 frames, about 0.08 hours;
-- the lateral sweep of series B (§7, step 6): 40 poses, 1,200 frames, about 0.07 hours;
-- the open-background variant of series C (§9, step 4): 30 poses, 300 frames, about 0.03 hours;
-- the reuse of C frames as D trials (§10, step 5), which takes 1,080 poses out of the D main row instead of adding any.
-
-The figures are for the indicative geometry and the default plan. The budget also leaves out target swaps, warm-up, the mount checks, the registration time (the registration poses are in the table, but not the solve), and the D post check. Allow two to three working days in total.
-
+The plan has 7,292 poses and 44,140 frames, about 7.3 hours of robot time. The extended 0 percent series takes about a third of the robot time. Check storage before starting: multiply the size of one `.mc` frame by 44,140 frames.
 
 ## 14. Running the analyses
 
@@ -460,15 +434,15 @@ python3 -m sensorperf.cli.analyze --session Characterization_20261014/ [--only A
 
 `--only` runs a subset (the letters are those of Table 4, with B for the lateral analysis and Z for the depth analysis). An analysis whose frames are absent from the manifest is skipped with a notice. The results go into `analysis/` in the session folder; an optional `--out DIR` changes the folder. The exit code is 0 when every selected analysis ran, 1 when one failed (the others still run), and 2 when the session cannot be read. Each analysis writes a CSV summary, a detail file, and figures (PNG and SVG). The definitions are in the specification, Sections 10 to 14; this section says what each one reports.
 
-**A, noise versus Z** (specification Section 10; series A and the sentinels). Reports the temporal, fixed-pattern, and total depth noise of the plate at each Z, with the bias, the fill rate, the spatial correlation length, and the depth quantization step, and fits the disparity-noise model. It also reports how noise and fill rate change with incidence angle (the tilt sub-series), corrects for drift with the sentinels (each mounted target against its own first sentinel), and computes the existing legacy metrics at 700 and 1000 mm. Writes `A_noise_summary.csv` (one row per station, with the achieved field fraction of the pose) and figures: the noise curves with the model fit, fill rate, noise maps, autocorrelation profiles, and depth-code histograms. The fitted disparity noise, the noise floor, the quantum, k, and the correlation length go into `forward_model_parameters.json`.
+**A, noise versus Z** (specification Section 10; series A and the sentinels). Reports the temporal, fixed-pattern, and total depth noise of the plate at each Z, with the bias, the fill rate, the spatial correlation length, and the depth quantization step, and fits the disparity-noise model. It also reports how noise and fill rate change with incidence angle (the tilt sub-series), corrects for drift with the sentinels, and computes the existing legacy metrics at 700 and 1000 mm. Writes `A_noise_summary.csv` (one row per station) and figures: the noise curves with the model fit, fill rate, noise maps, autocorrelation profiles, and depth-code histograms. The fitted disparity noise, the noise floor, the quantum, k, and the correlation length go into `forward_model_parameters.json`.
 
 **B-HV, resolution in H and V** (specification Section 11.1; series B). Reports the 10 to 90 percent rise distance and the MTF50 of the depth edge response, for each Z, edge orientation (H or V), polarity, and gap, from two cross-checked estimates (the slanted edge and the robot-stepped poses). It reports whether the result depends on step height, and the edge offset that analysis E uses. Writes tables and figures in `analysis/`; confidence intervals come from bootstrapping over poses.
 
-**B-Z, resolution in Z** (specification Section 11.2; series Z). Reports the smallest commanded Z step detected with 50 percent probability for square patches of side 1, 5, 20 px, the step-response gain and its linearity, and the measured quantum from the ramp (the plateau widths of the row averages against the true depth of each row), and from the staircase where it was captured. The step truth is the read-back robot pose through the registration. Rungs whose true step is below the robot repeatability are reported but flagged (`truth_reliable` False), left out of the gain regression, and kept in the detection curve. The smallest detectable step for the large patches may come out as a bound limited by the robot (`delta_50_is_bound`), not a measurement. The robot's own read-back scatter is reported per station. Writes tables and figures in `analysis/`.
+**B-Z, resolution in Z** (specification Section 11.2; series Z). Reports the smallest commanded Z step detected with 50 percent probability for square patches of side 1, 5, 20 px, the step-response gain and its linearity, and the measured quantum from the fine staircase. The step truth is the read-back robot pose through the registration. Rungs whose true step is below the robot repeatability are reported but flagged (`truth_reliable` False), left out of the gain regression, and kept in the detection curve. The smallest detectable step for the large patches may come out as a bound limited by the robot (`delta_50_is_bound`), not a measurement. The robot's own read-back scatter is reported per station. Writes tables and figures in `analysis/`.
 
-**C, true versus sensed area** (specification Section 12; series C). Reports the sensed area of disks and cutouts at the half-height contour compared with the true (as-built) area and with the geometrically visible area, against the diameter in pixels, and the edge bias in mm and px. The transfer curves are pooled over the features and stations of the Z sweep, with the feature kept as a factor. A scaling test compares neighboring features where they overlap in D_px: agreement within the bootstrap interval supports D_px as the governing variable, and a disagreement is attributed to the Z-dependent noise and reported. It also compares with the prediction from the edge response of B, and the field and open-background variants; the achieved field fraction of the field poses (§5) is reported with the field comparison. Writes `C_area_summary.csv`, `C_overlap_test.csv` (the scaling test), and figures: transfer curves, edge bias against Z, and phase spread against diameter in pixels.
+**C, true versus sensed area** (specification Section 12; series C). Reports the sensed area of disks and cutouts at the half-height contour compared with the true (as-built) area and with the geometrically visible area, against the diameter in pixels, and the edge bias in mm and px. The transfer curves are pooled over the features and stations of the Z sweep, with the feature kept as a factor. A scaling test compares neighboring features where they overlap in D_px: agreement within the bootstrap interval supports D_px as the governing variable, and a disagreement is attributed to the Z-dependent noise and reported. It also compares with the prediction from the edge response of B, and the field and open-background variants. Writes `C_area_summary.csv`, `C_overlap_test.csv` (the scaling test), and figures: transfer curves, edge bias against Z, and phase spread against diameter in pixels.
 
-**D, minimum detectable size** (specification Section 13; series D). Reports the diameter and subtended angle at 50 percent, 10 percent, and 5 percent detection probability (D_50, D_10, and D_5, the last being the lowest point measured), corrected for false alarms, for disks and cutouts, with confidence intervals. It also reports a predicted D_0, labeled as a prediction. The psychometric fit is made in the logarithm of D_px, pooled over the (feature, station) pairs; the false-alarm rate comes from the blank sites at each station; the predicted D_0 is the size at which the fitted curve, extrapolated below D_5, reaches 1 percent (`DETECTION_ZERO_PREDICTION_LEVEL`), converted to millimeters at each station; it is never a measurement, because a smooth curve never reaches zero and no number of trials proves a probability is zero. The noise at each Z enters as a covariate, and the same scaling test as in C compares neighboring features. Trials that reuse the first frame of a C pose (§10, step 5) are counted and flagged. It also checks the independence of the trials. Writes `D_detect_summary.csv` (one row per configuration and station), `D_pooled_summary.csv` (the pooled fit), `D_overlap_test.csv` (the scaling test), and figures: pooled psychometric curves and the minimum against Z.
+**D, minimum detectable size** (specification Section 13; series D). Reports the diameter and subtended angle at 50 percent, 10 percent, and 0 percent detection probability, corrected for false alarms, for disks and cutouts, with confidence intervals. The psychometric fit is made in the logarithm of D_px, pooled over the (feature, station) pairs; the false-alarm rate comes from the blank sites at each station; the 0 percent value is reported as a D_px bracket and converted to millimeters at each station, and it is a bound that is shown, with 0.95 confidence, to be below 0.01, not a proof of zero. The noise at each Z enters as a covariate, and the same scaling test as in C compares neighboring features. It also checks the independence of the trials. Writes `D_detect_summary.csv` (one row per configuration and station), `D_pooled_summary.csv` (the pooled fit), `D_overlap_test.csv` (the scaling test), and figures: pooled psychometric curves and the minimum against Z.
 
 **E, boundary detection bias** (specification Section 14; reuses the B and C frames, no captures of its own). Reports, near a true edge, how often the sensor reports a value where geometry says no stereo read is possible, how often it reports a no-read where a surface was visible, and whether it favors the near or the far surface. The feature-scale profiles are drawn against D_px, pooled over the features and stations of a plate. Writes `E_boundary_bias.csv` and figures: outcome profiles against distance to the edge, and the bias indices against Z. The widths and the near-far preference go into `forward_model_parameters.json`.
 
@@ -480,13 +454,13 @@ The smallest Z steps and the absolute bias are the measurements most limited by 
 
 | Source | Typical magnitude | Affects | What you do about it |
 |---|---|---|---|
-| Robot repeatability | 0.02 to 0.05 mm | Smallest Z steps; edge position | The ABAB cycles of the ladder average the scatter; rungs below the repeatability are flagged, and a delta_50 below the smallest reliable rung is reported as a bound; every pose of series Z is approached from below so that backlash cancels; the ramp finds the quantum without small Z moves; the plan averages over phase poses |
+| Robot repeatability | 0.02 to 0.05 mm | Smallest Z steps; edge position | The ABAB cycles of the ladder average the scatter; rungs below the repeatability are flagged, and a delta_50 below the smallest reliable rung is reported as a bound; every visit of series Z is approached from below so that backlash cancels; the plan averages over phase poses |
 | Robot absolute accuracy | 0.2 to 1 mm over large moves | Bias, registration | Registration over many poses spanning the full Z range; tests run as local moves from registered stations |
 | Registration residual | Acceptance limit 0.15 mm RMS | Bias, edge offset, small-feature area | Do not skip the acceptance gate; report the residual with every result |
 | Plane-registration depth offset | About 0.1 mm (rough estimate: the plane-fit error amplified at the tilt limit, averaged over the poses) | Absolute bias only | Many poses over the full Z range; tilts to the limit of 20 degrees; residual reported with every result |
 | As-built diameter uncertainty | Set by the measuring instrument | True area (for example 0.6 percent at 7 mm with 0.02 mm uncertainty) | Measure with the comparator or microscope and record the uncertainty |
 | Plate flatness | 0.05 mm | Fixed-pattern noise, bias | Keep the flatness report; map the plate on a CMM if available |
-| Thermal drift | Unknown until the sentinels run | Bias, series Z | Warm-up gate, sentinels on the mounted target, A, B, A, B order, randomized order |
+| Thermal drift | Unknown until the sentinels run | Bias, series Z | Warm-up gate, sentinels, A, B, A, B order, randomized order |
 | Front-back interreflection | Unknown | Cutout and small-gap results | Matte finish; both gaps are captured |
 | Sensor temporal filter | Depends on the configuration | Noise (underestimated), trial independence | Discard frames after each move until the plane settles (Step 4.4); filters-off repeat if possible |
 | Reflectance mismatch | Avoided by design | Edges, area | One finish on all surfaces |
@@ -498,9 +472,7 @@ Things that spoil a session in practice:
 - Moving or bumping the sensor. If it happens, everything after it is a new session.
 - Changing exposure, gain, any filter, the base frame, or the lighting mid-session.
 - Using the commanded pose instead of the reported pose in the log, or rounding the logged position to 0.1 mm: for series Z the read-back pose is the step truth.
-- Approaching a pose of series Z (ladder, ramp, or staircase) from above, or from different directions: backlash then enters the difference between visits. The only poses approached from alternating sides are those of the optional lateral sweep (§7, step 6), and only because the row says so.
-- Swapping a target to take a drift sentinel: a sentinel is captured on whatever target is mounted, and a swap adds the re-mount error the sentinel is meant to watch.
-- Moving a pose that the planner pulled inward back toward its requested field position: the achieved field fraction in the row is what the results report.
+- Approaching a visit of series Z from above, or from different directions: backlash then enters the difference between visits.
 - A change in the laboratory lighting during a session (the laboratory is enclosed, with constant lighting, by design).
 - Skipping the warm-up or the settle check, or shortening the settle wait.
 - A loose adapter, a spacer that has moved, or a target that has shifted on its dowels: do the mount check (Step 4.8) after every swap.
@@ -510,7 +482,7 @@ Things that spoil a session in practice:
 - Not recording a filter setting or a configuration change in `sensor_config.json`.
 - Losing the seed of the plan. Without it the offsets cannot be reproduced; the plan files keep it.
 
-Limitations. Results hold for one surface finish, static targets, mostly fronto-parallel poses, and the sensor configuration recorded in `sensor_config.json`. Registration from planes leaves the camera's depth offset conditioned by the registration tilt range (Table 8), so absolute bias carries that uncertainty; Z-scale and nonlinear bias do not, because a rigid transform cannot absorb them. The range limits of 400 and 1600 mm assume the sensor reads there; Step 4.5 confirms this before any series runs. The 0 percent detection size is a prediction from the fitted curve below the measured 5 percent point, not a measurement. Off-axis results (series A and the field sub-series of C) hold at the field fraction the planner achieved, which can be well below the requested one at the near stations. The smallest detectable Z step for the large patches may come out as a bound set by the robot's repeatability, or by the accuracy with which it reports its pose, not a measurement.
+Limitations. Results hold for one surface finish, static targets, mostly fronto-parallel poses, and the sensor configuration recorded in `sensor_config.json`. Registration from planes leaves the camera's depth offset conditioned by the registration tilt range (Table 8), so absolute bias carries that uncertainty; Z-scale and nonlinear bias do not, because a rigid transform cannot absorb them. The range limits of 400 and 1600 mm assume the sensor reads there; Step 4.5 confirms this before any series runs. A "0 percent" minimum means below the stated bound with 0.95 confidence, not proven zero. The smallest detectable Z step for the large patches may come out as a bound set by the robot's repeatability, or by the accuracy with which it reports its pose, not a measurement.
 
 ---
 
@@ -529,7 +501,7 @@ Values marked with a dagger in the specification depend on VSX3000 datasheet or 
 | `Z_REDUCED_STATION_STRIDE` | 4 | Every this-many-th station is a reduced station, used by the slowest tests (B-Z, the A tilt sub-series) (400, 800, 1600 with the defaults). |
 | `Z_REFERENCE_MM` | 800 | The reference station (one of the ladder stations) used for sentinels, the warm-up check, the re-mount check, the C field sub-series, the C open-background variant and the D post check. |
 | `FIELD_OFFSET_FRACTION` | 0.6 | Off-axis field positions at (+/- f W/2, +/- f H/2) from the center, f of the half field (A, C). |
-| `TILT_ANGLES_DEG` | 0, 15, 30, 45 | Plate tilts about H and about V in the A tilt sub-series. A tilt is planned only where the plate's near edge stays at or beyond Z_MIN (``acquisition.plan.tilt_near_edge_mm``); the others are skipped and listed in plan_summary.txt. |
+| `TILT_ANGLES_DEG` | 0, 15, 30, 45 | Plate tilts about H and about V in the A tilt sub-series. |
 | `WARMUP_MIN_MINUTES` | 45 | Minimum powered time before any capture. |
 | `WARMUP_DRIFT_WINDOW_MIN` | 10 | Window over which warm-up drift is judged. |
 | `WARMUP_DRIFT_FRACTION_OF_SIGMA` | 0.1 | Allowed drift of the mean plane Z over the window, as a fraction of sigma_t at that Z. |
@@ -543,8 +515,7 @@ Values marked with a dagger in the specification depend on VSX3000 datasheet or 
 | `FRAMES_PER_NOISE_STATION` | 100 | Frames per Z, field and tilt pose in A (the tilt sub-series uses frames_per_tilt_pose). |
 | `FRAMES_PER_TILT_POSE` | 50 | Frames per pose of the A tilt sub-series (Section 5, Step 5). |
 | `FRAMES_PER_EDGE_POSE` | 30 | Frames per edge pose (B-HV). |
-| `FRAMES_PER_ZSTEP_POSE` | 10 | Frames per Z-step pose (B-Z ladder visits). |
-| `FRAMES_PER_RAMP_POSE` | 50 | Frames per pose of the B-Z ramp sub-series (Section 6.2): the ramp is one pose per station, so it takes more frames than a ladder visit (the same as a tilt pose of A). |
+| `FRAMES_PER_ZSTEP_POSE` | 10 | Frames per Z-step pose (B-Z). |
 | `FRAMES_PER_AREA_POSE` | 10 | Frames per area pose (C). |
 | `FRAMES_PER_DETECTION_TRIAL` | 1 | Frames per detection trial (D): one, giving single-frame detectability. |
 | `FRAMES_PER_REGISTRATION_POSE` | 10 | Frames per registration pose (Section 4; the document's REGISTRATION_FRAMES). |
@@ -553,31 +524,26 @@ Values marked with a dagger in the specification depend on VSX3000 datasheet or 
 | `PHASE_JITTER_POSES_EDGE` | 25 | Random-offset poses per edge station (B-HV). |
 | `PHASE_JITTER_POSES_AREA` | 30 | Random-offset poses per area configuration (C). |
 | `FIELD_SUBSERIES_POSES_AREA` | 10 | Random-offset poses per array at each off-axis field position (Section 7, Step 3). |
-| `Z_STEP_LADDER_QUANTA` | 0.25, 0.5, 1, 2, 4, 8 | Commanded rungs of the B-Z step ladder, as multiples of the expected depth quantum at the station, dZ_q(Z0) = q Z0^2 / k with the Tier-A q until Analysis A has measured one (Section 6.2). Each rung is raised to at least ``robot_min_resolvable_move_mm``. At the indicative geometry the rungs run from 0.1 to 3.1 mm at 400 mm, 0.39 to 12.4 mm at 800 mm and 1.55 to 50 mm at 1600 mm; the planner lists them per station in plan_summary.txt. |
-| `ROBOT_MIN_RESOLVABLE_MOVE_MM` | 0.1 | The smallest Z move the robot is trusted to execute (Neil's figure, mm). A ladder rung or a staircase step smaller than this is raised to it; the analysis takes the read-back displacement as the truth in any case. |
+| `Z_STEP_LADDER_MM` | 0.1, 0.2, 0.5, 1, 2, 4 | Commanded step sizes of the B-Z ladder. |
 | `ROBOT_REPEATABILITY_MM` | 0.05 | Position repeatability of the robot (ISO 9283), the equipment requirement of Section 3.1; a commanded Z step smaller than this has a step truth no better than the robot itself, so such ladder rungs are reported but flagged. |
 | `Z_STEP_APPROACH_OVERSHOOT_MM` | 2 | Every visit of series Z is approached from the same direction so that the backlash and compliance of the robot joints (a different elastic and frictional state after a move in the opposite direction) do not enter the A / B difference: the robot first moves this far below the pose (to a smaller Z, nearer the sensor) and then moves up onto the pose, in the direction of increasing Z. |
 | `Z_STEP_REPEATS` | 10 | ABAB cycles for each step size. |
-| `RAMP_QUANTA` | 4 | The B-Z ramp tilts the plate about H so that the true depth across the plate's VISIBLE height (the smaller of the plate height and the field height at that Z) spans this many expected depth quanta (Section 6.2). |
-| `Z_STAIRCASE_SUBDIVISION` | 10 | OPTIONAL second pass (staircase): fine-sweep points per expected depth quantum; the step is max(dZ_q / this, ``robot_min_resolvable_move_mm``). |
-| `Z_STAIRCASE_QUANTA` | 3 | OPTIONAL second pass (staircase): the sweep runs from Z0 to Z0 plus this many expected quanta (Section 6.2). The staircase is planned only when ``plan_stations --staircase`` asks for it and is outside the Section 9 budget. |
-| `Z_STAIRCASE_FRAMES` | 10 | OPTIONAL second pass (staircase): frames per step. |
-| `LATERAL_SWEEP_STEP_PX` | 0.1 | OPTIONAL second pass of B-HV (lateral sweep, Section 6.1): lateral step of the edge sweep in pixels at the reference station (0.12 mm there). The sweep is planned only when ``plan_stations --lateral-sweep`` asks for it and is outside the Section 9 budget. |
-| `LATERAL_SWEEP_SPAN_PX` | 2 | OPTIONAL second pass of B-HV (lateral sweep): span of the sweep in H and in V, pixels at the reference station. The sweep runs from one step to the full span from the nominal position, so it has ``lateral_sweep_span_px / lateral_sweep_step_px`` poses per axis (20 with the defaults); the nominal position itself (offset 0) is the nominal B pose already captured and is not repeated. |
+| `Z_STAIRCASE_SUBDIVISION` | 10 | Fine-sweep points per expected depth quantum. |
+| `Z_STAIRCASE_QUANTA` | 3 | The fine staircase sweeps from Z0 to Z0 plus this many expected quanta (Section 6.2, Step 3). |
+| `Z_STAIRCASE_FRAMES` | 10 | Frames per staircase step. |
 | `ZSTEP_PATCH_SIZES_PX` | 1, 5, 20 | Side lengths of the square patches of the B-Z analysis (1 px, 5 x 5, 20 x 20). |
 | `DETECTION_FALSE_ALARM_TARGET` | 0.01 | Target false-alarm rate per window; sets the threshold tau from the blank-site distribution. |
 | `DETECTION_MIN_CONNECTED_PX` | 2 | Minimum connected region counted as a detection. |
 | `DETECTION_WINDOW_MARGIN_PX` | 3 | Search window radius equals D/2 in pixels plus this margin. |
 | `DETECTION_TRIALS_PER_LEVEL` | 60 | Independent trials per (feature, station) pair in the D series. |
-| `DETECTION_LOW_TRIALS` | 300 | Trials per (feature, station) pair at the detection_low_station_count farthest stations, where the smallest feature lies near and below the expected threshold. 300 trials measure a detection probability of 5 percent (detection_low_probability) to about +/- 2.5 percent at the confidence level (the extended trials of Section 8). |
-| `DETECTION_LOW_STATION_COUNT` | 3 | Number of farthest stations that carry detection_low_trials trials (1131, 1345 and 1600 mm with the defaults). |
-| `DETECTION_LOW_PROBABILITY` | 0.05 | The lowest detection probability the trials measure: D_5, the size at which the false-alarm-corrected detection probability is 5 percent. 300 trials (detection_low_trials) resolve it to about +/- 2.5 percent; a lower level (3 percent) would be marginal at that count. The 0 percent point is not measured (see detection_zero_prediction_level). |
-| `DETECTION_ZERO_PREDICTION_LEVEL` | 0.01 | The false-alarm-corrected probability level to which the fitted psychometric curve is extrapolated to give the predicted D_0 (Section 13). The result is a PREDICTION from the fitted curve below the lowest measured point (D_5), never a measurement: a smooth curve never reaches zero and no finite number of trials proves a probability is zero. |
+| `DETECTION_ZERO_TRIALS` | 300 | Trials per (feature, station) pair at the detection_zero_station_count farthest stations, where the smallest feature lies below the expected threshold and the 0 percent point is bounded (rule of three). |
+| `DETECTION_ZERO_STATION_COUNT` | 3 | Number of farthest stations that carry detection_zero_trials trials (1131, 1345 and 1600 mm with the defaults). |
+| `DETECTION_ZERO_PROBABILITY_BOUND` | 0.01 | Upper bound on detection probability that defines practically zero detection. |
 | `DETECTION_LAPSE_RATE_MAX` | 0.05 | Upper bound of the lapse rate lambda in the psychometric fit (Section 13, Step 4). |
 | `CONFIDENCE_LEVEL` | 0.95 | Level of all confidence intervals and bounds (B, C, D, E). |
 | `BOOTSTRAP_RESAMPLES` | 2000 | Resamples for bootstrap confidence intervals (C, D, E). |
 | `INDEPENDENCE_SIGMA_MULTIPLE` | 2 | Lag-1 autocorrelation of a detection sequence must lie within this many standard errors (1/sqrt(n)) of zero (Section 13, Step 1: +/- 2/sqrt(n)). |
-| `BOUNDARY_BAND_HALF_WIDTH_PX` | 8 | Analysis band on each side of a true edge (E); also the ROI shrink in A, the reference-plane exclusion in B and C, and the edge margin of the capture planner's field-of-view fit (``acquisition.plan``: a target must lie this many pixels inside the image, so the margin used to pull an off-axis pose inward is the same band the analysis shrinks the region of interest by). |
+| `BOUNDARY_BAND_HALF_WIDTH_PX` | 8 | Analysis band on each side of a true edge (E); also the ROI shrink in A and the reference-plane exclusion in B and C. |
 | `BOUNDARY_BIN_WIDTH_PX` | 0.25 | Signed-distance bin width (B, E): four bins per pixel. |
 | `SURFACE_ASSIGNMENT_SIGMA_MULTIPLE` | 3 | A read within this many sigma_tot(Z) of a reference plane is assigned to that plane (E). |
 | `FRONT_READ_HEIGHT_THRESHOLD` | 0.5 | Normalized height h above which a read counts as a front read (C, Section 12, Step 3). |
@@ -590,7 +556,7 @@ Values marked with a dagger in the specification depend on VSX3000 datasheet or 
 | `QUANTIZATION_PATCH_PX` | 20 | Side of the central patch whose depth codes are histogrammed (Section 10, Step 8). |
 | `LEGACY_BOX_HALF_PX` | 10 | Half side of the legacy 20 x 20 px boxes of testZRepeatabilityBrownBoard.py (Step 12). |
 | `LEGACY_BOX_CENTERS_PX` | (264, 253), (137, 81), (401, 83), (404, 386), (129, 392) | The five VSX3000 BrownBoard box centers (column, row) of testZRepeatabilityBrownBoard.py. |
-| `LEGACY_METRIC_DEPTHS_MM` | 700, 1000 | Depths at which the legacy metrics are computed (Section 10, Step 12); series A adds them as extra noise stations to the ladder, captured at the center field position only. |
+| `LEGACY_METRIC_DEPTHS_MM` | 700, 1000 | Depths at which the legacy metrics are computed (Section 10, Step 12); series A adds them as extra noise stations to the ladder. |
 | `STATION_MATCH_TOLERANCE_MM` | 0.5 | Two depths closer than this are the same station (the file-name rule rounds a station to 1 mm). |
 | `AUTOCORRELATION_THRESHOLD` | 0.3679 | The correlation length is the lag where the normalized autocorrelation first falls to this (1/e). |
 | `NOISE_PLATE_SIZE_MM` | 400, 400 | Uniform matte plate (T2), width x height. |
@@ -609,8 +575,7 @@ Values marked with a dagger in the specification depend on VSX3000 datasheet or 
 | `POST_SITES_PER_PLATE` | 1 | Post-only sites per disk plate (the post check: a bare post must not be detected). |
 | `FEATURE_ISOLATION_PX` | 30 | Minimum edge-to-edge spacing between features, pixels at Z_MAX (evaluated at the far station so that neighbors stay separated there, where a pixel covers the most millimeters). Applies edge to edge between every pair of sites of a plate, in both directions (along a row and between rows). |
 | `FEATURE_PLATE_MARGIN_PX` | 8 | Front-plate margin beyond the outermost sites of a disk or cutout plate, pixels at Z_MAX (equal to the boundary band BOUNDARY_BAND_HALF_WIDTH_PX, so that the analysis band of an outer cutout edge lies on front material at the far station). The plate (sites plus margin) must fit the field of view at Z_MIN with the phase-jitter span and the boundary band on every side; make_standard_target_set raises an error when it does not. |
-| `EXPECTED_D0_PX` | 7 | Expected minimum detectable size D_0 in pixels, from the detectability model of Section 3.2 (about 40 pixels of area, a diameter of 7 px), used before fabrication to size the disk support posts. Not a measured value: Analysis D replaces it with the predicted D_0. |
-| `POST_DIAMETER_FRACTION_OF_D0` | 0.5 | Rule for the disk support posts: a post must be thinner than this fraction of the expected D_0 (the post check of Section 8, Step 1 confirms that a bare post is not detected). The planned post diameter is post_diameter_fraction_of_d0 x expected_d0_px x p(Z_MIN) (:meth:`post_diameter_mm`: about 2 mm at the indicative geometry). |
+| `POST_DIAMETER_FRACTION_OF_D0` | 0.5 | Disk support posts must be thinner than this fraction of the expected D_0 (the post check of Section 8, Step 1 confirms that a bare post is not detected). |
 | `FRAME_CHECK_PX` | 0.5 | IR-edge to depth-discontinuity agreement required in Step 4.5. |
 | `REGISTRATION_POSES` | 30 | Hand-eye poses spanning the volume (Section 4, Step 6). |
 | `REGISTRATION_TILT_RANGE_DEG` | 20 | Half range of the registration tilts about H and V (+/-). |
@@ -633,24 +598,24 @@ The tools: `plan_stations` (§5), `register` (§4), `make_manifest` (§11), `che
 | `sensorperf/__init__.py` | 16 | sensorperf: code for the VSX3000 Resolution, Area-Fidelity, Detectability, and Noise Characterization Procedure. |
 | `sensorperf/acquisition/__init__.py` | 1 | sensorperf.acquisition: see the package docstring and docs/design/code_design.md. |
 | `sensorperf/acquisition/check.py` | 526 | Quick-look check of a capture set (Part I of the procedure) and the D pilot post check (Section 8, Step 1; Section 13, Step 2). |
-| `sensorperf/acquisition/plan.py` | 1864 | Station and pose planning for Part I of the procedure (Sections 4 to 9). |
+| `sensorperf/acquisition/plan.py` | 1317 | Station and pose planning for Part I of the procedure (Sections 4 to 9). |
 | `sensorperf/acquisition/pose_log.py` | 561 | Robot pose log -> capture manifest (document, Section 9). |
 | `sensorperf/analysis/__init__.py` | 1 | sensorperf.analysis: see the package docstring and docs/design/code_design.md. |
 | `sensorperf/analysis/area.py` | 1160 | Analysis C: true versus sensed area (procedure document, Section 12), Steps 1 to 12. |
 | `sensorperf/analysis/boundary.py` | 876 | Analysis E: boundary detection bias (procedure document, Section 14), Steps 1 to 8. |
 | `sensorperf/analysis/common.py` | 407 | What every analysis of Part II shares: the registered geometry of a pose (which pixel should see which surface, where the true edges are), the reference planes, |
-| `sensorperf/analysis/detection.py` | 1452 | Analysis D: minimum detectable size at 50, 10 and 5 percent, with a PREDICTED 0 percent point (procedure document, Section 13), Steps 1 to 11, in the Z-sweep de |
+| `sensorperf/analysis/detection.py` | 1300 | Analysis D: minimum detectable size at 50, 10 and 0 percent (procedure document, Section 13), Steps 1 to 11, in the Z-sweep design (redesign note, Sections 2 an |
 | `sensorperf/analysis/forward_model.py` | 73 | Assembly of ``forward_model_parameters.json`` (document, Section 1 and Section 10 Step 13, Section 14 Step 8): the hand-off from the analyses to the Tier-A forw |
-| `sensorperf/analysis/noise.py` | 1249 | Analysis A: noise versus Z (procedure document, Section 10), on the frames of procedure "A" (the noise-plate series) and the drift sentinels (procedure "S", Ste |
+| `sensorperf/analysis/noise.py` | 1101 | Analysis A: noise versus Z (procedure document, Section 10), on the frames of procedure "A" (the noise-plate series) and the drift sentinels (procedure "S", Ste |
 | `sensorperf/analysis/overlap.py` | 268 | The overlap (scaling) test of the Z-sweep design (redesign note, Section 5), shared by Analysis C (area transfer curves) and Analysis D (detection curves). |
-| `sensorperf/analysis/resolution_depth.py` | 1280 | Analysis B-Z: effective resolution in depth (procedure document, Section 11.2), from the Z-step series (procedure "Z"): the noise plate T2 at a station Z0, a st |
-| `sensorperf/analysis/resolution_lateral.py` | 783 | Analysis B-HV: effective lateral resolution in H and V (procedure document, Section 11.1), from the edge series (procedure "B"): the raised square T3a and the s |
+| `sensorperf/analysis/resolution_depth.py` | 841 | Analysis B-Z: effective resolution in depth (procedure document, Section 11.2), from the Z-step series (procedure "Z"): the noise plate T2 at a station Z0, a st |
+| `sensorperf/analysis/resolution_lateral.py` | 781 | Analysis B-HV: effective lateral resolution in H and V (procedure document, Section 11.1), from the edge series (procedure "B"): the raised square T3a and the s |
 | `sensorperf/cli/__init__.py` | 1 | sensorperf.cli: see the package docstring and docs/design/code_design.md. |
 | `sensorperf/cli/analyze.py` | 98 | Command line: run the Part II analyses on a session folder. |
 | `sensorperf/cli/check_captures.py` | 122 | Command line: a quick-look check of a capture session before the long analyses. |
 | `sensorperf/cli/make_manifest.py` | 117 | Command line: build the capture manifest (procedure document, Section 9) from the robot's pose log, the capture files and the plan. |
-| `sensorperf/cli/plan_stations.py` | 162 | Command line: plan the stations and poses of the characterization capture (procedure document, Sections 4 to 9). |
-| `sensorperf/cli/register.py` | 192 | Command line: solve the robot-to-sensor registration (procedure document, Section 4, Steps 6 and 7) from the registration observations. |
+| `sensorperf/cli/plan_stations.py` | 139 | Command line: plan the stations and poses of the characterization capture (procedure document, Sections 4 to 9). |
+| `sensorperf/cli/register.py` | 188 | Command line: solve the robot-to-sensor registration (procedure document, Section 4, Steps 6 and 7) from the registration observations. |
 | `sensorperf/cli/simulate.py` | 102 | Command line: write a synthetic characterization session. |
 | `sensorperf/features/__init__.py` | 1 | sensorperf.features: see the package docstring and docs/design/code_design.md. |
 | `sensorperf/features/depth_features.py` | 210 | Per-pixel features computed from depth images: temporal statistics over the frames of one pose, the local surface slopes (s_u, s_v) that are inputs of the corre |
@@ -658,18 +623,18 @@ The tools: `plan_stations` (§5), `register` (§4), `make_manifest` (§11), `che
 | `sensorperf/features/planes.py` | 145 | Plane fits and plane-based depth references shared by the analyses. |
 | `sensorperf/geometry/__init__.py` | 1 | sensorperf.geometry: see the package docstring and docs/design/code_design.md. |
 | `sensorperf/geometry/camera.py` | 89 | Pinhole camera model of the depth sensor, built from a capture file's header. |
-| `sensorperf/geometry/registration.py` | 376 | Robot-to-sensor registration (document, Section 4): the two transforms that turn a read-back robot pose into a ground-truth target pose in the camera frame, the |
-| `sensorperf/geometry/targets.py` | 780 | The two-plane targets of the characterization procedure (document, Section 3): a front surface with knife-edge features standing a gap G in front of a back plat |
+| `sensorperf/geometry/registration.py` | 325 | Robot-to-sensor registration (document, Section 4): the two transforms that turn a read-back robot pose into a ground-truth target pose in the camera frame, the |
+| `sensorperf/geometry/targets.py` | 776 | The two-plane targets of the characterization procedure (document, Section 3): a front surface with knife-edge features standing a gap G in front of a back plat |
 | `sensorperf/geometry/transforms.py` | 95 | Rigid transforms and the rigid fit between two point sets. |
 | `sensorperf/io/__init__.py` | 1 | sensorperf.io: see the package docstring and docs/design/code_design.md. |
 | `sensorperf/io/capture_set.py` | 113 | Frames of one commanded pose loaded together as a stack (adapted from the calibration repository's capture_set.py for the characterization manifest). |
-| `sensorperf/io/manifest.py` | 441 | The capture manifest of the characterization procedure (document, Section 9): one row per captured frame, saying which procedure and target it belongs to, where |
+| `sensorperf/io/manifest.py` | 430 | The capture manifest of the characterization procedure (document, Section 9): one row per captured frame, saying which procedure and target it belongs to, where |
 | `sensorperf/io/matcloud.py` | 404 | Reader/writer for Liberty Reach's ".mc" ("Matrix Cloud") file format. |
 | `sensorperf/io/qt_datastream.py` | 433 | A minimal reader/writer for Qt5's ``QDataStream`` binary encoding (default stream version, which is what ``MC::toFile``/``MC::fromFile`` use -- see ``MC.cpp`` i |
 | `sensorperf/io/session.py` | 140 | The session folder of Section 9 and the small JSON records it holds. |
-| `sensorperf/parameters.py` | 599 | Every arbitrary constant of the characterization procedure, as a named parameter (procedure document, Section 2), plus the five geometric relations of that sect |
+| `sensorperf/parameters.py` | 538 | Every arbitrary constant of the characterization procedure, as a named parameter (procedure document, Section 2), plus the five geometric relations of that sect |
 | `sensorperf/simulate/__init__.py` | 1 | sensorperf.simulate: see the package docstring and docs/design/code_design.md. |
-| `sensorperf/simulate/demo_plan.py` | 329 | A small but complete demonstration plan for the synthetic session writer (Sections 4 to 9 of the procedure, drastically reduced), a plausible registration to re |
+| `sensorperf/simulate/demo_plan.py` | 304 | A small but complete demonstration plan for the synthetic session writer (Sections 4 to 9 of the procedure, drastically reduced), a plausible registration to re |
 | `sensorperf/simulate/sensor_model.py` | 446 | INDICATIVE synthetic depth renderer of a :class:`~sensorperf.geometry.targets.TwoPlaneTarget` (design document, Section 5, "simulate/sensor_model.py"). |
 | `sensorperf/simulate/session.py` | 177 | Write a synthetic characterization session (design document, Section 5, "simulate/session.py"): render every :class:`~sensorperf.acquisition.plan.PlannedCapture |
 | `sensorperf/stats/__init__.py` | 1 | sensorperf.stats: see the package docstring and docs/design/code_design.md. |
@@ -688,9 +653,7 @@ usage: python3 -m sensorperf.cli.plan_stations [-h] --out DIR
                                                [--parameters PATH]
                                                [--series LETTER [LETTER ...]]
                                                [--seed N] [--no-extended]
-                                               [--filters-off] [--staircase]
-                                               [--reuse-c-first-frames]
-                                               [--lateral-sweep]
+                                               [--filters-off]
                                                [--open-background]
 
 Plan the stations and poses of the characterization capture (Sections 4 to 9):
@@ -713,33 +676,10 @@ options:
                         C area, D detection); default all
   --seed N              master random seed; every shuffle and offset draws
                         from it and is logged (default 0)
-  --no-extended         skip the extended trials of the low point (D_5) of the
-                        D series at the farthest stations (Section 8)
-  --filters-off         append the filters-off repeat of the A and B series
-                        (A, B-HV and B-Z; Section 4, Step 4.2) after each
-                        filters-on series; its poses are labeled filters_off
-                        and are listed outside the main budget in
-                        plan_summary.txt
-  --staircase           add the optional second pass of the B-Z series, the
-                        fine staircase (Section 6.2), at the reduced stations;
-                        its poses are labeled staircase and are listed outside
-                        the main budget in plan_summary.txt (the ramp and the
-                        step ladder are always planned)
-  --reuse-c-first-frames
-                        let the first frame of each C pose of the same target,
-                        gap and station count as a D trial (Section 8, Reuse:
-                        30 of the 60 per configuration and station), so that
-                        the D main series plans only the remaining poses; the
-                        Section 9 budget is still computed without the reuse
-                        and plan_summary.txt says how many D poses were taken
-                        from C
-  --lateral-sweep       add the optional second pass of the B-HV series
-                        (Section 6.1, Step 6): the edge target T3a swept in H
-                        and then in V at Z_REFERENCE_MM in steps of
-                        LATERAL_SWEEP_STEP_PX over LATERAL_SWEEP_SPAN_PX (20
-                        poses per axis, approached from alternating
-                        directions); its poses are labeled lateral_sweep and
-                        are listed outside the main budget in plan_summary.txt
+  --no-extended         skip the extended 0 percent trials of the D series at
+                        the farthest stations (Section 8)
+  --filters-off         append the filters-off repeat of the A series (Section
+                        5, Step 7)
   --open-background     add the open-background variant of the C series for
                         the cutout arrays (Section 7, Step 4)
 ```
@@ -955,7 +895,7 @@ C.8 If something goes wrong.
 | 2 | The experimental setup, side view. The sensor stands on its own rigid stand, separate from the robot. The robot carries the target on the dowel-pinned adapter anywhere between Z_MIN and Z_MAX. The laboratory is enclosed and its lighting is constant. | `figures/fig_setup.png` |
 | 3 | Front views of T2, T3a, T3b, T4 and T5 to one scale, drawn from the code's own target definitions with the indicative sensor geometry. The real layout depends on the final focal length (unconfirmed). Gray is the back plate, dashed circles are blank sites, vermillion dots are post-only control sites. | `figures/fig_targets.png` |
 | 4 | Chamfered cutout and disk on its post, cross-section, not to scale. The three viewpoints (left camera, projector, right camera) pass the knife edge in open space and never meet the beveled wall. The bevel angle is measured from the plate normal. | `figures/fig_chamfer.png` |
-| 5 | Left: the 9 stations of the ladder, used by A, C and D and by the ramp of Z (A adds the 2 legacy depths, at the center only), the 5 shape stations of B, the 3 reduced stations of the Z step ladder and the A tilt sub-series, and the 3 farthest stations of the extended D trials, along Z; the dotted line is the reference station. Right: the 5 field positions (codes 0 to 4) in the image, and the square span of the random lateral offsets (phase jitter) at one corner, true size and magnified. | `figures/fig_stations.png` |
+| 5 | Left: the 9 stations of the ladder, used by A, C and D (A adds the 2 legacy depths), the 5 shape stations of B, the 3 reduced stations of Z and the tilt sub-series, and the 3 farthest stations of the extended D trials, along Z; the dotted line is the reference station. Right: the 5 field positions (codes 0 to 4) in the image, and the square span of the random lateral offsets (phase jitter) at one corner, true size and magnified. | `figures/fig_stations.png` |
 | 6 | The default full plan: target centers in the sensor frame, side view (H against Z) and front view (H against V), colored by series, with the frustum. Each cloud around a station is a set of random lateral offsets. | `figures/fig_plan.png` |
-| 7 | The series Z captures at one station, 800 mm. Left: the step ladder, the 6 step sizes in turn, each with its A, B, A, B alternation. Right: the ramp, with the depth the sensor reports if it quantizes at the expected quantum (an illustration, not a measurement). | `figures/fig_zstep.png` |
+| 7 | The series Z visits at one Z0. Left: the step ladder, the 6 step sizes in turn, each with its A, B, A, B alternation. Right: the fine staircase. | `figures/fig_zstep.png` |
 | 8 | The session folder feeds the six analyses, which write into `analysis/`. The fits of A and the boundary terms of E converge on `forward_model_parameters.json`. | `figures/fig_data_flow.png` |
