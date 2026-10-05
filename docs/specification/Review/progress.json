@@ -1,0 +1,98 @@
+{
+  "C01": {
+    "title": "Purpose and scope",
+    "reviewed": null,
+    "tier": null,
+    "note": "not yet reviewed"
+  },
+  "C02": {
+    "title": "Parameters and relations",
+    "reviewed": null,
+    "tier": null,
+    "note": "not yet reviewed"
+  },
+  "C03": {
+    "title": "Equipment and targets",
+    "reviewed": null,
+    "tier": null,
+    "note": "not yet reviewed"
+  },
+  "C04": {
+    "title": "Chamfered boundaries",
+    "reviewed": null,
+    "tier": null,
+    "note": "not yet reviewed"
+  },
+  "C05": {
+    "title": "Setup, warm-up, registration",
+    "reviewed": null,
+    "tier": null,
+    "note": "not yet reviewed"
+  },
+  "C06": {
+    "title": "Acquisition A, noise plate",
+    "reviewed": null,
+    "tier": null,
+    "note": "not yet reviewed"
+  },
+  "C07": {
+    "title": "Acquisition B, edges and Z steps",
+    "reviewed": null,
+    "tier": null,
+    "note": "not yet reviewed"
+  },
+  "C08": {
+    "title": "Acquisition C, area arrays",
+    "reviewed": null,
+    "tier": null,
+    "note": "not yet reviewed"
+  },
+  "C09": {
+    "title": "Acquisition D, detection trials",
+    "reviewed": null,
+    "tier": null,
+    "note": "not yet reviewed"
+  },
+  "C10": {
+    "title": "Data logging, layout, budget",
+    "reviewed": null,
+    "tier": null,
+    "note": "not yet reviewed"
+  },
+  "C11": {
+    "title": "Analysis A, noise vs Z",
+    "reviewed": null,
+    "tier": null,
+    "note": "not yet reviewed"
+  },
+  "C12": {
+    "title": "Analysis B, resolution H, V, Z",
+    "reviewed": null,
+    "tier": null,
+    "note": "not yet reviewed"
+  },
+  "C13": {
+    "title": "Analysis C, area",
+    "reviewed": null,
+    "tier": null,
+    "note": "not yet reviewed"
+  },
+  "C14": {
+    "title": "Analysis D, detectability",
+    "reviewed": null,
+    "tier": null,
+    "note": "not yet reviewed"
+  },
+  "C15": {
+    "title": "Analysis E, boundary bias",
+    "reviewed": null,
+    "tier": null,
+    "note": "not yet reviewed"
+  },
+  "C16": {
+    "title": "Uncertainty, limitations, open questions",
+    "reviewed": null,
+    "tier": null,
+    "note": "not yet reviewed"
+  }
+}

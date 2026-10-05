@@ -1,0 +1,440 @@
+{
+  "document": "VSX3000_characterization_specification.docx",
+  "built": "2026-10-05T12:47:39",
+  "source_of_truth": "https://claude.ai/code/artifact/20fd839b-0e95-4210-9e8f-959da07ce6c2",
+  "elements": [
+    {
+      "id": "VSX3000 Resolution, Area-Fidelity, Detectability, and Noise Characterization Procedure",
+      "kind": "section",
+      "title": "VSX3000 Resolution, Area-Fidelity, Detectability, and Noise Characterization Procedure",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {},
+      "refs": []
+    },
+    {
+      "id": "§1",
+      "kind": "section",
+      "title": "1. Purpose and scope",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {
+        "z_range_mm": "500–1000"
+      },
+      "refs": [
+        "Step 4.5"
+      ]
+    },
+    {
+      "id": "Figure 1",
+      "kind": "figure",
+      "section": "§1",
+      "caption": "",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {},
+      "refs": []
+    },
+    {
+      "id": "Table 1",
+      "kind": "table",
+      "section": "§1",
+      "caption": "ID",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {},
+      "refs": []
+    },
+    {
+      "id": "§2",
+      "kind": "section",
+      "title": "2. Parameters",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {
+        "noise_station_count": 11,
+        "shape_station_count": 5,
+        "reduced_station_count": 3,
+        "zstep_rung_count": 6,
+        "registration_poses": 30,
+        "z_range_mm": "500–1000",
+        "gap_small_mm": 15,
+        "gap_large_mm": 60,
+        "detection_zero_trials": 300,
+        "registration_residual_accept_mm": "0.15"
+      },
+      "refs": [
+        "Section 3.1",
+        "Step 4.4",
+        "Step 4.5"
+      ]
+    },
+    {
+      "id": "Table 2",
+      "kind": "table",
+      "section": "§2",
+      "caption": "Name",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {
+        "noise_station_count": 11,
+        "shape_station_count": 5,
+        "reduced_station_count": 3,
+        "zstep_rung_count": 6,
+        "registration_poses": 30,
+        "gap_small_mm": 15,
+        "gap_large_mm": 60,
+        "detection_zero_trials": 300,
+        "registration_residual_accept_mm": "0.15"
+      },
+      "refs": [
+        "Section 3.1",
+        "Step 4.4"
+      ]
+    },
+    {
+      "id": "§3",
+      "kind": "section",
+      "title": "3. Equipment and targets",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {},
+      "refs": []
+    },
+    {
+      "id": "§3.1",
+      "kind": "section",
+      "title": "3.1 Equipment",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {},
+      "refs": []
+    },
+    {
+      "id": "Table 3",
+      "kind": "table",
+      "section": "§3.1",
+      "caption": "Item",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {},
+      "refs": []
+    },
+    {
+      "id": "§3.2",
+      "kind": "section",
+      "title": "3.2 Targets",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {
+        "gap_small_mm": 15,
+        "gap_large_mm": 60
+      },
+      "refs": []
+    },
+    {
+      "id": "Table 4",
+      "kind": "table",
+      "section": "§3.2",
+      "caption": "ID",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {
+        "gap_small_mm": 15,
+        "gap_large_mm": 60
+      },
+      "refs": []
+    },
+    {
+      "id": "§3.3",
+      "kind": "section",
+      "title": "3.3 Chamfered (knife-edge) boundaries",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {},
+      "refs": []
+    },
+    {
+      "id": "Figure 2",
+      "kind": "figure",
+      "section": "§3.3",
+      "caption": "",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {},
+      "refs": []
+    },
+    {
+      "id": "Part I — Data acquisition procedure",
+      "kind": "section",
+      "title": "Part I — Data acquisition procedure",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {},
+      "refs": []
+    },
+    {
+      "id": "§4",
+      "kind": "section",
+      "title": "4. Setup, warm-up, and robot-to-sensor registration",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {
+        "registration_poses": 30,
+        "registration_residual_accept_mm": "0.15"
+      },
+      "refs": [
+        "Section 15",
+        "Section 2",
+        "Step 4.7"
+      ]
+    },
+    {
+      "id": "Figure 3",
+      "kind": "figure",
+      "section": "§4",
+      "caption": "",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {},
+      "refs": []
+    },
+    {
+      "id": "§5",
+      "kind": "section",
+      "title": "5. Acquisition A: noise-plate series",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {
+        "noise_station_count": 11,
+        "reduced_station_count": 3,
+        "sentinel_frames": 30
+      },
+      "refs": [
+        "Step 4.2"
+      ]
+    },
+    {
+      "id": "§6",
+      "kind": "section",
+      "title": "6. Acquisition B: edge-target and Z-step series",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {
+        "shape_station_count": 5,
+        "reduced_station_count": 3,
+        "zstep_rung_count": 6,
+        "gap_small_mm": 15,
+        "gap_large_mm": 60
+      },
+      "refs": [
+        "Section 2"
+      ]
+    },
+    {
+      "id": "§7",
+      "kind": "section",
+      "title": "7. Acquisition C: disk and cutout area series",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {
+        "shape_station_count": 5,
+        "gap_small_mm": 15,
+        "gap_large_mm": 60
+      },
+      "refs": []
+    },
+    {
+      "id": "§8",
+      "kind": "section",
+      "title": "8. Acquisition D: detection trials",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {
+        "shape_station_count": 5,
+        "reduced_station_count": 3,
+        "gap_small_mm": 15,
+        "gap_large_mm": 60,
+        "detection_zero_trials": 300
+      },
+      "refs": [
+        "Section 13"
+      ]
+    },
+    {
+      "id": "§9",
+      "kind": "section",
+      "title": "9. Data logging, file layout, and capture budget",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {
+        "total_poses": "6,590",
+        "total_frames": "45,710",
+        "total_robot_hours": "6.8",
+        "detection_zero_trials": 300
+      },
+      "refs": []
+    },
+    {
+      "id": "Table 5",
+      "kind": "table",
+      "section": "§9",
+      "caption": "Series",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {
+        "total_poses": "6,590",
+        "total_frames": "45,710",
+        "total_robot_hours": "6.8"
+      },
+      "refs": []
+    },
+    {
+      "id": "Part II — Data analysis procedure",
+      "kind": "section",
+      "title": "Part II — Data analysis procedure",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {},
+      "refs": []
+    },
+    {
+      "id": "§10",
+      "kind": "section",
+      "title": "10. Analysis A: noise vs Z",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {},
+      "refs": []
+    },
+    {
+      "id": "§11",
+      "kind": "section",
+      "title": "11. Analysis B: effective resolution in H, V, Z",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {
+        "gap_small_mm": 15,
+        "gap_large_mm": 60
+      },
+      "refs": [
+        "Section 10",
+        "Section 13",
+        "Section 14"
+      ]
+    },
+    {
+      "id": "§12",
+      "kind": "section",
+      "title": "12. Analysis C: true vs sensed area",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {},
+      "refs": []
+    },
+    {
+      "id": "§13",
+      "kind": "section",
+      "title": "13. Analysis D: minimum detectable size at 50%, 10%, and 0%",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {},
+      "refs": [
+        "Section 12",
+        "Section 14",
+        "Step 8.2"
+      ]
+    },
+    {
+      "id": "§14",
+      "kind": "section",
+      "title": "14. Analysis E: boundary detection bias",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {},
+      "refs": [
+        "Section 12",
+        "Section 13"
+      ]
+    },
+    {
+      "id": "§15",
+      "kind": "section",
+      "title": "15. Uncertainty budget, limitations, and open questions",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {
+        "registration_poses": 30,
+        "gap_small_mm": 15,
+        "registration_residual_accept_mm": "0.15"
+      },
+      "refs": [
+        "Step 4.4",
+        "Step 4.6",
+        "Step 4.7"
+      ]
+    },
+    {
+      "id": "Table 6",
+      "kind": "table",
+      "section": "§15",
+      "caption": "Source",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {
+        "registration_poses": 30,
+        "gap_small_mm": 15,
+        "registration_residual_accept_mm": "0.15"
+      },
+      "refs": [
+        "Step 4.4",
+        "Step 4.7"
+      ]
+    }
+  ],
+  "invariants": [
+    {
+      "name": "Noise station count agrees everywhere",
+      "key": "noise_station_count",
+      "phrase": "Z stations"
+    },
+    {
+      "name": "Shape station count agrees everywhere",
+      "key": "shape_station_count"
+    },
+    {
+      "name": "Reduced station count agrees everywhere",
+      "key": "reduced_station_count"
+    },
+    {
+      "name": "Z-step rung count agrees everywhere",
+      "key": "zstep_rung_count"
+    },
+    {
+      "name": "Registration pose count agrees everywhere",
+      "key": "registration_poses"
+    },
+    {
+      "name": "Sentinel frame count agrees everywhere",
+      "key": "sentinel_frames"
+    },
+    {
+      "name": "Budget total poses agree everywhere",
+      "key": "total_poses"
+    },
+    {
+      "name": "Budget total frames agree everywhere",
+      "key": "total_frames"
+    },
+    {
+      "name": "Budget total hours agree everywhere",
+      "key": "total_robot_hours"
+    },
+    {
+      "name": "Range limits agree everywhere",
+      "key": "z_range_mm"
+    },
+    {
+      "name": "Small gap agrees everywhere",
+      "key": "gap_small_mm"
+    },
+    {
+      "name": "Large gap agrees everywhere",
+      "key": "gap_large_mm"
+    },
+    {
+      "name": "Extended trials per level agree everywhere",
+      "key": "detection_zero_trials"
+    },
+    {
+      "name": "Registration acceptance agrees everywhere",
+      "key": "registration_residual_accept_mm"
+    }
+  ],
+  "invariant_values": {
+    "noise_station_count": 11,
+    "shape_station_count": 5,
+    "reduced_station_count": 3,
+    "zstep_rung_count": 6,
+    "registration_poses": 30,
+    "sentinel_frames": 30,
+    "total_poses": "6,590",
+    "total_frames": "45,710",
+    "total_robot_hours": "6.8",
+    "z_range_mm": "500–1000",
+    "gap_small_mm": 15,
+    "gap_large_mm": 60,
+    "detection_zero_trials": 300,
+    "registration_residual_accept_mm": "0.15"
+  }
+}

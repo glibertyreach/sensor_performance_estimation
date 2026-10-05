@@ -1,0 +1,152 @@
+{
+  "document": "VSX3000_characterization_specification.docx",
+  "planned": "2026-10-05",
+  "order": "as listed; C02, C03, C05, C07, C09, C12, C14 are high-stakes",
+  "chunks": [
+    {
+      "id": "C01",
+      "title": "Purpose and scope",
+      "headings": [
+        "1"
+      ],
+      "stakes": "medium",
+      "why": "the framing every later section inherits: measurands, outputs, coordinate convention, scope exclusions"
+    },
+    {
+      "id": "C02",
+      "title": "Parameters and relations",
+      "headings": [
+        "2"
+      ],
+      "stakes": "high",
+      "why": "every number of the design in one table; the code's parameters.py mirrors it"
+    },
+    {
+      "id": "C03",
+      "title": "Equipment and targets",
+      "headings": [
+        "3.1",
+        "3.2"
+      ],
+      "stakes": "high",
+      "why": "the hardware list and the target family; the plate-merge question lives here"
+    },
+    {
+      "id": "C04",
+      "title": "Chamfered boundaries",
+      "headings": [
+        "3.3"
+      ],
+      "stakes": "medium",
+      "why": "the bevel rule and its unconfirmed worked value; the as-built record"
+    },
+    {
+      "id": "C05",
+      "title": "Setup, warm-up, registration",
+      "headings": [
+        "4"
+      ],
+      "stakes": "high",
+      "why": "registration method (fiducial vs plane correspondence), warm-up and settle gates, approach discipline"
+    },
+    {
+      "id": "C06",
+      "title": "Acquisition A, noise plate",
+      "headings": [
+        "5"
+      ],
+      "stakes": "medium",
+      "why": "station list, field positions that may not fit, sentinels, tilt sub-series"
+    },
+    {
+      "id": "C07",
+      "title": "Acquisition B, edges and Z steps",
+      "headings": [
+        "6"
+      ],
+      "stakes": "high",
+      "why": "recently changed: read-back truth, ladder rungs, approach from below, staircase"
+    },
+    {
+      "id": "C08",
+      "title": "Acquisition C, area arrays",
+      "headings": [
+        "7"
+      ],
+      "stakes": "medium",
+      "why": "configuration list, jitter poses, field and open-background variants"
+    },
+    {
+      "id": "C09",
+      "title": "Acquisition D, detection trials",
+      "headings": [
+        "8"
+      ],
+      "stakes": "high",
+      "why": "pilot, level selection against the sqrt 2 ladder, trial counts, independence rule"
+    },
+    {
+      "id": "C10",
+      "title": "Data logging, layout, budget",
+      "headings": [
+        "9"
+      ],
+      "stakes": "medium",
+      "why": "manifest columns, file names, the budget table (6,590 poses)"
+    },
+    {
+      "id": "C11",
+      "title": "Analysis A, noise vs Z",
+      "headings": [
+        "10"
+      ],
+      "stakes": "medium",
+      "why": "noise decomposition, quantization, model fit, drift, legacy metrics"
+    },
+    {
+      "id": "C12",
+      "title": "Analysis B, resolution H, V, Z",
+      "headings": [
+        "11"
+      ],
+      "stakes": "high",
+      "why": "ESF definitions and the Z-step analysis that now rests on the read-back pose"
+    },
+    {
+      "id": "C13",
+      "title": "Analysis C, area",
+      "headings": [
+        "12"
+      ],
+      "stakes": "medium",
+      "why": "sensed area definitions, geometric visible area, edge bias"
+    },
+    {
+      "id": "C14",
+      "title": "Analysis D, detectability",
+      "headings": [
+        "13"
+      ],
+      "stakes": "high",
+      "why": "psychometric model, false-alarm correction, D_0 bound, the 300-trial design"
+    },
+    {
+      "id": "C15",
+      "title": "Analysis E, boundary bias",
+      "headings": [
+        "14"
+      ],
+      "stakes": "medium",
+      "why": "visibility mask, outcome classes, indices and widths"
+    },
+    {
+      "id": "C16",
+      "title": "Uncertainty, limitations, open questions",
+      "headings": [
+        "15"
+      ],
+      "stakes": "medium",
+      "why": "the budget table and the open-question list, which must end the review resolved"
+    }
+  ]
+}
