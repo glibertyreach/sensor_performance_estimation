@@ -386,3 +386,28 @@ goes into Section 11.1 at C12 (it uses the B jitter poses, no capture cost); the
 added now as Section 6.1, Step 6 (optional second pass, LATERAL_SWEEP_STEP_PX = 0.1 px, LATERAL_SWEEP_SPAN_PX = 2 px,
 rows added to Section 2), outside the budget; in the technician procedure it belongs to Series B as an optional
 step after the edge captures, where the target is already mounted.
+
+## C09 — Section 8 Acquisition D, detection trials (opened 2026-10-05)
+
+Reviewer findings (proposals; nothing executed until Neil closes the chunk):
+- C09-R1 (serious, statistics; the C14 forward note lands here): Step 3 says "300 trials bound a never-detected
+  level at ≤ 1 %". That holds for the raw rate only. After the false-alarm correction of Section 13, Step 6, a
+  feature that is never detected still fires about 3 of 300 windows at the 1 % false-alarm target, and the corrected
+  95 % upper bound is then about 1.6 %, above the 1 % bound; it passes only when at most 1 window fires, about one
+  time in five. Distinguishing "never detected" from the 1 % blank rate to within 1 % needs about 540 trials
+  (one-sided 95 %, two-sample). Options for Neil: (a) keep 300 trials and set DETECTION_ZERO_PROBABILITY_BOUND to
+  0.02, with the 0 % criterion defined as the one-sided 95 % bound on the excess of the feature's rate over the
+  blank-site rate (two-sample), which 300 trials resolve to about 1.3 %; (b) keep the 1 % bound and raise
+  DETECTION_ZERO_TRIALS to 600 (the D extended row roughly doubles, about +2.5 h); (c) lower the false-alarm target
+  for the extended trials, which the blank sites cannot calibrate at 300 trials (a 0.1 % quantile from about 900
+  blank windows). Recommendation: (a). Sections 2, 8, 9 and 13 change with it.
+- C09-R2 (budget consistency): Step 5 lets the first frame of each C pose count as a D trial (30 of the 60 per
+  configuration and station), but the Section 9 budget counts all 60 as new poses and the plan tool plans them
+  all. Proposal: say that the budget assumes no reuse and that the plan tool applies the reuse on request
+  (shortening D main from 2,160 to 1,080 poses), or drop the reuse. Recommendation: keep it as the stated option.
+- C09-R3 (clarity, plain style): rewrite the intro and Steps 2–3 with the values (3 features, 9 stations, 60
+  poses of 1 frame, 300 trials at the 3 farthest stations 1131, 1345, 1600 mm) and the parameter names once.
+- C09-R4 (low): Step 1 is fine; Step 4 should also forbid reusing a C pose's later frames (only its first frame
+  is independent of the D poses), which Step 5 implies.
+
+Neil's comments: (pending)
