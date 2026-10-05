@@ -1152,7 +1152,7 @@ def _figure_drift(result: NoiseResult, out_dir: Path) -> list[Path] | None:
     if drift is None:
         return None
     has_temperature = any(t is not None for t in drift.temperature_c)
-    figure, axes = _grid_figure(2 if has_temperature else 1, columns=2)
+    figure, axes = _grid_figure(3 if has_temperature else 2, columns=2)
     hours = np.array(drift.elapsed_hours)
     values = np.array(drift.mean_z_mm)
     axes[0].plot(hours, values, "o", color=OKABE_ITO_BLUE, markersize=3)
@@ -1162,14 +1162,26 @@ def _figure_drift(result: NoiseResult, out_dir: Path) -> list[Path] | None:
                      label=f"{drift.rate_mm_per_hour:.3g} mm/h")
         axes[0].legend(fontsize="small")
     axes[0].set_xlabel("time since the first frame (h)")
-    axes[0].set_ylabel("sentinel mean Z - Z_GT (mm)" if drift.reference == "registered" else "sentinel mean Z (mm)")
+    axes[0].set_ylabel("T2 sentinel mean Z - Z_GT (mm)" if drift.reference == "registered"
+                       else "T2 sentinel mean Z (mm)")
+    axes[0].set_title("T2 sentinels of A (the correction)", fontsize="small")
     axes[0].grid(True, alpha=0.3)
+    # Every mounted target, each relative to its own first sentinel after the mount.
+    for index, target in enumerate(drift.targets):
+        axes[1].plot(target.pose_hours, target.pose_offset_mm, "o-", color=OKABE_ITO_CYCLE[index % len(OKABE_ITO_CYCLE)],
+                     markersize=3, label=f"{target.target_id} (mount {target.mount})")
+    axes[1].set_xlabel("time since the first frame (h)")
+    axes[1].set_ylabel("sentinel offset from the first of the mount (mm)")
+    axes[1].set_title("drift per mounted target", fontsize="small")
+    axes[1].grid(True, alpha=0.3)
+    if drift.targets:
+        axes[1].legend(fontsize="x-small")
     if has_temperature:
         known = [(t, v) for t, v in zip(drift.temperature_c, values) if t is not None]
-        axes[1].plot([k[0] for k in known], [k[1] for k in known], "o", color=OKABE_ITO_BLUISH_GREEN, markersize=3)
-        axes[1].set_xlabel("sensor temperature (degrees C)")
-        axes[1].set_ylabel("sentinel mean (mm)")
-        axes[1].grid(True, alpha=0.3)
+        axes[2].plot([k[0] for k in known], [k[1] for k in known], "o", color=OKABE_ITO_BLUISH_GREEN, markersize=3)
+        axes[2].set_xlabel("sensor temperature (degrees C)")
+        axes[2].set_ylabel("sentinel mean (mm)")
+        axes[2].grid(True, alpha=0.3)
     return save_figure(figure, out_dir / FIGURE_STEMS["drift"])
 
 

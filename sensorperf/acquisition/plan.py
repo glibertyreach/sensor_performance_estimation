@@ -141,14 +141,17 @@ PERCENT = 100.0
 PLOT_GRID_ALPHA = 0.3
 """Opacity of the grid lines of plan.png."""
 
-DOCUMENT_ESTIMATE_POSES = 7292
-DOCUMENT_ESTIMATE_FRAMES = 44140
-DOCUMENT_ESTIMATE_HOURS = 7.3
+DOCUMENT_ESTIMATE_POSES = 7278
+DOCUMENT_ESTIMATE_FRAMES = 43000
+DOCUMENT_ESTIMATE_HOURS = 7.26
 """The capture-budget estimate printed in Section 9 of the procedure document (poses, frames, robot hours) for the
 redesigned plan: the totals of ``plan_full_session`` with the default parameters, the indicative geometry (10
-frames/s) and no optional variants (no filters-off repeat, no open-background variant; 7,292 poses, 44,140 frames,
-7.30 h). plan_summary.txt compares the plan it summarizes with these numbers, so a change of the parameters shows
-up as a ratio away from 1. The filters-off repeat is never part of these totals (see ``capture_budget``)."""
+frames/s) and no optional variants (no filters-off repeat, no open-background variant; 7,278 poses, 43,000 frames,
+7.26 h). The A series has 47 main poses (nine ladder stations at five field positions plus the two legacy depths at the
+center), 16 tilt poses (the 800 and 1600 mm stations; every tilt at 400 mm is infeasible) and the re-mount check, and the
+sentinels (11, on the mounted target) are part of the totals. plan_summary.txt compares the plan it summarizes with these
+numbers, so a change of the parameters shows up as a ratio away from 1. The filters-off repeat is never part of these
+totals (see ``capture_budget``)."""
 
 PLAN_CSV_NAME = "poses.csv"
 PLAN_SUMMARY_NAME = "plan_summary.txt"

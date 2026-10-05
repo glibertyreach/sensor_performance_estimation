@@ -1,11 +1,11 @@
 # Review decisions log — VSX3000 characterization specification
 
 Source of truth: the live Claude Docs document. Decisions are logged here as they are made and executed
-only when the person closes the chunk. "Agreed" items are the reviewer's proposals the person accepted.
+only when Neil closes the chunk. "Agreed" items are the reviewer's proposals Neil accepted.
 
 ## C01 — Section 1, Purpose and scope (opened 2026-10-05)
 
-Person's comments:
+Neil's comments:
 - C01-P1: the phrase "rise distance" is unusual and needs a definition (first use is in the measurand
   table, B-HV row; the definition belongs where the term first appears, with the 10–90 percent rule
   of Section 11.1 Step 6 stated in one sentence).
@@ -31,7 +31,7 @@ Deferred follow-up: C05 — add the baseline-side check to Step 4.5 (from C01-R3
 
 ## C02 — Section 2, Parameters (opened 2026-10-05)
 
-Reviewer findings (proposals; nothing executed until the person closes the chunk):
+Reviewer findings (proposals; nothing executed until Neil closes the chunk):
 - C02-R1 (serious): the opening claim "every arbitrary constant ... is a named parameter listed here" is
   false; literals remain in Sections 4–13 (750 mm reference Z; warm-up 1 min / 10 frames; settle check
   100 frames / 10 %; sentinel 30 frames; tilt 50 frames; C field sub-series 10 poses; staircase 3 quanta /
@@ -60,7 +60,7 @@ Reviewer findings (proposals; nothing executed until the person closes the chunk
   TILT_ANGLES_DEG includes 0°, which repeats the main-series pose (state it as a deliberate repeat or drop it).
 - C02-N1 (note, no action): the relations block exports as raw LaTeX in the docx; verify the live rendering.
 
-Person's comments: none; closed 2026-10-05 with "closed. next" (treated as acceptance of R1–R9).
+Neil's comments: none; closed 2026-10-05 with "closed. next" (treated as acceptance of R1–R9).
 Executed (document rev 54): R1 added 30 rows using the code's names (Z_REFERENCE_MM, WARMUP_CHECK_*, SENTINEL_FRAMES,
 SETTLE_CHECK_FRAMES, SETTLE_SIGMA_EXCESS_FRACTION, FRAMES_PER_TILT_POSE, POSE_LOG_RESOLUTION_MM, FRAME_CHECK_PX,
 FRAME_RATE_HZ, MOVE_AND_SETTLE_TIME_S, FIELD_SUBSERIES_POSES_AREA, Z_STAIRCASE_QUANTA, Z_STAIRCASE_FRAMES,
@@ -79,7 +79,7 @@ lapse, ±2/√n). C06 §5: add the quick-look autocorrelation check between A an
 
 ## C03 — Sections 3.1 Equipment and 3.2 Targets (opened 2026-10-05)
 
-Reviewer findings (proposals; nothing executed until the person closes the chunk):
+Reviewer findings (proposals; nothing executed until Neil closes the chunk):
 - C03-R1 (serious, truth chain): 3.1 does not require what B-Z now rests on. The robot row asks only for ISO 9283
   repeatability; the read-back pose is the step truth, so 3.1 must require that the controller reports the actual
   (encoder-derived) pose, at POSE_LOG_RESOLUTION_MM, with a stated pose-reporting accuracy, and that the pose is
@@ -109,25 +109,25 @@ Reviewer findings (proposals; nothing executed until the person closes the chunk
   be programmable, and the enclosure row should name the IR meter's logging interval (same as the temperature
   loggers). Surface-finish paragraph: "mid-range IR reflectance" is unquantified; propose recording the measured
   reflectance as a required field in targets_asbuilt.csv rather than fixing a number.
-- C03-Q1 (person's pending decision, not executed): merging T1 and T2 into one plate registered by plane
+- C03-Q1 (Neil's pending decision, not executed): merging T1 and T2 into one plate registered by plane
   correspondence (asked earlier in chat). If adopted, the T1 row changes to "plane-registration plate = T2" and
   the ChArUco pattern is dropped; the registration method in Section 4 changes with it.
 
-Person's comments (2026-10-05):
+Neil's comments (2026-10-05):
 - C03-P1: remove the "Enclosure or blackout curtains, IR light meter" row; the laboratory is enclosed and its lighting
   is constant. Propagation: the ambient-IR manifest column (Section 9, C10) and any ambient-IR mention in Sections 4
   and 15 go with it; the R7 note on the IR meter's logging interval is void.
-- C03-P2: the person does not like the pattern on the registration plate and asks whether it can be eliminated
+- C03-P2: Neil does not like the pattern on the registration plate and asks whether it can be eliminated
   (same question as Q1: plane-correspondence registration with the T2 plate). Answer given in chat with the
   consequences (rotation and camera position stay observable; the camera-Z offset is conditioned by the tilt
   range; the in-plane position of a target's features relative to the flange is not observable from planes and must
   come from the dowel datum plus as-built metrology, or from an IR-image localization once per mount).
-- C03-P3: the person questions the need for a large number of disks and holes and asks how many are proposed.
+- C03-P3: Neil questions the need for a large number of disks and holes and asks how many are proposed.
   Answer given in chat: 17 rungs (0.22 to 55.8 mm at the indicative f_x = 688 px); 17 disks + 17 blank sites +
   4 post-only sites over T4-S/T4-L, 17 holes + 17 blank sites over T5-S/T5-L, 74 sites in all; reduction options
   offered (12 rungs keeping √2 only over 0.5–8 mm, or 8 rungs at ratio 2).
-Awaiting the person's decisions on P2 and P3 before closing the chunk.
-- C03-P3 decision (2026-10-05): the person rejects the 17-rung ladder. Directive: radically reduce the number of
+Awaiting Neil's decisions on P2 and P3 before closing the chunk.
+- C03-P3 decision (2026-10-05): Neil rejects the 17-rung ladder. Directive: radically reduce the number of
   disks and cutouts and use robot motion in Z to vary the subtended angle. Reviewer proposal put to the person:
   6 disks and 6 holes (a 5-rung ratio-2 ladder 0.44–6.98 mm whose D_px ranges tile 0.3–9.6 px over Z_MIN..Z_MAX,
   plus one 27.9 mm asymptote feature), one disk plate and one cutout plate, blank and post-only sites as named
@@ -143,7 +143,7 @@ Awaiting the person's decisions on P2 and P3 before closing the chunk.
 - C03-P3 (2026-10-05, third directive, person's domain knowledge): the 0.70 and 1.97 mm features would never be
   detected. VSX3000 model: about 300,000 depth voxels and about 30,000 projected laser pencils, 10 voxels per
   pencil; the path-correlation algorithm needs several pencil detections, at least 4, so a patch of at least 40
-  voxels, a minimum detectable diameter of at least 6 px (2·sqrt(40/π) = 7.1 px). The person calls this very
+  voxels, a minimum detectable diameter of at least 6 px (2·sqrt(40/π) = 7.1 px). Neil calls this very
   conservative and asks the reviewer to check available sources and consider still larger patch sizes. The person
   also allows the 400–1600 mm distance variation for the rest of the tests if necessary.
 - C03 closed 2026-10-05 ("accepted. execute. next."): 3 features per plate at 7.0, 19.7, 55.8 mm (ratio 2√2 from 3 px at
@@ -164,7 +164,7 @@ Awaiting the person's decisions on P2 and P3 before closing the chunk.
 
 ## C04 — Section 3.3 Chamfered (knife-edge) boundaries (opened 2026-10-05)
 
-Reviewer findings (proposals; nothing executed until the person closes the chunk):
+Reviewer findings (proposals; nothing executed until Neil closes the chunk):
 - C04-R1 (serious, stale worked value): the paragraph still reasons from "70° FOV, 50 mm baseline" and the old Z_MIN,
   giving 32° + 10° = 42° so that a 45° bevel passes. With Z_MIN = 400 mm the same conservative construction (a
   chamfered target at the off-axis field position at Z_MIN) gives about 38° + 10° = 48° at the indicative geometry
@@ -185,8 +185,8 @@ Reviewer findings (proposals; nothing executed until the person closes the chunk
   not a requirement.
 - C04-N1 (note): the bevel formula exports as raw LaTeX in the review PDF; verify the live rendering.
 
-Person's comments: (pending)
-Person's comments (2026-10-05), closed with "close":
+Neil's comments: (pending)
+Neil's comments (2026-10-05), closed with "close":
 - C04-P1: the LaTeX math in Section 3.3 is not formatted. Finding: the bevel formula is stored in the live document as
   a code block (as are the relations in Section 2, the noise model in Section 10, the psychometric model in Section
   13, and the two boundary-bias formulas in Section 14), so it is unformatted in the live document too, not only in
@@ -205,7 +205,7 @@ diameter derived from the rule).
 
 ## C05 — Section 4 Setup, warm-up, and registration (opened 2026-10-05)
 
-Reviewer findings (proposals; nothing executed until the person closes the chunk):
+Reviewer findings (proposals; nothing executed until Neil closes the chunk):
 - C05-R1 (serious): the settle and vibration check runs at Z_MAX, where σ_t is largest (it grows as Z²: 16× from
   400 to 1600 mm) while a robot vibration has the same millimeter amplitude at every Z, so the 10 % excess test is
   least sensitive exactly where it is run. Proposal: run it at Z_MIN (optionally also at Z_MAX).
@@ -227,7 +227,7 @@ Reviewer findings (proposals; nothing executed until the person closes the chunk
 - Pipeline: numbered steps now render as numbered lists (nested sub-steps inside their step); fixed in
   render_subsection.py during this chunk.
 
-Person's comments: none; closed 2026-10-05 with "close" (treated as acceptance of R1–R6; N1 carried to C06).
+Neil's comments: none; closed 2026-10-05 with "close" (treated as acceptance of R1–R6; N1 carried to C06).
 Executed (document rev 77): R1 settle check at Z_MIN with the reason stated; R2 mount check with Z within
 REGISTRATION_RESIDUAL_ACCEPT_MM, tilt within the new MOUNT_TILT_TOLERANCE_DEG (0.05 †, row added to Section 2),
 H and V within FRAME_CHECK_PX; R3 registration poses with tilts about both axes and both signs, plate kept in the
@@ -240,14 +240,14 @@ false-alarm target γ = 0.01 per window and 300 extended trials, a feature that 
 collects about 3 false detections; the one-sided 95% Clopper–Pearson upper bound on 3/300 is about 2.6%, and the
 corrected bound (ψ_U − γ)/(1 − γ) ≈ 1.6% exceeds DETECTION_ZERO_PROBABILITY_BOUND = 0.01. The bound is met only
 when at most 1 of the 300 trials fires, which happens about one time in five. So the 0% criterion of Section 13,
-Step 6 cannot be met reliably as specified. Options to put to the person in C14: raise the bound to about 0.02 or
+Step 6 cannot be met reliably as specified. Options to put to Neil in C14: raise the bound to about 0.02 or
 0.03, lower the false-alarm target for the extended trials, raise the trial count, or define the 0% point as
 "not distinguishable from the blank sites" with a two-sample bound. Also a code follow-up (C04-R3): derive the
 nominal post diameter from POST_DIAMETER_FRACTION_OF_D0 × the expected D_0 instead of a fixed 0.5 mm.
 
 ## C06 — Section 5 Acquisition A, noise-plate series (opened 2026-10-05)
 
-Reviewer findings (proposals; nothing executed until the person closes the chunk):
+Reviewer findings (proposals; nothing executed until Neil closes the chunk):
 - C06-R1 (serious, geometry): the tilt sub-series at the reduced stations includes Z_MIN = 400 mm with tilts up to
   45°. A 400 mm plate tilted 45° about its center at 400 mm puts its near edge at about 259 mm, inside the sensor's
   near limit (Z_MIN is the dagger-marked limit of valid depth), and its far edge at 541 mm; the plan tool already
@@ -258,7 +258,7 @@ Reviewer findings (proposals; nothing executed until the person closes the chunk
   C and D forces a re-mount of T2 (the plan tool reports it), which costs time and injects the re-mount error it is
   meant to watch. Proposal: define the sentinel as the front plane of whatever target is mounted, captured centered
   at Z_REFERENCE_MM, with the first sentinel after each mount as that target's reference; T2 sentinels remain at
-  the series boundaries. Decision for the person (changes Sections 5, 7, 8, 9 and the plan tool).
+  the series boundaries. Decision for Neil (changes Sections 5, 7, 8, 9 and the plan tool).
 - C06-R3 (from C05-N1): "check that the plate fully covers the analysis region of interest" has no rule. The plan
   tool places the plate as far off-axis as keeps it inside the field with a margin and logs the achieved fraction
   (36 % of the requested offset at 476 mm). Proposal: state that rule, with the margin BOUNDARY_BAND_HALF_WIDTH_PX,
@@ -269,10 +269,10 @@ Reviewer findings (proposals; nothing executed until the person closes the chunk
 - C06-R5 (low): Step 4 logs the sensor temperature; the air temperature comes from the loggers of Step 4.1, say
   so; Step 8's "Steps 1–5" should include Step 6 (the repeat-mount check is part of the filters-off repeat).
 
-Person's comments: (pending)
-Person's comment (2026-10-05) on C06: Section 5 would be very difficult to follow as a procedure; imperatives such
+Neil's comments: (pending)
+Neil's comment (2026-10-05) on C06: Section 5 would be very difficult to follow as a procedure; imperatives such
 as "Build the station list from every station..." carry no definitions or guidance and a naive reader could not act
-on them. The person hopes the data acquisition (technician) document is clearer. Logged as C06-P1. Reviewer
+on them. Neil hopes the data acquisition (technician) document is clearer. Logged as C06-P1. Reviewer
 response pending: compare with the technician procedure's Sections 5 and 6 and propose how the specification should
 define its terms (station, field position, pose list) and point to the plan tool's pose list as the thing the
 technician executes.
@@ -285,7 +285,7 @@ technician executes.
   registration; pose list = the plan tool's poses.csv, which the robot program executes in order) and stating the
   division of labor: the specification says what each series captures and why, the technician procedure says how.
   Then rephrase the Section 5 imperatives against those terms ("The pose list for A holds every ladder station ...").
-- C06-P2 (person, 2026-10-05): the specification skirts the line between a human-readable document and a computer
+- C06-P2 (Neil, 2026-10-05): the specification skirts the line between a human-readable document and a computer
   specification, with many shibboleths (the code-style parameter names and constructs in the prose); the plan
   documents (technician procedure Sections 5 and 6) are good. Style decision pending: how the prose should refer to
   parameters (plain words with the value, the code name only in the Section 2 table and at first mention).
@@ -301,7 +301,7 @@ delegated (sentinel target, tilt rule, legacy center, achieved fraction); the Se
 
 ## C07 — Section 6 Acquisition B, edge-target and Z-step series (opened 2026-10-05)
 
-Reviewer findings (proposals; nothing executed until the person closes the chunk):
+Reviewer findings (proposals; nothing executed until Neil closes the chunk):
 - C07-R1 (serious, design): the Z-step ladder is fixed in millimeters (0.1 to 4 mm) while the expected depth
   quantum grows as Z²: at the indicative geometry (q = 0.125 px, k = f_x·B ≈ 51,600 px·mm) δZ_q is 0.39 mm at
   400 mm, 1.55 mm at 800 mm and 6.2 mm at 1600 mm. At 1600 mm the whole ladder lies below one quantum, so δ_50
@@ -321,10 +321,10 @@ Reviewer findings (proposals; nothing executed until the person closes the chunk
 - C07-R4 (low): 6.1, Step 2 "centered" at 1600 mm gives a 69 px square with 8 px bands and 8 px jitter, which is
   enough; say that the plan tool checks the square's size against the band and jitter at every shape station.
 - C07-P2 (style, pending): this section is the densest in parameter names; it is the next candidate for the
-  plain-language style once the person decides.
+  plain-language style once Neil decides.
 
-Person's comments: (pending)
-- C07-P1 (person, 2026-10-05): instead of moving the target in Z by multiples of a suspected quantum, tilt the target
+Neil's comments: (pending)
+- C07-P1 (Neil, 2026-10-05): instead of moving the target in Z by multiples of a suspected quantum, tilt the target
   by a small angle about H and/or V so that the true depth varies smoothly across the plate; one capture then shows
   the quantization plateaus along the ramp, and the many small Z moves are not needed. Reviewer assessment given in
   chat (adopt as a ramp sub-series; geometry table; fixed-pattern subtraction from A; one time-staircase kept at the
