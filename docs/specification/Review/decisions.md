@@ -270,3 +270,9 @@ Reviewer findings (proposals; nothing executed until the person closes the chunk
   so; Step 8's "Steps 1–5" should include Step 6 (the repeat-mount check is part of the filters-off repeat).
 
 Person's comments: (pending)
+Person's comment (2026-10-05) on C06: Section 5 would be very difficult to follow as a procedure; imperatives such
+as "Build the station list from every station..." carry no definitions or guidance and a naive reader could not act
+on them. The person hopes the data acquisition (technician) document is clearer. Logged as C06-P1. Reviewer
+response pending: compare with the technician procedure's Sections 5 and 6 and propose how the specification should
+define its terms (station, field position, pose list) and point to the plan tool's pose list as the thing the
+technician executes.
