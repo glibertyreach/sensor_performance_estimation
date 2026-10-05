@@ -29,7 +29,7 @@ from typing import Any
 # Procedure identifiers (the letters used in file names and the manifest)
 # ---------------------------------------------------------------------------
 PROCEDURE_REGISTRATION = "R"
-"""Section 4: registration captures of target T1."""
+"""Section 4: registration captures of the noise plate T2 (plane correspondence)."""
 PROCEDURE_NOISE = "A"
 """Section 5: noise-plate series."""
 PROCEDURE_EDGES = "B"
@@ -47,17 +47,17 @@ PROCEDURES = (PROCEDURE_REGISTRATION, PROCEDURE_NOISE, PROCEDURE_EDGES, PROCEDUR
               PROCEDURE_AREA, PROCEDURE_DETECTION, PROCEDURE_SENTINEL)
 """All procedure letters accepted in a manifest."""
 
-# Target identifiers (Section 3.2). File names drop the hyphen (T4-S -> T4S).
-TARGET_REGISTRATION_PLATE = "T1"
+# Target identifiers (Section 3.2). One disk plate and one cutout plate; the registration plate T1 no
+# longer exists (registration uses the noise plate T2 by plane correspondence, redesign note Section 3).
 TARGET_NOISE_PLATE = "T2"
+"""Noise plate; also the registration target (plane-only solve)."""
 TARGET_RAISED_SQUARE = "T3a"
 TARGET_SQUARE_WINDOW = "T3b"
-TARGET_DISKS_SMALL = "T4-S"
-TARGET_DISKS_LARGE = "T4-L"
-TARGET_CUTOUTS_SMALL = "T5-S"
-TARGET_CUTOUTS_LARGE = "T5-L"
-TARGET_IDS = (TARGET_REGISTRATION_PLATE, TARGET_NOISE_PLATE, TARGET_RAISED_SQUARE, TARGET_SQUARE_WINDOW,
-              TARGET_DISKS_SMALL, TARGET_DISKS_LARGE, TARGET_CUTOUTS_SMALL, TARGET_CUTOUTS_LARGE)
+TARGET_DISKS = "T4"
+"""The disk plate: feature_count disks, blank sites and a post-only site."""
+TARGET_CUTOUTS = "T5"
+"""The cutout plate: feature_count cutouts and blank sites."""
+TARGET_IDS = (TARGET_NOISE_PLATE, TARGET_RAISED_SQUARE, TARGET_SQUARE_WINDOW, TARGET_DISKS, TARGET_CUTOUTS)
 """All target identifiers of Section 3.2."""
 
 FIELD_POSITION_CENTER = 0
@@ -179,20 +179,22 @@ class CharacterizationParameters:
     """The parameter table of Section 2. Field names are the document's names
     in lower case; docstrings are the document's meanings."""
 
-    # Working volume
-    z_min_mm: float = 500.0
-    """Near range limit."""
-    z_max_mm: float = 1000.0
-    """Far range limit."""
-    z_noise_step_mm: float = 50.0
-    """Spacing of the noise stations (A); 500 to 1000 in steps of 50 gives 11 stations."""
-    z_shape_stations_mm: tuple[float, ...] = (500.0, 625.0, 750.0, 875.0, 1000.0)
-    """Stations for the edge, area and detection tests (B, C, D)."""
-    z_reduced_stations_mm: tuple[float, ...] = (500.0, 750.0, 1000.0)
-    """Subset of stations for the slowest tests (B-Z, the D 0 percent series, the A tilt sub-series)."""
-    z_reference_mm: float = 750.0
-    """The mid-range station used for sentinels, the warm-up check, the re-mount check,
-    the field sub-series and the D pilot (the document writes 750 mm in each place)."""
+    # Working volume and station ladder (redesign note, Section 1)
+    z_min_mm: float = 400.0
+    """Near range limit. † Step 4.5 confirms that the sensor reads at this distance."""
+    z_max_mm: float = 1600.0
+    """Far range limit. † Step 4.5 confirms that the sensor reads at this distance."""
+    z_station_ratio: float = 2.0 ** 0.25
+    """Ratio of successive stations of the one geometric ladder (four stations per octave); the stations are
+    Z_MIN times this ratio to the power k, rounded to 1 mm, up to and including Z_MAX."""
+    z_shape_station_stride: int = 2
+    """Every this-many-th station is a B-HV shape station (400, 566, 800, 1131, 1600 with the defaults)."""
+    z_reduced_station_stride: int = 4
+    """Every this-many-th station is a reduced station, used by the slowest tests (B-Z, the A tilt sub-series)
+    (400, 800, 1600 with the defaults)."""
+    z_reference_mm: float = 800.0
+    """The reference station (one of the ladder stations) used for sentinels, the warm-up check, the re-mount check,
+    the C field sub-series, the C open-background variant and the D post check."""
     field_offset_fraction: float = 0.6
     """Off-axis field positions at (+/- f W/2, +/- f H/2) from the center, f of the half field (A, C)."""
     tilt_angles_deg: tuple[float, ...] = (0.0, 15.0, 30.0, 45.0)
@@ -275,22 +277,17 @@ class CharacterizationParameters:
     """Minimum connected region counted as a detection."""
     detection_window_margin_px: float = 3.0
     """Search window radius equals D/2 in pixels plus this margin."""
-    detection_levels: int = 9
-    """Diameter levels per psychometric curve."""
-    detection_level_low_factor: float = 0.3
-    """Smallest level as a multiple of the pilot D_50."""
-    detection_level_high_factor: float = 2.5
-    """Largest level as a multiple of the pilot D_50."""
     detection_trials_per_level: int = 60
-    """Independent trials per level in the main D series."""
+    """Independent trials per (feature, station) pair in the D series."""
     detection_zero_trials: int = 300
-    """Trials per level in the extended 0 percent series."""
+    """Trials per (feature, station) pair at the detection_zero_station_count farthest stations, where the smallest
+    feature lies below the expected threshold and the 0 percent point is bounded (rule of three)."""
+    detection_zero_station_count: int = 3
+    """Number of farthest stations that carry detection_zero_trials trials (1131, 1345 and 1600 mm with the defaults)."""
     detection_zero_probability_bound: float = 0.01
     """Upper bound on detection probability that defines practically zero detection."""
     detection_lapse_rate_max: float = 0.05
     """Upper bound of the lapse rate lambda in the psychometric fit (Section 13, Step 4)."""
-    detection_fine_ladder_ratio: float = 2.0 ** 0.25
-    """Diameter ratio of a dedicated fine detection plate (Section 8, Step 2)."""
     confidence_level: float = 0.95
     """Level of all confidence intervals and bounds (B, C, D, E)."""
     bootstrap_resamples: int = 2000
@@ -329,7 +326,10 @@ class CharacterizationParameters:
     legacy_box_centers_px: tuple[tuple[int, int], ...] = ((264, 253), (137, 81), (401, 83), (404, 386), (129, 392))
     """The five VSX3000 BrownBoard box centers (column, row) of testZRepeatabilityBrownBoard.py."""
     legacy_metric_depths_mm: tuple[float, ...] = (700.0, 1000.0)
-    """Depths at which the legacy metrics are computed (Section 10, Step 12)."""
+    """Depths at which the legacy metrics are computed (Section 10, Step 12); series A adds them as extra
+    noise stations to the ladder."""
+    station_match_tolerance_mm: float = 0.5
+    """Two depths closer than this are the same station (the file-name rule rounds a station to 1 mm)."""
     autocorrelation_threshold: float = 1.0 / math.e
     """The correlation length is the lag where the normalized autocorrelation first falls to this (1/e)."""
 
@@ -352,16 +352,23 @@ class CharacterizationParameters:
     """Margin added to the worst-case ray angle in the bevel check (Section 3.3)."""
     edge_land_max_mm: float = 0.2
     """Maximum residual flat land at a knife edge."""
-    diameter_ladder_ratio: float = math.sqrt(2.0)
-    """Ratio between successive diameters of the disk and cutout ladder."""
-    diameter_min_footprint_fraction: float = 0.3
-    """Smallest diameter as a fraction of the pixel footprint at Z_MIN."""
-    diameter_max_footprint_multiple: float = 30.0
-    """Largest diameter as a multiple of the pixel footprint at Z_MAX."""
+    feature_ladder_ratio: float = 2.0 * math.sqrt(2.0)
+    """Diameter ratio of successive disk and cutout features (a half-octave overlap in subtended pixels between
+    neighbors, since one feature covers two octaves of D_px over the Z range)."""
+    feature_min_px_at_z_max: float = 3.0
+    """Subtended size, in pixels at Z_MAX, of the smallest feature."""
+    feature_count: int = 3
+    """Features per disk plate and per cutout plate."""
+    blank_sites_per_plate: int = 3
+    """Blank sites per plate, each sized to the largest search window (the guess rate gamma of the detection fit)."""
+    post_sites_per_plate: int = 1
+    """Post-only sites per disk plate (the post check: a bare post must not be detected)."""
     feature_isolation_px: float = 30.0
-    """Minimum edge-to-edge spacing between features, pixels at Z_MIN."""
+    """Minimum edge-to-edge spacing between features, pixels at Z_MAX (evaluated at the far station so that
+    neighbors stay separated there, where a pixel covers the most millimeters)."""
     post_diameter_fraction_of_d0: float = 0.5
-    """Disk support posts must be thinner than this fraction of the pilot D_0."""
+    """Disk support posts must be thinner than this fraction of the expected D_0 (the post check of the D pilot
+    confirms that a bare post is not detected)."""
     frame_check_px: float = 0.5
     """IR-edge to depth-discontinuity agreement required in Step 4.5."""
 
@@ -372,47 +379,72 @@ class CharacterizationParameters:
     """Half range of the registration tilts about H and V (+/-)."""
     registration_residual_accept_mm: float = 0.15
     """Acceptance limit of the registration residual, mm RMS."""
-    mount_check_depth_mm: float = 750.0
+    mount_check_depth_mm: float = 800.0
     """Depth of the once-per-mount plane-fit check (Section 4, Step 8)."""
 
-    # Open-background variant and continuous-angle variant (optional series)
-    continuous_angle_step_mm: float = 10.0
-    """Z step of the optional continuous-angle D variant (Section 8, Step 7)."""
-    continuous_angle_poses_per_step: int = 20
-    """Random-offset poses per Z step of that variant."""
+    # Equipment (redesign note, Section 4)
+    adapter_remount_repeatability_mm: float = 0.02
+    """Repeatability of the target adapter when a target is removed and mounted again (the re-mount check of A)."""
+    temperature_log_interval_min: float = 1.0
+    """Interval at which the sensor and air temperatures are logged during every capture."""
 
     # ------------------------------------------------------------------
     # Derived station lists (Section 2 relations and Section 5, Step 1)
     # ------------------------------------------------------------------
-    def noise_stations_mm(self) -> tuple[float, ...]:
-        """Z_MIN : Z_NOISE_STEP_MM : Z_MAX inclusive (11 stations with the defaults)."""
-        count = int(round((self.z_max_mm - self.z_min_mm) / self.z_noise_step_mm)) + 1
-        return tuple(self.z_min_mm + index * self.z_noise_step_mm for index in range(count))
+    def z_stations_mm(self) -> tuple[float, ...]:
+        """The one geometric station ladder of the whole procedure: Z_MIN times Z_STATION_RATIO to the
+        power k, rounded to 1 mm, from Z_MIN up to and including Z_MAX (400, 476, 566, 673, 800, 951,
+        1131, 1345, 1600 with the defaults; nine stations).
 
-    def diameter_ladder_mm(self, geometry: SensorGeometry) -> tuple[float, ...]:
-        """The disk and cutout diameters: from DIAMETER_MIN_FOOTPRINT_FRACTION x p(Z_MIN) up to
-        DIAMETER_MAX_FOOTPRINT_MULTIPLE x p(Z_MAX) in steps of DIAMETER_LADDER_RATIO
-        (Section 3.2). The last rung is the first one at or above the maximum."""
-        smallest = self.diameter_min_footprint_fraction * geometry.pixel_footprint_mm(self.z_min_mm)
-        largest = self.diameter_max_footprint_multiple * geometry.pixel_footprint_mm(self.z_max_mm)
-        rungs = [smallest]
-        while rungs[-1] < largest:
-            rungs.append(rungs[-1] * self.diameter_ladder_ratio)
-        return tuple(rungs)
+        The last station is Z_MAX itself (the ratio power that reaches it is rounded to the nearest
+        integer count, so floating-point error in the ratio cannot drop or duplicate the end)."""
+        octaves_span = math.log(self.z_max_mm / self.z_min_mm) / math.log(self.z_station_ratio)
+        count = int(round(octaves_span)) + 1
+        stations = [float(round(self.z_min_mm * self.z_station_ratio ** k)) for k in range(count)]
+        stations[-1] = float(round(self.z_max_mm))
+        return tuple(stations)
+
+    def _strided_stations_mm(self, stride: int) -> tuple[float, ...]:
+        """Every stride-th station of the ladder, counted from Z_MIN, always including the last (Z_MAX)."""
+        stations = self.z_stations_mm()
+        chosen = list(stations[::stride])
+        if chosen[-1] != stations[-1]:
+            chosen.append(stations[-1])
+        return tuple(chosen)
+
+    def z_shape_stations_mm(self) -> tuple[float, ...]:
+        """The B-HV stations: every Z_SHAPE_STATION_STRIDE-th station including both ends
+        (400, 566, 800, 1131, 1600 with the defaults)."""
+        return self._strided_stations_mm(self.z_shape_station_stride)
+
+    def z_reduced_stations_mm(self) -> tuple[float, ...]:
+        """The B-Z and A tilt sub-series stations: every Z_REDUCED_STATION_STRIDE-th station including
+        both ends (400, 800, 1600 with the defaults)."""
+        return self._strided_stations_mm(self.z_reduced_station_stride)
+
+    def noise_stations_mm(self) -> tuple[float, ...]:
+        """The A stations: every ladder station plus the LEGACY_METRIC_DEPTHS_MM that are not already
+        stations (700 and 1000 mm), in ascending order, so the legacy metrics are computed at the same
+        depths as the existing data."""
+        extra = [z for z in self.legacy_metric_depths_mm if all(abs(z - s) > self.station_match_tolerance_mm
+                                                                for s in self.z_stations_mm())]
+        return tuple(sorted(self.z_stations_mm() + tuple(extra)))
+
+    def detection_zero_stations_mm(self) -> tuple[float, ...]:
+        """The DETECTION_ZERO_STATION_COUNT farthest stations (1131, 1345, 1600 mm), which carry
+        DETECTION_ZERO_TRIALS trials per feature."""
+        return self.z_stations_mm()[-self.detection_zero_station_count:]
+
+    def feature_diameters_mm(self, geometry: SensorGeometry) -> tuple[float, ...]:
+        """The disk and cutout diameters D_k = FEATURE_MIN_PX_AT_Z_MAX x p(Z_MAX) x FEATURE_LADDER_RATIO^k,
+        k = 0 .. FEATURE_COUNT - 1 (7.0, 19.7 and 55.8 mm at the indicative geometry; 3.0 to 12, 8.5 to 34
+        and 24 to 96 px over the Z range)."""
+        smallest = self.feature_min_px_at_z_max * geometry.pixel_footprint_mm(self.z_max_mm)
+        return tuple(smallest * self.feature_ladder_ratio ** k for k in range(self.feature_count))
 
     def phase_jitter_span_mm(self, geometry: SensorGeometry, depth_mm: float) -> float:
         """PHASE_JITTER_SPAN_PX converted to millimeters at the station depth."""
         return self.phase_jitter_span_px * geometry.pixel_footprint_mm(depth_mm)
-
-    def detection_level_diameters_mm(self, pilot_d50_mm: float) -> tuple[float, ...]:
-        """DETECTION_LEVELS diameters, log-spaced from DETECTION_LEVEL_LOW_FACTOR to
-        DETECTION_LEVEL_HIGH_FACTOR times the pilot D_50 (Section 8, Step 2)."""
-        low = math.log(self.detection_level_low_factor * pilot_d50_mm)
-        high = math.log(self.detection_level_high_factor * pilot_d50_mm)
-        if self.detection_levels == 1:
-            return (math.exp((low + high) / 2.0),)
-        return tuple(math.exp(low + (high - low) * index / (self.detection_levels - 1))
-                     for index in range(self.detection_levels))
 
     def rule_of_three_bound(self, trials: int) -> float:
         """One-sided upper bound on a probability after zero successes in n trials at the

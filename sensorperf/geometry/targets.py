@@ -57,8 +57,8 @@ import numpy as np
 from sensorperf.geometry.camera import PinholeCamera
 from sensorperf.geometry.transforms import RigidTransform
 from sensorperf.parameters import (
-    CharacterizationParameters, SensorGeometry, TARGET_CUTOUTS_LARGE, TARGET_CUTOUTS_SMALL, TARGET_DISKS_LARGE,
-    TARGET_DISKS_SMALL, TARGET_NOISE_PLATE, TARGET_RAISED_SQUARE, TARGET_REGISTRATION_PLATE, TARGET_SQUARE_WINDOW,
+    CharacterizationParameters, SensorGeometry, TARGET_CUTOUTS, TARGET_DISKS, TARGET_NOISE_PLATE,
+    TARGET_RAISED_SQUARE, TARGET_SQUARE_WINDOW,
 )
 
 # ---------------------------------------------------------------------------
@@ -108,12 +108,12 @@ ARRAY_ROW_PACKING_FRACTION = 0.9
 """Fraction of the plate width used by a row of features when laying out an array."""
 ARRAY_MIN_PLATE_SIZE_MM = 100.0
 """An array plate is never smaller than this (width and height), whatever the ladder."""
-BLANK_SITE_WINDOW_FRACTION = 1.0
-"""A blank site's diameter equals the diameter of the level it serves (one blank per level)."""
 POST_NOMINAL_DIAMETER_MM = 0.5
 """Nominal post diameter used when laying out an array (replaced by the as-built value)."""
-POST_SITE_LEVELS = 2
-"""Number of post-only control sites per disk array (the two thinnest posts)."""
+ARRAY_FIELD_MARGIN_PX = 12.0
+"""Margin kept inside the image edge, in pixels at Z_MIN, when the rows of an array are limited to the width of the
+field of view at Z_MIN: the ROI shrink BOUNDARY_BAND_HALF_WIDTH_PX plus half the phase-jitter span with the default
+parameters (8 + 4 px). The array planner checks the exact fit per station; this only steers the row packing."""
 ASBUILT_COLUMNS = ("target_id", "site_id", "kind", "x_mm", "y_mm", "diameter_mm", "diameter_uncertainty_mm",
                    "land_mm", "bevel_deg", "rotation_deg", "level_index")
 """Columns of targets_asbuilt.csv (Section 3.3)."""
@@ -261,7 +261,7 @@ class TwoPlaneTarget:
     half_width_mm: float
     half_height_mm: float
     gap_mm: float | None = None
-    """Front-to-back plate distance; None means no back plate (T1, T2, or the open-background variant)."""
+    """Front-to-back plate distance; None means no back plate (T2, or the open-background variant)."""
     back_half_width_mm: float | None = None
     back_half_height_mm: float | None = None
     """Back plate half sizes; None means the same as the front plate."""
@@ -534,14 +534,9 @@ def load_targets_asbuilt(path: str | Path) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Standard targets from the parameters (Section 3.2)
 # ---------------------------------------------------------------------------
-def make_registration_plate(params: CharacterizationParameters, half_width_mm: float = 200.0,
-                            half_height_mm: float = 150.0) -> TwoPlaneTarget:
-    """T1: a flat plate (about 400 x 300 mm) carrying the fiducial pattern."""
-    return TwoPlaneTarget(TARGET_REGISTRATION_PLATE, TARGET_KIND_PLATE, half_width_mm, half_height_mm)
-
-
 def make_noise_plate(params: CharacterizationParameters) -> TwoPlaneTarget:
-    """T2: the uniform matte plate of NOISE_PLATE_SIZE_MM."""
+    """T2: the uniform matte plate of NOISE_PLATE_SIZE_MM. It is also the registration target: the plane-only
+    registration solve needs no pattern on it (redesign note, Section 3)."""
     width, height = params.noise_plate_size_mm
     return TwoPlaneTarget(TARGET_NOISE_PLATE, TARGET_KIND_PLATE, width / 2.0, height / 2.0)
 
@@ -585,32 +580,36 @@ def _layout_rows(diameters_mm: list[float], isolation_mm: float, max_row_width_m
 
 
 def make_feature_array(target_id: str, kind: str, diameters_mm: list[float], isolation_mm: float, gap_mm: float,
-                       level_indices: list[int] | None = None, post_diameter_mm: float = POST_NOMINAL_DIAMETER_MM,
-                       post_sites: int = POST_SITE_LEVELS, min_plate_mm: float = ARRAY_MIN_PLATE_SIZE_MM,
-                       ) -> TwoPlaneTarget:
-    """A disk (TARGET_KIND_DISK_ARRAY) or cutout (TARGET_KIND_CUTOUT_ARRAY) array
-    carrying the given diameters, one blank site per diameter (for the matching
-    search window) and, for disks, post-only control sites (Section 3.2). Features
-    are packed in rows with at least ``isolation_mm`` between edges; the plate is
-    sized to hold them with a half-isolation margin."""
+                       blank_diameter_mm: float, blank_sites: int, post_sites: int = 0,
+                       post_diameter_mm: float = POST_NOMINAL_DIAMETER_MM, min_plate_mm: float = ARRAY_MIN_PLATE_SIZE_MM,
+                       max_row_width_mm: float | None = None) -> TwoPlaneTarget:
+    """A disk (TARGET_KIND_DISK_ARRAY) or cutout (TARGET_KIND_CUTOUT_ARRAY) plate carrying the given diameters
+    (feature levels 0, 1, ... in the order given), ``blank_sites`` blank sites of ``blank_diameter_mm`` (the largest
+    search window, so that the window of any feature fits on any blank site; blank site i has level index i and
+    serves feature i of the detection analysis) and ``post_sites`` post-only control sites (Section 3.2).
+
+    Sites are packed in rows with at least ``isolation_mm`` between edges; a row is at most ``max_row_width_mm`` wide
+    (default: ARRAY_ROW_PACKING_FRACTION of a roughly square plate), which lets the caller keep the rows inside the
+    field of view at the nearest station. The plate is sized to hold the sites with an isolation margin."""
     if kind not in (TARGET_KIND_DISK_ARRAY, TARGET_KIND_CUTOUT_ARRAY):
         raise ValueError("kind must be TARGET_KIND_DISK_ARRAY or TARGET_KIND_CUTOUT_ARRAY")
     feature_kind = FEATURE_DISK if kind == TARGET_KIND_DISK_ARRAY else FEATURE_CUTOUT
-    if level_indices is None:
-        level_indices = list(range(len(diameters_mm)))
     entries: list[tuple[str, str, float, int | None]] = []
-    for diameter, level in zip(diameters_mm, level_indices):
+    for level, diameter in enumerate(diameters_mm):
         entries.append((f"{feature_kind}_{level:02d}", feature_kind, float(diameter), level))
-        entries.append((f"blank_{level:02d}", FEATURE_BLANK, float(diameter) * BLANK_SITE_WINDOW_FRACTION, level))
+    for level in range(blank_sites):
+        entries.append((f"blank_{level:02d}", FEATURE_BLANK, float(blank_diameter_mm), level))
     if kind == TARGET_KIND_DISK_ARRAY:
         for post_index in range(post_sites):
             entries.append((f"post_{post_index:02d}", FEATURE_POST, post_diameter_mm, None))
     sizes = [e[2] for e in entries]
     largest = max(sizes)
     total = sum(sizes) + isolation_mm * len(sizes)
-    # A roughly square plate: row width about the square root of the packed area, at least the largest feature.
-    row_width = max(math.sqrt(total * (largest + isolation_mm)), largest + isolation_mm, min_plate_mm)
-    rows = _layout_rows(sizes, isolation_mm, row_width * ARRAY_ROW_PACKING_FRACTION)
+    if max_row_width_mm is None:
+        # A roughly square plate: row width about the square root of the packed area, at least the largest feature.
+        row_width = max(math.sqrt(total * (largest + isolation_mm)), largest + isolation_mm, min_plate_mm)
+        max_row_width_mm = row_width * ARRAY_ROW_PACKING_FRACTION
+    rows = _layout_rows(sizes, isolation_mm, max_row_width_mm)
     row_heights = [max(sizes[i] for i in row) for row in rows]
     total_height = sum(row_heights) + isolation_mm * (len(rows) + 1)
     total_width = max(sum(sizes[i] for i in row) + isolation_mm * (len(row) + 1) for row in rows)
@@ -630,29 +629,40 @@ def make_feature_array(target_id: str, kind: str, diameters_mm: list[float], iso
     return TwoPlaneTarget(target_id, kind, half_width, half_height, gap_mm=gap_mm, features=features)
 
 
+def blank_site_diameter_mm(params: CharacterizationParameters, geometry: SensorGeometry) -> float:
+    """The diameter of a blank site: the largest search window of the detection analysis. The window of a feature
+    has radius D_px / 2 + DETECTION_WINDOW_MARGIN_PX pixels, which is largest in millimeters for the largest feature
+    at Z_MAX (the pixel footprint is largest there), so the blank site is
+    D_largest + 2 DETECTION_WINDOW_MARGIN_PX p(Z_MAX)."""
+    footprint_mm = geometry.pixel_footprint_mm(params.z_max_mm)
+    return max(params.feature_diameters_mm(geometry)) + 2.0 * params.detection_window_margin_px * footprint_mm
+
+
 def make_standard_target_set(params: CharacterizationParameters, geometry: SensorGeometry,
                              gap_mm: float | None = None) -> TargetSet:
-    """T1, T2, T3a, T3b, T4-S, T4-L, T5-S and T5-L from the parameters: the
-    diameter ladder of Section 3.2 is split at its middle rung into the small
-    and large arrays; the feature isolation is FEATURE_ISOLATION_PX at Z_MIN.
+    """T2, T3a, T3b, T4 and T5 from the parameters (Section 3.2 and the redesign note, Section 2).
+
+    T4 (disks) and T5 (cutouts) each carry FEATURE_COUNT features of diameters
+    ``params.feature_diameters_mm(geometry)``, BLANK_SITES_PER_PLATE blank sites sized to the largest search window
+    (:func:`blank_site_diameter_mm`) and, for the disk plate, POST_SITES_PER_PLATE post-only sites. The feature
+    isolation is FEATURE_ISOLATION_PX at Z_MAX, so neighbors stay separated at the far station; the rows of an
+    array are limited to the width of the field of view at Z_MIN so that all sites are visible at the near station.
     The gap defaults to GAP_SMALL_MM (the manifest's gap overrides it per pose)."""
     gap = params.gap_small_mm if gap_mm is None else gap_mm
-    ladder = list(params.diameter_ladder_mm(geometry))
-    isolation_mm = params.feature_isolation_px * geometry.pixel_footprint_mm(params.z_min_mm)
-    split = len(ladder) // 2
-    small, large = ladder[:split], ladder[split:]
-    small_levels, large_levels = list(range(split)), list(range(split, len(ladder)))
+    diameters = list(params.feature_diameters_mm(geometry))
+    isolation_mm = params.feature_isolation_px * geometry.pixel_footprint_mm(params.z_max_mm)
+    blank_mm = blank_site_diameter_mm(params, geometry)
+    field_width_mm = 2.0 * geometry.half_field_mm(params.z_min_mm)[0]
+    max_row_mm = field_width_mm - 2.0 * ARRAY_FIELD_MARGIN_PX * geometry.pixel_footprint_mm(params.z_min_mm)
     targets = TargetSet()
-    targets.add(make_registration_plate(params))
     targets.add(make_noise_plate(params))
     targets.add(make_edge_target(params, TARGET_KIND_RAISED_SQUARE, gap))
     targets.add(make_edge_target(params, TARGET_KIND_SQUARE_WINDOW, gap))
-    targets.add(make_feature_array(TARGET_DISKS_SMALL, TARGET_KIND_DISK_ARRAY, small, isolation_mm, gap, small_levels))
-    targets.add(make_feature_array(TARGET_DISKS_LARGE, TARGET_KIND_DISK_ARRAY, large, isolation_mm, gap, large_levels))
-    targets.add(make_feature_array(TARGET_CUTOUTS_SMALL, TARGET_KIND_CUTOUT_ARRAY, small, isolation_mm, gap,
-                                   small_levels))
-    targets.add(make_feature_array(TARGET_CUTOUTS_LARGE, TARGET_KIND_CUTOUT_ARRAY, large, isolation_mm, gap,
-                                   large_levels))
+    targets.add(make_feature_array(TARGET_DISKS, TARGET_KIND_DISK_ARRAY, diameters, isolation_mm, gap, blank_mm,
+                                   params.blank_sites_per_plate, params.post_sites_per_plate,
+                                   max_row_width_mm=max_row_mm))
+    targets.add(make_feature_array(TARGET_CUTOUTS, TARGET_KIND_CUTOUT_ARRAY, diameters, isolation_mm, gap, blank_mm,
+                                   params.blank_sites_per_plate, max_row_width_mm=max_row_mm))
     return targets
 
 

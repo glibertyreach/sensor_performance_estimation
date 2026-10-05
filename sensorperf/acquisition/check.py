@@ -1,6 +1,6 @@
 """
 Quick-look check of a capture set (Part I of the procedure) and the D pilot
-detection counts (Section 8, Step 1; Section 13, Step 2).
+post check (Section 8, Step 1; Section 13, Step 2).
 
 ``check_session`` is meant to be run right after capturing, before the long
 analyses. For every pose of the session (all frames sharing a pose key) it
@@ -36,9 +36,10 @@ thresholds are for gross errors (wrong target, wrong registration, target
 moved), not for the sensor's own noise and bias, which are what the analyses
 measure; the defaults are therefore loose (millimeters, not tenths).
 
-``pilot_detection_counts`` implements the rule of Section 13, Step 2 on the
-first frame of each C pose of one station, to give the pilot D_50 and D_0 that
-Section 8 needs before the D series is planned (see its docstring).
+``pilot_post_check`` implements the rule of Section 13, Step 2 on the first frame of each C pose of
+the reference station and reports how often a bare support post of the disk plate is detected (it
+must not be). The former pilot D_50 and D_0 are gone: the D levels are the fixed (feature, station)
+pairs (redesign note, Section 2).
 """
 from __future__ import annotations
 
@@ -46,7 +47,7 @@ import json
 import math
 import struct
 import zlib
-from collections import OrderedDict, defaultdict
+from collections import OrderedDict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Sequence
@@ -57,8 +58,8 @@ from scipy import ndimage
 from sensorperf.features.planes import PlaneFit, fit_plane_robust, plane_depth_image
 from sensorperf.geometry.camera import PinholeCamera
 from sensorperf.geometry.targets import (
-    FEATURE_BLANK, FEATURE_CUTOUT, FEATURE_DISK, FEATURE_POST, SURFACE_BACK, SURFACE_FRONT, SURFACE_NONE,
-    TARGET_KIND_CUTOUT_ARRAY, TARGET_KIND_DISK_ARRAY, TARGET_KIND_PLATE, TwoPlaneTarget,
+    FEATURE_BLANK, FEATURE_POST, SURFACE_BACK, SURFACE_FRONT, SURFACE_NONE,
+    TARGET_KIND_DISK_ARRAY, TARGET_KIND_PLATE, TwoPlaneTarget,
 )
 from sensorperf.io.capture_set import load_frame_depth
 from sensorperf.io.manifest import FrameRecord, SUBSERIES_JITTER, format_file_name, group_by_pose
@@ -86,9 +87,6 @@ UNREADABLE_ERRORS = (OSError, ValueError, KeyError, EOFError, zlib.error, struct
 Qt data stream); such a pose is flagged instead of stopping the check."""
 FRAME_SEPARATOR = "_f"
 """Separator of the pose part and the frame index in a Section 9 file name."""
-STATION_MATCH_TOLERANCE_MM = 0.5
-"""A pose belongs to a station when its station depth differs from the requested one by less than this (the file
-name writes the station in whole millimeters)."""
 
 FLAG_UNREADABLE = "capture files could not be read"
 FLAG_NO_TARGET = "target id is not in targets.json"
@@ -102,13 +100,6 @@ FLAG_FRONT_TILT = "front plane normal disagrees with the registered normal"
 FLAG_BACK_RMS = "back plane fit residual too large"
 FLAG_BACK_OFFSET = "back plane is far from the registered back plane"
 FLAG_BACK_TILT = "back plane normal disagrees with the registered normal"
-
-PILOT_TARGET_KINDS = (TARGET_KIND_DISK_ARRAY, TARGET_KIND_CUTOUT_ARRAY)
-"""Target kinds the pilot detection counts apply to (the arrays of Section 3.2)."""
-PILOT_D50_FRACTION = 0.5
-"""Detection fraction whose crossing defines the pilot D_50 (Section 13, Step 2: the 0.5 crossing)."""
-LEVEL_FEATURE_KINDS = (FEATURE_DISK, FEATURE_CUTOUT)
-"""Feature kinds that carry the diameter levels of an array."""
 
 
 # ---------------------------------------------------------------------------
@@ -397,62 +388,26 @@ def check_session(session: Session, check_params: CheckParameters | None = None)
 
 
 # ---------------------------------------------------------------------------
-# D pilot detection counts (Section 8, Step 1; Section 13, Step 2)
+# D pilot: the post check (Section 8, Step 1; Section 13, Step 2)
 # ---------------------------------------------------------------------------
 @dataclass
-class PilotDetection:
-    """The pilot detection result of one (target, gap) at one station."""
+class PostCheck:
+    """The post check of one (disk plate, gap) at the reference station: a bare support post must not be detected."""
 
     target_id: str
     gap_mm: float | None
     station_z_mm: float
-    kind: str
     poses: int = 0
     """C poses (first frames) used."""
     tau_mm: float | None = None
     """Threshold: the (1 - DETECTION_FALSE_ALARM_TARGET) quantile of the deviation over the blank sites."""
     blank_pixels: int = 0
-    level_indices: list[int] = field(default_factory=list)
-    diameters_mm: list[float] = field(default_factory=list)
-    trials: list[int] = field(default_factory=list)
-    detections: list[int] = field(default_factory=list)
-    fractions: list[float] = field(default_factory=list)
-    d50_mm: float | None = None
-    d0_mm: float | None = None
+    """Valid reads in the blank-site windows that set the threshold."""
     post_trials: int = 0
     post_detections: int = 0
     post_fraction: float | None = None
+    """Fraction of post-only sites in which the detection rule fires (should be about the false-alarm target)."""
     notes: list[str] = field(default_factory=list)
-
-
-def interpolate_d50(diameters_mm: Sequence[float], fractions: Sequence[float],
-                    level: float = PILOT_D50_FRACTION) -> float | None:
-    """The diameter at which the detection fraction first crosses ``level`` (default 0.5), by linear interpolation of
-    the fraction against ln(diameter) between the two levels that bracket the crossing (Section 13, Step 2).
-    Levels are taken in increasing diameter. None when the fraction never reaches the level, or already
-    exceeds it at the smallest diameter (no bracket, so no interpolation)."""
-    order = np.argsort(diameters_mm)
-    d = np.asarray(diameters_mm, dtype=np.float64)[order]
-    f = np.asarray(fractions, dtype=np.float64)[order]
-    for i in range(1, len(d)):
-        if f[i - 1] < level <= f[i]:
-            weight = (level - f[i - 1]) / (f[i] - f[i - 1])
-            return float(math.exp(math.log(d[i - 1]) + weight * (math.log(d[i]) - math.log(d[i - 1]))))
-    return None
-
-
-def zero_detection_diameter(diameters_mm: Sequence[float], detections: Sequence[int]) -> float | None:
-    """The pilot D_0: the largest diameter such that it and every smaller level had no detection at all. None when
-    even the smallest level was detected at least once. (Taking the largest level with zero detections anywhere would let a chance
-    zero among detected levels define D_0; requiring all smaller levels to be zero too keeps D_0 below the
-    first detection.)"""
-    order = np.argsort(diameters_mm)
-    d0: float | None = None
-    for index in order:
-        if detections[int(index)] > 0:
-            break
-        d0 = float(diameters_mm[int(index)])
-    return d0
 
 
 def _window_deviation(depth: np.ndarray, reference_deviation: np.ndarray, u0: float, v0: float, radius_px: float):
@@ -469,53 +424,51 @@ def _window_deviation(depth: np.ndarray, reference_deviation: np.ndarray, u0: fl
     return crop, True
 
 
-def pilot_detection_counts(session: Session, params: CharacterizationParameters, geometry: SensorGeometry,
-                           station_z_mm: float, subseries: Sequence[str] = (SUBSERIES_JITTER,)
-                           ) -> dict[tuple[str, float | None], PilotDetection]:
-    """The pilot detection counts of Section 8, Step 1, by the rule of Section 13, Step 2, on the first frame of every
-    C pose of the station (sub-series ``subseries``, default the main "jitter" poses), for each (target_id, gap).
+def pilot_post_check(session: Session, params: CharacterizationParameters, geometry: SensorGeometry,
+                     station_z_mm: float | None = None, subseries: Sequence[str] = (SUBSERIES_JITTER,)
+                     ) -> dict[tuple[str, float | None], PostCheck]:
+    """The D pilot of Section 8, Step 1, which keeps only the post check (the redesign note, Section 2: the selection of
+    detection levels from a pilot D_50 is gone, the levels are the fixed (feature, station) pairs). Applies the
+    detection rule of Section 13, Step 2 to the first frame of every C pose at ``station_z_mm`` (default Z_REFERENCE_MM,
+    sub-series ``subseries``, default the main "jitter" poses) of the disk plate, for each (target_id, gap).
 
-    For every feature site of the array (disk or cutout level, blank, post) the window is the disk of radius D_px / 2 +
-    DETECTION_WINDOW_MARGIN_PX around the projected feature center, D_px = D f_x / Z. The deviation of a read from its
-    reference plane, taken from the registered geometry (front and back planes at the registered pose), is Z_back - Z for
-    a disk array and Z - Z_front for a cutout array: positive when the read lies on the feature's side of the reference
-    plane. The threshold tau is the (1 - DETECTION_FALSE_ALARM_TARGET) quantile of that deviation over the valid reads in
-    the blank-site windows of all the poses of the group (the blank sites carry no feature, so this is the distribution
-    of false deviations). A feature is detected in a pose when at least DETECTION_MIN_CONNECTED_PX connected (4-connected,
-    scipy.ndimage.label) pixels of its window have valid reads with deviation above tau. Per (target_id, gap) the result
-    holds the detection fraction per ladder level, the pilot D_50 (:func:`interpolate_d50`), the pilot D_0
-    (:func:`zero_detection_diameter`) and, for disk arrays, the fraction of post-only sites in which the same rule
-    fires (the posts must not be detected as disks). Groups without a back plate (gap None) are skipped: the reference
-    plane of the rule needs it."""
+    The window of a site is the disk of radius D_px / 2 + DETECTION_WINDOW_MARGIN_PX around its projected center,
+    D_px = D f_x / Z. The deviation of a read from the reference plane, taken from the registered geometry, is
+    Z_back - Z (positive toward the sensor). The threshold tau is the (1 - DETECTION_FALSE_ALARM_TARGET) quantile of that
+    deviation over the valid reads in the blank-site windows of all the poses of the group (the distribution of false
+    deviations). A post-only site is detected in a pose when at least DETECTION_MIN_CONNECTED_PX connected
+    (scipy.ndimage.label) pixels of its window have valid reads with deviation above tau. The post check passes when the
+    fraction of detected post sites is no larger than about the false-alarm target: a bare post must not look like a
+    disk. Groups without a back plate (gap None) and plates without posts are skipped."""
+    station = params.z_reference_mm if station_z_mm is None else station_z_mm
     groups: "OrderedDict[tuple, dict[tuple, FrameRecord]]" = OrderedDict()
     for record in session.records:
         if record.procedure != PROCEDURE_AREA or record.subseries not in tuple(subseries):
             continue
-        if abs(record.station_z_mm - station_z_mm) > STATION_MATCH_TOLERANCE_MM:
+        if abs(record.station_z_mm - station) > params.station_match_tolerance_mm:
             continue
         poses = groups.setdefault((record.target_id, record.gap_mm), {})
         current = poses.get(record.pose_key())
         if current is None or record.frame_index < current.frame_index:
             poses[record.pose_key()] = record               # keep the first frame of each pose
-    results: dict[tuple[str, float | None], PilotDetection] = {}
+    results: dict[tuple[str, float | None], PostCheck] = {}
     for (target_id, gap), poses in groups.items():
         template = session.targets.targets.get(target_id)
-        if template is None or template.kind not in PILOT_TARGET_KINDS:
+        if template is None or template.kind != TARGET_KIND_DISK_ARRAY:
             continue
-        result = PilotDetection(target_id=target_id, gap_mm=gap, station_z_mm=station_z_mm, kind=template.kind)
+        result = PostCheck(target_id=target_id, gap_mm=gap, station_z_mm=station)
         results[(target_id, gap)] = result
         if gap is None:
             result.notes.append("no back plate: the reference plane of the detection rule is missing, group skipped")
             continue
-        _count_group(session, params, geometry, template.with_gap(gap), list(poses.values()), result)
+        _count_posts(session, params, geometry, template.with_gap(gap), list(poses.values()), result)
     return results
 
 
-def _count_group(session: Session, params: CharacterizationParameters, geometry: SensorGeometry,
-                 target: TwoPlaneTarget, records: list[FrameRecord], result: PilotDetection) -> None:
-    """Fill a PilotDetection from the first frames of the C poses of one (target, gap) (see pilot_detection_counts)."""
-    disks = target.kind == TARGET_KIND_DISK_ARRAY
-    windows: list[tuple[str, int | None, float, np.ndarray]] = []      # (kind, level, diameter_mm, deviation crop)
+def _count_posts(session: Session, params: CharacterizationParameters, geometry: SensorGeometry,
+                 target: TwoPlaneTarget, records: list[FrameRecord], result: PostCheck) -> None:
+    """Fill a PostCheck from the first frames of the C poses of one (disk plate, gap) (see pilot_post_check)."""
+    windows: list[tuple[str, np.ndarray]] = []                          # (feature kind, deviation crop)
     for record in records:
         try:
             depth, _, header = load_frame_depth(record.path)
@@ -524,13 +477,11 @@ def _count_group(session: Session, params: CharacterizationParameters, geometry:
             continue
         camera = PinholeCamera.from_matcloud_header(header, width_px=depth.shape[1], height_px=depth.shape[0])
         pose = record.target_pose_camera
-        front_depth = plane_depth_image(camera, *target.front_plane_camera(pose))
         back_depth = plane_depth_image(camera, *target.back_plane_camera(pose))
-        deviation = (back_depth - depth) if disks else (depth - front_depth)      # NaN where there is no read
+        deviation = back_depth - depth                                  # NaN where there is no read
         result.poses += 1
         for feature in target.features:
-            wanted = LEVEL_FEATURE_KINDS + (FEATURE_BLANK,) + ((FEATURE_POST,) if disks else ())
-            if feature.kind not in wanted:
+            if feature.kind not in (FEATURE_BLANK, FEATURE_POST):
                 continue
             center = target.feature_center_camera(pose, feature)
             u0, v0, in_front = camera.project(center)
@@ -540,59 +491,35 @@ def _count_group(session: Session, params: CharacterizationParameters, geometry:
                 + params.detection_window_margin_px
             crop, touches = _window_deviation(depth, deviation, float(u0), float(v0), radius_px)
             if touches:
-                windows.append((feature.kind, feature.level_index, feature.diameter_mm, crop))
-    blank = np.concatenate([crop[np.isfinite(crop)] for kind, _, _, crop in windows if kind == FEATURE_BLANK]
+                windows.append((feature.kind, crop))
+    blank = np.concatenate([crop[np.isfinite(crop)] for kind, crop in windows if kind == FEATURE_BLANK]
                            or [np.empty(0)])
     result.blank_pixels = int(blank.size)
     if blank.size == 0:
         result.notes.append("no valid reads in the blank-site windows, so the threshold tau cannot be set")
         return
     result.tau_mm = float(np.quantile(blank, 1.0 - params.detection_false_alarm_target))
-    counts: dict[int, list[int]] = defaultdict(lambda: [0, 0])         # level -> [trials, detections]
-    diameters: dict[int, float] = {}
-    for kind, level, diameter, crop in windows:
-        if kind == FEATURE_BLANK:
+    for kind, crop in windows:
+        if kind != FEATURE_POST:
             continue
         labeled, count = ndimage.label(np.isfinite(crop) & (crop > result.tau_mm))
         detected = count > 0 and int(np.bincount(labeled.ravel())[1:].max()) >= params.detection_min_connected_px
-        if kind == FEATURE_POST:
-            result.post_trials += 1
-            result.post_detections += int(detected)
-            continue
-        counts[level][0] += 1
-        counts[level][1] += int(detected)
-        diameters[level] = diameter
-    for level in sorted(counts):
-        trials, detections = counts[level]
-        result.level_indices.append(level)
-        result.diameters_mm.append(diameters[level])
-        result.trials.append(trials)
-        result.detections.append(detections)
-        result.fractions.append(detections / trials)
-    result.d50_mm = interpolate_d50(result.diameters_mm, result.fractions)
-    result.d0_mm = zero_detection_diameter(result.diameters_mm, result.detections)
+        result.post_trials += 1
+        result.post_detections += int(detected)
     if result.post_trials:
         result.post_fraction = result.post_detections / result.post_trials
 
 
-def format_pilot_table(results: dict[tuple[str, float | None], PilotDetection]) -> str:
-    """Console text of the pilot detection counts: per (target, gap) the levels with their detection fractions, the
-    pilot D_50 and D_0, and the post-site fraction."""
+def format_post_check_table(results: dict[tuple[str, float | None], PostCheck]) -> str:
+    """Console text of the post check: per (disk plate, gap) the threshold and the post-site detection fraction."""
     if not results:
-        return "No C poses of the requested station and sub-series were found."
+        return "No C poses of the requested station and sub-series were found on a disk plate."
     lines = []
     for (target_id, gap), r in results.items():
         gap_text = "none" if gap is None else f"{gap:g} mm"
         tau = "n/a" if r.tau_mm is None else f"{r.tau_mm:.3f} mm"
-        lines.append(f"{target_id}  G = {gap_text}  Z = {r.station_z_mm:g} mm: {r.poses} poses, tau = {tau} "
-                     f"({r.blank_pixels} blank-site reads)")
-        for index, diameter, trials, detections, fraction in zip(r.level_indices, r.diameters_mm, r.trials,
-                                                                  r.detections, r.fractions):
-            lines.append(f"    level {index:>2d}  D = {diameter:8.3f} mm   detected {detections:>3d} / {trials:<3d} "
-                         f"= {fraction:5.2f}")
-        d50 = "n/a" if r.d50_mm is None else f"{r.d50_mm:.3f} mm"
-        d0 = "n/a" if r.d0_mm is None else f"{r.d0_mm:.3f} mm"
         post = "n/a" if r.post_fraction is None else f"{r.post_fraction:.2f} ({r.post_detections}/{r.post_trials})"
-        lines.append(f"    pilot D_50 = {d50}, pilot D_0 = {d0}, post-site detection fraction = {post}")
+        lines.append(f"{target_id}  G = {gap_text}  Z = {r.station_z_mm:g} mm: {r.poses} poses, tau = {tau} "
+                     f"({r.blank_pixels} blank-site reads), post-site detection fraction = {post}")
         lines += [f"    NOTE: {note}" for note in r.notes]
     return "\n".join(lines)

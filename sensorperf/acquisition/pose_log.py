@@ -18,7 +18,7 @@ base frame, the read-back flange pose = flange -> base)
     Format 1, one row per frame (recognized by a ``file`` column)
         file, x_mm, y_mm, z_mm, rotation_type, r1 .. r9 [, optional columns]
         ``file`` is the Section 9 file name (a folder part is ignored), for example
-        ``C_T5S_G15_Z0750_F0_P017_f03.mc``; it identifies the pose and the frame.
+        ``C_T5_G15_Z0800_F0_P017_f03.mc``; it identifies the pose and the frame.
 
     Format 2, one row per pose (recognized by the identity columns and ``frames``)
         procedure, target_id, gap_mm, station_z_mm, field, pose_index, frames,
@@ -36,7 +36,7 @@ base frame, the read-back flange pose = flange -> base)
     synthetic sessions and the tests use it.
 
     Optional columns, all of which end up in the manifest when present: timestamp,
-    sensor_temp_c, air_temp_c, ambient_ir.
+    sensor_temp_c, air_temp_c (logged every TEMPERATURE_LOG_INTERVAL_MIN).
 
     Resolution of the logged position: for series Z the read-back pose is the ground truth of the depth step, so
     x_mm, y_mm, z_mm must be written with at least ``MIN_POSE_LOG_DECIMALS`` decimals (0.01 mm). A log rounded to 0.1 mm
@@ -138,7 +138,7 @@ LOG_TRANSLATION_COLUMNS = ("x_mm", "y_mm", "z_mm")
 IDENTITY_COLUMNS = ("procedure", "target_id", "gap_mm", "station_z_mm", "field", "pose_index")
 """The Section 9 identity of a pose (the columns of a per-pose log row)."""
 OPTIONAL_TEXT_COLUMNS = ("timestamp",)
-OPTIONAL_FLOAT_COLUMNS = ("sensor_temp_c", "air_temp_c", "ambient_ir")
+OPTIONAL_FLOAT_COLUMNS = ("sensor_temp_c", "air_temp_c")
 """Optional pose log columns copied to the manifest."""
 FRAME_SEPARATOR = "_f"
 """Separator of the pose part and the frame index in a Section 9 file name."""
@@ -519,7 +519,7 @@ def _record(planned: PlannedCapture, frame_index: int, path: Path, entry: LogFra
         seed=planned.seed, offset_h_mm=planned.offset_h_mm, offset_v_mm=planned.offset_v_mm,
         timestamp=entry.text.get("timestamp", ""),
         sensor_temp_c=entry.numbers.get("sensor_temp_c"), air_temp_c=entry.numbers.get("air_temp_c"),
-        ambient_ir=entry.numbers.get("ambient_ir"), sensor_config_id=sensor_config_id, subseries=planned.subseries,
+        sensor_config_id=sensor_config_id, subseries=planned.subseries,
         tilt_axis=planned.tilt_axis, tilt_deg=planned.tilt_deg, step_mm=planned.step_mm, visit=planned.visit,
         level_index=planned.level_index)
 

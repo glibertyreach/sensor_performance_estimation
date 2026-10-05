@@ -9,9 +9,11 @@ the Section 9 session folder (frames, manifest.csv and the JSON records) with
 :func:`sensorperf.simulate.session.write_synthetic_session`. ``--quick`` renders a 160 x 120 sensor with
 the same field of view (the indicative geometry with fx, fy, cx, cy, width and height divided by 4) and
 scales the frame count by 0.2; ``--frame-scale`` overrides the scale. Because the pixels of the quick sensor
-are four times larger and its focal length four times smaller, the disparity noise and the disparity quantum
-are divided by the same factor so that the depth noise and the depth quantum in mm are those of the full-size
-sensor (sigma_Z = sigma_d Z^2 / k and delta_Z = q Z^2 / k both keep their values). The physical targets are always the
+are four times larger and its focal length four times smaller, the disparity noise, the disparity quantum and the
+minimum feature diameter (the synthetic matcher's minimum detectable size, in pixels) are divided by the same factor
+so that the depth noise, the depth quantum and the minimum feature size in mm are those of the full-size
+sensor (sigma_Z = sigma_d Z^2 / k and delta_Z = q Z^2 / k both keep their values; see
+``SyntheticSensorModel.indicative_scaled``). The physical targets are always the
 standard set of the FULL-size indicative geometry, so a quick session uses the same targets as a full one
 and merely sees them with larger pixels.
 """
@@ -70,10 +72,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                    else (QUICK_FRAME_SCALE if arguments.quick else 1.0))
     rng = np.random.default_rng(arguments.seed)
     pixel_divisor = QUICK_PIXEL_DIVISOR if arguments.quick else 1
-    indicative = SyntheticSensorModel.indicative(geometry)
-    model = replace(indicative, fixed_pattern_seed=arguments.seed, drift_mm_per_hour=DEMO_DRIFT_MM_PER_HOUR,
-                    disparity_noise_px=indicative.disparity_noise_px / pixel_divisor,
-                    disparity_quantum_px=indicative.disparity_quantum_px / pixel_divisor)
+    model = replace(SyntheticSensorModel.indicative_scaled(geometry, pixel_divisor),
+                    fixed_pattern_seed=arguments.seed, drift_mm_per_hour=DEMO_DRIFT_MM_PER_HOUR)
     targets = make_standard_target_set(params, full_geometry)
     plan = demo_plan(params, geometry, rng, arguments.quick, series=arguments.series,
                      disparity_quantum_px=model.disparity_quantum_px)

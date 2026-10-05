@@ -66,7 +66,7 @@ and extended with the unit-variance normalization above.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -76,7 +76,8 @@ from scipy.ndimage import uniform_filter
 
 from sensorperf.features.planes import incidence_cosine
 from sensorperf.geometry.targets import (
-    SURFACE_BACK, SURFACE_FRONT, SURFACE_NONE, StereoGeometry, TwoPlaneTarget, geometric_visibility,
+    FEATURE_CUTOUT, FEATURE_DISK, SURFACE_BACK, SURFACE_FRONT, SURFACE_NONE, StereoGeometry, TwoPlaneTarget,
+    geometric_visibility,
 )
 from sensorperf.geometry.transforms import RigidTransform
 from sensorperf.io.capture_set import XYZ_CHANNEL_NAME
@@ -110,6 +111,12 @@ INDICATIVE_POSTS_VISIBLE = False
 """By default the hidden disk posts are not rendered (Section 3.2: they are thinner than the pixel)."""
 INDICATIVE_DRIFT_MM_PER_HOUR = 0.0
 """Indicative drift of the depth field; zero keeps sentinels flat unless a test asks otherwise."""
+INDICATIVE_MIN_FEATURE_DIAMETER_PX = 10.0
+"""Indicative smallest feature diameter, in pixels of the full-size (640 x 480) image, that the imitation matcher
+resolves. The redesign note brackets the real sensor's minimum detectable diameter at 10 to 15 px (a path correlation
+that needs about 4 pencil detections, a diameter of about 7 px, and matcher support windows of 7 x 7 to 13 x 13 px);
+the synthetic sensor takes a value inside 8 to 12 px so that the detection transitions of the synthetic data fall
+inside the feature ladder (3 to 96 px). Not a datasheet value."""
 
 # ---------------------------------------------------------------------------
 # Numerical guards and file-format constants
@@ -175,6 +182,12 @@ class SyntheticSensorModel:
     """Whether the disk support posts are rendered as front material."""
     drift_mm_per_hour: float
     """Linear drift of the whole depth field, mm per hour of elapsed time (for sentinels); 0 disables."""
+    min_feature_diameter_px: float = 0.0
+    """Smallest disk or cutout diameter, in pixels of the rendered image, that the imitation matcher resolves
+    (the synthetic sensor's minimum detectable size; indicative 10 px at 640 x 480, roughly 8 to 12). A feature that
+    subtends fewer pixels than this is not rendered: a disk reads as back plate and a cutout as front plate, as if
+    the matcher's support window averaged it away. 0 disables the rule (every feature is rendered, and only the
+    window blur and the noise limit detection)."""
 
     def __post_init__(self) -> None:
         if self.matching_window_px < 1 or self.matching_window_px % 2 == 0:
@@ -186,8 +199,8 @@ class SyntheticSensorModel:
         if self.front_preference <= 0.0:
             raise ValueError(f"front_preference must be positive, got {self.front_preference}")
         if min(self.disparity_noise_px, self.disparity_quantum_px, self.output_lsb_mm,
-               self.fixed_pattern_amplitude_mm) < 0.0:
-            raise ValueError("noise, quantum, LSB and fixed pattern amplitude must not be negative")
+               self.fixed_pattern_amplitude_mm, self.min_feature_diameter_px) < 0.0:
+            raise ValueError("noise, quantum, LSB, fixed pattern amplitude and minimum feature size must not be negative")
 
     @classmethod
     def indicative(cls, geometry: SensorGeometry) -> "SyntheticSensorModel":
@@ -208,7 +221,20 @@ class SyntheticSensorModel:
             require_projector=INDICATIVE_REQUIRE_PROJECTOR,
             posts_visible=INDICATIVE_POSTS_VISIBLE,
             drift_mm_per_hour=INDICATIVE_DRIFT_MM_PER_HOUR,
+            min_feature_diameter_px=INDICATIVE_MIN_FEATURE_DIAMETER_PX,
         )
+
+    @classmethod
+    def indicative_scaled(cls, geometry: SensorGeometry, pixel_divisor: int = 1) -> "SyntheticSensorModel":
+        """The indicative model on a geometry whose pixels are ``pixel_divisor`` times larger than the full-size
+        (640 x 480) sensor's, with the same field of view (``demo_plan.scaled_geometry``). The disparity noise,
+        the disparity quantum and the minimum feature diameter, which are in pixels, are divided by the divisor so
+        that the depth noise and the depth quantum in millimeters and the minimum feature size in millimeters are
+        those of the full-size sensor (sigma_Z = sigma_d Z^2 / k and delta_Z = q Z^2 / k keep their values)."""
+        indicative = cls.indicative(geometry)
+        return replace(indicative, disparity_noise_px=indicative.disparity_noise_px / pixel_divisor,
+                       disparity_quantum_px=indicative.disparity_quantum_px / pixel_divisor,
+                       min_feature_diameter_px=indicative.min_feature_diameter_px / pixel_divisor)
 
 
 @dataclass
@@ -320,6 +346,25 @@ def _imitation_matcher(true_depth: np.ndarray, surface: np.ndarray, readable: np
     return matched, read
 
 
+def _resolved_target(model: SyntheticSensorModel, target: TwoPlaneTarget,
+                     pose_camera: RigidTransform) -> TwoPlaneTarget:
+    """The target as the imitation matcher can resolve it: the disks and cutouts whose diameter in pixels,
+    D_px = D f_x / Z at the feature center, is below ``model.min_feature_diameter_px`` are left out, so a small
+    disk is not seen (the back plate shows) and a small cutout is filled in (the front plate shows). The analyses
+    still use the full target as ground truth, which is what makes such a feature a miss. Blank and post sites and the
+    squares of the edge targets are never removed."""
+    if model.min_feature_diameter_px <= 0.0:
+        return target
+    kept = []
+    for feature in target.features:
+        if feature.kind in (FEATURE_DISK, FEATURE_CUTOUT):
+            depth_mm = float(target.feature_center_camera(pose_camera, feature)[2])
+            if model.geometry.diameter_in_pixels(feature.diameter_mm, depth_mm) < model.min_feature_diameter_px:
+                continue
+        kept.append(feature)
+    return target if len(kept) == len(target.features) else replace(target, features=kept)
+
+
 def render_frame(model: SyntheticSensorModel, target: TwoPlaneTarget, pose_camera: RigidTransform,
                  rng: np.random.Generator, elapsed_hours: float = 0.0) -> RenderedFrame:
     """Render one frame of ``target`` at ``pose_camera`` (target -> camera, mm) with the seven steps of
@@ -331,7 +376,8 @@ def render_frame(model: SyntheticSensorModel, target: TwoPlaneTarget, pose_camer
     height, width = camera.height, camera.width
     disparity_constant = model.geometry.disparity_constant_mm_px()
 
-    # Step 1: ideal ray cast from the left camera center.
+    # Step 1: ideal ray cast from the left camera center, of the target as the matcher resolves it.
+    target = _resolved_target(model, target, pose_camera)
     hit = target.intersect_rays(pose_camera, np.zeros(3), rays, include_posts=model.posts_visible)
     surface = hit.surface
     true_depth = hit.point_camera[..., 2]

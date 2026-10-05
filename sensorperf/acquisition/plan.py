@@ -12,12 +12,12 @@ captured files back to it.
 The planning functions, one per series, apply the rules the procedure states
 step by step (each docstring cites its section):
 
-    plan_registration        Section 4, Step 6   (R, target T1)
+    plan_registration        Section 4, Step 6   (R, target T2, plane correspondence)
     plan_noise_series        Section 5           (A, target T2)
     plan_edge_series         Section 6.1         (B, targets T3a and T3b)
     plan_zstep_series        Section 6.2         (Z, target T2; the document's B-Z)
-    plan_area_series         Section 7           (C, targets T4 and T5)
-    plan_detection_series    Section 8           (D, targets T4 and T5)
+    plan_area_series         Section 7           (C, targets T4 and T5; every station)
+    plan_detection_series    Section 8           (D, targets T4 and T5; every station)
     insert_sentinels         Section 5, Step 3   (S, drift sentinels on the budget clock)
     plan_full_session        all of the above in the order of the procedure
     capture_budget           Section 9           (poses, frames and robot hours per series)
@@ -47,7 +47,7 @@ the field offset.")
     fraction of both the H and V offsets) until it fits; the fraction kept is
     stored in ``notes["field_placement"]`` and listed in plan_summary.txt.
     Targets with features (the raised square, the window, the arrays) must have
-    every feature outline inside the image by the edge margin. A plate (T1, T2)
+    every feature outline inside the image by the edge margin. A plate (T2)
     is judged per image axis: it must lie inside the image by the edge margin or,
     when it is larger than the field at that depth, cover the whole image across
     that axis, so that no plate edge falls into the border band of the analysis
@@ -83,9 +83,8 @@ from sensorperf.io.manifest import (
 from sensorperf.parameters import (
     CharacterizationParameters, FIELD_POSITION_CENTER, FIELD_POSITION_CODES, FIELD_POSITION_SIGNS,
     PROCEDURE_AREA, PROCEDURE_DETECTION, PROCEDURE_EDGES, PROCEDURE_NOISE,
-    PROCEDURE_REGISTRATION, PROCEDURE_SENTINEL, PROCEDURE_ZSTEP, SensorGeometry, TARGET_CUTOUTS_LARGE,
-    TARGET_CUTOUTS_SMALL, TARGET_DISKS_LARGE, TARGET_DISKS_SMALL, TARGET_NOISE_PLATE, TARGET_RAISED_SQUARE,
-    TARGET_REGISTRATION_PLATE, TARGET_SQUARE_WINDOW,
+    PROCEDURE_REGISTRATION, PROCEDURE_SENTINEL, PROCEDURE_ZSTEP, SensorGeometry, TARGET_CUTOUTS,
+    TARGET_DISKS, TARGET_NOISE_PLATE, TARGET_RAISED_SQUARE, TARGET_SQUARE_WINDOW,
 )
 
 # ---------------------------------------------------------------------------
@@ -129,11 +128,14 @@ PERCENT = 100.0
 PLOT_GRID_ALPHA = 0.3
 """Opacity of the grid lines of plan.png."""
 
-DOCUMENT_ESTIMATE_POSES = 6590
-DOCUMENT_ESTIMATE_FRAMES = 45710
-DOCUMENT_ESTIMATE_HOURS = 6.8
-"""The capture-budget estimate printed in Section 9 of the procedure document
-(poses, frames, robot hours), for the comparison in plan_summary.txt."""
+DOCUMENT_ESTIMATE_POSES = 7292
+DOCUMENT_ESTIMATE_FRAMES = 44140
+DOCUMENT_ESTIMATE_HOURS = 7.3
+"""The capture-budget estimate printed in Section 9 of the procedure document (poses, frames, robot hours) for the
+redesigned plan: the totals of ``plan_full_session`` with the default parameters, the indicative geometry (10
+frames/s) and no optional variants (no filters-off repeat, no open-background variant; 7,292 poses, 44,140 frames,
+7.30 h). plan_summary.txt compares the plan it summarizes with these numbers, so a change of the parameters shows
+up as a ratio away from 1."""
 
 PLAN_CSV_NAME = "poses.csv"
 PLAN_SUMMARY_NAME = "plan_summary.txt"
@@ -498,7 +500,8 @@ def plan_registration(params: CharacterizationParameters, geometry: SensorGeomet
                       diagnostics: PlanDiagnostics | None = None) -> list[PlannedCapture]:
     """Section 4, Step 6: "Command REGISTRATION_POSES poses that span Z_MIN to Z_MAX, cover the
     field of view, and tilt within REGISTRATION_TILT_RANGE_DEG about H and V. At each pose
-    capture REGISTRATION_FRAMES frames." Target T1.
+    capture REGISTRATION_FRAMES frames." Target: the noise plate T2 (redesign note, Section 3: registration is the
+    plane-only hand-eye solve, ``geometry.registration.solve_from_planes``, which needs no pattern on the plate).
 
     The depths are REGISTRATION_POSES values evenly spaced from Z_MIN to Z_MAX, assigned to the
     poses in random order; the lateral field fractions and the two tilts come from a scrambled
@@ -508,7 +511,7 @@ def plan_registration(params: CharacterizationParameters, geometry: SensorGeomet
     the design draw (shared by all registration poses)."""
     from scipy.stats import qmc
 
-    plate = _targets(params, geometry, targets).get(TARGET_REGISTRATION_PLATE)
+    plate = _targets(params, geometry, targets).get(TARGET_NOISE_PLATE)
     count = params.registration_poses
     seed = derive_seed(rng)
     generator = np.random.default_rng(seed)
@@ -532,7 +535,7 @@ def plan_registration(params: CharacterizationParameters, geometry: SensorGeomet
         notes = _placement_notes(placement)
         notes.update({"depth_mm": depth, "tilt_h_deg": tilt_h, "tilt_v_deg": tilt_v})
         angle = float(np.degrees(np.linalg.norm(Rotation.from_matrix(rotation).as_rotvec())))
-        plan.append(_new_capture(counter, PROCEDURE_REGISTRATION, TARGET_REGISTRATION_PLATE, None, depth,
+        plan.append(_new_capture(counter, PROCEDURE_REGISTRATION, TARGET_NOISE_PLATE, None, depth,
                                  FIELD_POSITION_CENTER, params.frames_per_registration_pose, SUBSERIES_MAIN, pose,
                                  seed=seed, tilt_axis=TILT_AXIS_BOTH, tilt_deg=angle, notes=notes))
         _warn_not_fitting(diagnostics, "R", plate, depth, placement)
@@ -547,12 +550,14 @@ def plan_noise_series(params: CharacterizationParameters, geometry: SensorGeomet
                       diagnostics: PlanDiagnostics | None = None) -> list[PlannedCapture]:
     """Section 5 (Series A), target T2: main stations, tilt sub-series and repeat-mount check.
 
-    Step 1: the station list is every Z in Z_MIN : Z_NOISE_STEP_MM : Z_MAX at the five field
-    positions (center, then the four off-axis ones), all fronto-parallel, FRAMES_PER_NOISE_STATION
+    Step 1: the station list is every station of the geometric ladder (``params.z_stations_mm()``, nine
+    stations from Z_MIN to Z_MAX) plus the LEGACY_METRIC_DEPTHS_MM (700 and 1000 mm) as extra stations, so the
+    legacy metrics are computed at the depths of the existing data (``params.noise_stations_mm()``), at the five
+    field positions (center, then the four off-axis ones), all fronto-parallel, FRAMES_PER_NOISE_STATION
     frames each; positions that do not fit the field are pulled inward (see module docstring).
     Step 2: the station list is shuffled with a logged seed. Step 4 (move, settle, capture) is the
     robot's job; the budget counts the settle time. Step 5: at the center and each Z in
-    Z_REDUCED_STATIONS_MM, T2 is tilted about V and then about H through every angle in
+    reduced station (``params.z_reduced_stations_mm()``), T2 is tilted about V and then about H through every angle in
     TILT_ANGLES_DEG (FRAMES_PER_TILT_POSE frames each; the zero angle is captured in both
     sweeps, as the procedure lists it). Step 6: the repeat-mount check repeats the center station at
     Z_REFERENCE_MM after the tilt sub-series (subseries "remount"). Step 3: the drift sentinels
@@ -584,7 +589,7 @@ def plan_noise_series(params: CharacterizationParameters, geometry: SensorGeomet
                                  notes=notes))
         _warn_not_fitting(diagnostics, "A", plate, z, placement)
     # Step 5: tilt sub-series at the center, about V and then about H.
-    for z in params.z_reduced_stations_mm:
+    for z in params.z_reduced_stations_mm():
         for axis in (TILT_AXIS_V, TILT_AXIS_H):
             for angle in params.tilt_angles_deg:
                 pose = tilted_pose(0.0, 0.0, z, axis, angle)
@@ -620,7 +625,7 @@ def plan_edge_series(params: CharacterizationParameters, geometry: SensorGeometr
     """Section 6.1 (Series B-HV): T3a (raised square) then T3b (square window), each with G =
     GAP_SMALL_MM and then GAP_LARGE_MM. The slant of the square is part of the target definition.
 
-    At each Z in Z_SHAPE_STATIONS_MM, centered and fronto-parallel: Step 2, FRAMES_PER_EDGE_POSE
+    At each shape station (``params.z_shape_stations_mm()``), centered and fronto-parallel: Step 2, FRAMES_PER_EDGE_POSE
     frames at the nominal pose (subseries "nominal"); Step 3, PHASE_JITTER_POSES_EDGE further poses,
     each with its own logged random lateral offset uniform over +/- PHASE_JITTER_SPAN_PX / 2 in both
     H and V (subseries "jitter"), FRAMES_PER_EDGE_POSE frames each. Steps 4 and 5 are the loop over the
@@ -632,7 +637,7 @@ def plan_edge_series(params: CharacterizationParameters, geometry: SensorGeometr
     for target_id in (TARGET_RAISED_SQUARE, TARGET_SQUARE_WINDOW):
         for gap in (params.gap_small_mm, params.gap_large_mm):
             target = target_set.get(target_id).with_gap(gap)
-            for z in params.z_shape_stations_mm:
+            for z in params.z_shape_stations_mm():
                 nominal = fronto_parallel_pose(0.0, 0.0, z)
                 if not pose_fits_field(camera, target, nominal, _fit_margin_px(params, jittered=True)):
                     _warn(diagnostics, f"B: {target_id} (G = {gap:g} mm) does not fit the field of view at Z = "
@@ -673,7 +678,7 @@ def plan_zstep_series(params: CharacterizationParameters, geometry: SensorGeomet
                       targets: TargetSet | None = None,
                       diagnostics: PlanDiagnostics | None = None) -> list[PlannedCapture]:
     """Section 6.2 (Series B-Z, procedure letter Z), target T2 centered and fronto-parallel at each Z0
-    in Z_REDUCED_STATIONS_MM (Step 1).
+    in the reduced stations (``params.z_reduced_stations_mm()``, Step 1).
 
     Step 2, step ladder: for each delta in Z_STEP_LADDER_MM the target alternates between Z0 and
     Z0 + delta for Z_STEP_REPEATS cycles (A, B, A, B, ...). Each visit is its own pose with
@@ -702,7 +707,7 @@ def plan_zstep_series(params: CharacterizationParameters, geometry: SensorGeomet
         quantum_at = lambda depth_mm: constant      # noqa: E731 (a constant quantum at every depth)
     counter = _PoseCounter()
     plan: list[PlannedCapture] = []
-    for z0 in params.z_reduced_stations_mm:
+    for z0 in params.z_reduced_stations_mm():
         for delta in params.z_step_ladder_mm:
             for _ in range(params.z_step_repeats):
                 for visit, displacement in ((VISIT_A, 0.0), (VISIT_B, float(delta))):
@@ -733,19 +738,20 @@ def plan_zstep_series(params: CharacterizationParameters, geometry: SensorGeomet
 # ---------------------------------------------------------------------------
 # Section 7: area series
 # ---------------------------------------------------------------------------
-AREA_TARGET_ORDER = (TARGET_DISKS_SMALL, TARGET_DISKS_LARGE, TARGET_CUTOUTS_SMALL, TARGET_CUTOUTS_LARGE)
-"""The four arrays of Sections 7 and 8, one mounting each (T4-S, T4-L, T5-S, T5-L)."""
-CUTOUT_TARGETS = (TARGET_CUTOUTS_SMALL, TARGET_CUTOUTS_LARGE)
-"""The cutout arrays (T5-S, T5-L), the ones of the open-background variant."""
+AREA_TARGET_ORDER = (TARGET_DISKS, TARGET_CUTOUTS)
+"""The two feature plates of Sections 7 and 8, one mounting each (T4 disks, T5 cutouts)."""
+CUTOUT_TARGETS = (TARGET_CUTOUTS,)
+"""The cutout plate (T5), the one of the open-background variant."""
 
 
 def plan_area_series(params: CharacterizationParameters, geometry: SensorGeometry, rng: np.random.Generator,
                      open_background: bool = False, targets: TargetSet | None = None,
                      diagnostics: PlanDiagnostics | None = None) -> list[PlannedCapture]:
-    """Section 7 (Series C): the four arrays, one mounting each, in the order T4-S, T4-L, T5-S, T5-L.
+    """Section 7 (Series C): the two feature plates, one mounting each, in the order T4, T5.
 
-    Step 1: the configuration list is {T4-S, T4-L, T5-S, T5-L} x {GAP_SMALL_MM, GAP_LARGE_MM} x
-    Z_SHAPE_STATIONS_MM, centered and fronto-parallel. The order within each mounting is randomized with a
+    Step 1: the configuration list is {T4, T5} x {GAP_SMALL_MM, GAP_LARGE_MM} x every station of the ladder
+    (``params.z_stations_mm()``, all nine), centered and fronto-parallel; the three features of a plate are all on
+    every pose, so each (feature, station) pair has PHASE_JITTER_POSES_AREA poses. The order within each mounting is randomized with a
     logged seed (``notes["order_seed"]``), so targets are re-mounted as rarely as possible.
     Step 2: each configuration gets PHASE_JITTER_POSES_AREA poses, each with its own logged random
     lateral offset uniform over +/- PHASE_JITTER_SPAN_PX / 2 in H and V and FRAMES_PER_AREA_POSE frames
@@ -762,7 +768,7 @@ def plan_area_series(params: CharacterizationParameters, geometry: SensorGeometr
     z_ref = params.z_reference_mm
     for target_id in AREA_TARGET_ORDER:
         configurations = [(gap, z) for gap in (params.gap_small_mm, params.gap_large_mm)
-                          for z in params.z_shape_stations_mm]
+                          for z in params.z_stations_mm()]
         order_seed = derive_seed(rng)
         shuffled = np.random.default_rng(order_seed).permutation(len(configurations))
         for position in shuffled:
@@ -803,47 +809,35 @@ def plan_area_series(params: CharacterizationParameters, geometry: SensorGeometr
 # ---------------------------------------------------------------------------
 # Section 8: detection series
 # ---------------------------------------------------------------------------
-def _pilot_value(table: dict | None, target_id: str, gap_mm: float) -> float | None:
-    """The pilot value of a (target_id, gap) dictionary, or None when absent."""
-    if not table:
-        return None
-    value = table.get((target_id, gap_mm))
-    return None if value is None else float(value)
-
-
-def _ladder_diameters_mm(target: TwoPlaneTarget) -> list[float]:
-    """Sorted diameters of the disk or cutout levels on an array (blank and post sites excluded)."""
-    return sorted(f.diameter_mm for f in target.features if f.level_index is not None
-                  and f.site_id.split("_")[0] in ("disk", "cutout"))
-
-
 def plan_detection_series(params: CharacterizationParameters, geometry: SensorGeometry, rng: np.random.Generator,
-                          pilot_d50_mm: dict | None = None, pilot_d0_mm: dict | None = None, extended: bool = True,
-                          targets: TargetSet | None = None, diagnostics: PlanDiagnostics | None = None,
+                          extended: bool = True, targets: TargetSet | None = None,
+                          diagnostics: PlanDiagnostics | None = None,
                           shuffle_within_mounting: bool = True) -> list[PlannedCapture]:
-    """Section 8 (Series D): the four arrays (both the small and the large array of each kind), one mounting each.
+    """Section 8 (Series D): the two feature plates T4 and T5, one mounting each.
 
-    Step 3, main trials: for each configuration {T4-S, T4-L, T5-S, T5-L} x {GAP_SMALL_MM, GAP_LARGE_MM} x
-    Z_SHAPE_STATIONS_MM, DETECTION_TRIALS_PER_LEVEL poses, each with a new random lateral offset (own logged
-    seed, uniform over +/- PHASE_JITTER_SPAN_PX / 2) and FRAMES_PER_DETECTION_TRIAL frames (sub-series
-    "jitter"). All diameter levels are on the plate, so every pose serves all levels and ``level_index`` stays
-    None. The pose order is shuffled with a logged seed (``notes["order_seed"]``); the shuffle is applied within
-    each mounting (``shuffle_within_mounting=True``), because shuffling across mountings would swap the plate
-    thousands of times; with False the whole series is shuffled as the procedure's wording reads literally.
-    Step 4, extended trials for the 0 percent point (``extended=True``): at each Z in Z_REDUCED_STATIONS_MM the
-    pose count is raised to DETECTION_ZERO_TRIALS for every configuration (the additional poses carry
-    sub-series "extended"). Step 6 (reuse): the first frame of each C pose at a matching configuration may count as
-    a D trial; the plan does not reduce the D poses for it, so the technician or the analysis may drop them.
+    Main trials: for each configuration {T4, T5} x {GAP_SMALL_MM, GAP_LARGE_MM} x every station of the ladder
+    (``params.z_stations_mm()``), DETECTION_TRIALS_PER_LEVEL poses, each with a new random lateral offset (own logged
+    seed, uniform over +/- PHASE_JITTER_SPAN_PX / 2) and FRAMES_PER_DETECTION_TRIAL frames (sub-series "jitter"). All
+    features are on the plate, so every pose serves all of them and ``level_index`` stays None: the detection
+    "levels" are the (feature, station) pairs, FEATURE_COUNT x 9 = 27 values of D_px spaced by the station ratio with
+    the overlaps between neighboring features. The pose order is shuffled with a logged seed (``notes["order_seed"]``);
+    the shuffle is applied within each mounting (``shuffle_within_mounting=True``), because shuffling across mountings
+    would swap the plate thousands of times; with False the whole series is shuffled as the procedure's wording reads
+    literally.
+    Extended trials for the 0 percent point (``extended=True``): at the DETECTION_ZERO_STATION_COUNT farthest stations
+    (``params.detection_zero_stations_mm()``: 1131, 1345 and 1600 mm), where the smallest feature lies below the
+    expected threshold, the pose count is raised to DETECTION_ZERO_TRIALS for every configuration (the additional poses
+    carry sub-series "extended"). Reuse: the first frame of each C pose at a matching configuration may count as a D
+    trial; the plan does not reduce the D poses for it, so the technician or the analysis may drop them.
 
-    The pilot dictionaries (keyed by (target_id, gap_mm)) are used for the summary and for one warning: when fewer
-    than two ladder levels of an array lie below its pilot D_0, the extended series has too few points in the
-    zero-detection region (the fabricated plate cannot be changed by the plan)."""
+    The D pilot keeps only the post check (post-only sites of the disk plate are not detected, see
+    ``acquisition.check.pilot_post_check``); the former level selection from a pilot D_50 is gone, since the levels are
+    fixed by the feature ladder and the station ladder."""
     target_set = _targets(params, geometry, targets)
     camera = camera_of(geometry)
     counter = _PoseCounter()
     plan: list[PlannedCapture] = []
-    block: list[PlannedCapture] = []
-    reduced = {int(round(z)) for z in params.z_reduced_stations_mm}
+    zero_stations = {int(round(z)) for z in params.detection_zero_stations_mm()}
     series_order_seed = derive_seed(rng)
 
     def shuffled(entries: list[PlannedCapture], order_seed: int) -> list[PlannedCapture]:
@@ -853,26 +847,11 @@ def plan_detection_series(params: CharacterizationParameters, geometry: SensorGe
         return [entries[int(i)] for i in np.random.default_rng(order_seed).permutation(len(entries))]
 
     for target_id in AREA_TARGET_ORDER:
-        block = []
+        block: list[PlannedCapture] = []
         for gap in (params.gap_small_mm, params.gap_large_mm):
             target = target_set.get(target_id).with_gap(gap)
-            d50 = _pilot_value(pilot_d50_mm, target_id, gap)
-            d0 = _pilot_value(pilot_d0_mm, target_id, gap)
-            if d50 is not None or d0 is not None:
-                levels = _ladder_diameters_mm(target)
-                below = sum(1 for d in levels if d0 is not None and d < d0)
-                if diagnostics is not None:
-                    diagnostics.note(f"D pilot {target_id} G = {gap:g} mm: D_50 = "
-                                     f"{'n/a' if d50 is None else f'{d50:.3g} mm'}, D_0 = "
-                                     f"{'n/a' if d0 is None else f'{d0:.3g} mm'}, {below} of {len(levels)} ladder "
-                                     "levels below D_0")
-                if d0 is not None and below < 2:
-                    _warn(diagnostics, f"D: only {below} ladder level(s) of {target_id} lie below the pilot D_0 = "
-                                       f"{d0:.3g} mm at G = {gap:g} mm; the extended 0 percent series will have too "
-                                       "few points in the zero-detection region, and the plan cannot change the "
-                                       "fabricated plate")
-            for z in params.z_shape_stations_mm:
-                total = params.detection_zero_trials if (extended and int(round(z)) in reduced) \
+            for z in params.z_stations_mm():
+                total = params.detection_zero_trials if (extended and int(round(z)) in zero_stations) \
                     else params.detection_trials_per_level
                 if not pose_fits_field(camera, target, fronto_parallel_pose(0.0, 0.0, z),
                                        _fit_margin_px(params, jittered=True)):
@@ -914,7 +893,7 @@ def insert_sentinels(plan: list[PlannedCapture], params: CharacterizationParamet
                      seconds_per_frame: float, move_settle_s: float,
                      sentinel_target_id: str = TARGET_NOISE_PLATE,
                      diagnostics: PlanDiagnostics | None = None) -> list[PlannedCapture]:
-    """Section 5, Step 3: "Before the first station, capture a drift sentinel: center, Z = 750 mm, 30 frames.
+    """Section 5, Step 3: "Before the first station, capture a drift sentinel: center, Z = Z_REFERENCE_MM (800 mm), 30 frames.
     Repeat the sentinel every DRIFT_SENTINEL_INTERVAL_MIN and after the last station." (Section 7, Step 5 and
     Section 8 ask for the same cadence in their series.)
 
@@ -981,8 +960,7 @@ def insert_sentinels(plan: list[PlannedCapture], params: CharacterizationParamet
 # The whole session
 # ---------------------------------------------------------------------------
 def plan_full_session(params: CharacterizationParameters, geometry: SensorGeometry, rng: np.random.Generator,
-                      registration: Registration | None = None, pilot_d50_mm: dict | None = None,
-                      pilot_d0_mm: dict | None = None, expected_quantum_mm: Callable[[float], float] | float | None = None,
+                      registration: Registration | None = None, expected_quantum_mm: Callable[[float], float] | float | None = None,
                       filters_off: bool = False, open_background: bool = False, extended: bool = True,
                       targets: TargetSet | None = None, series: Iterable[str] | None = None,
                       diagnostics: PlanDiagnostics | None = None) -> list[PlannedCapture]:
@@ -1016,8 +994,7 @@ def plan_full_session(params: CharacterizationParameters, geometry: SensorGeomet
     if PROCEDURE_AREA in chosen:
         parts += plan_area_series(params, geometry, rng, open_background, target_set, diagnostics)
     if PROCEDURE_DETECTION in chosen:
-        parts += plan_detection_series(params, geometry, rng, pilot_d50_mm, pilot_d0_mm, extended, target_set,
-                                       diagnostics)
+        parts += plan_detection_series(params, geometry, rng, extended, target_set, diagnostics)
     return insert_sentinels(parts, params, geometry, _seconds_per_frame(geometry), params.move_and_settle_time_s,
                             diagnostics=diagnostics)
 
@@ -1208,6 +1185,17 @@ def plan_summary_text(plan: Sequence[PlannedCapture], params: CharacterizationPa
         lines.append(f"Master random seed: {diagnostics.master_seed} (every pose also carries its own seed in poses.csv)")
     lines.append("Registration: " + ("flange poses to command are in poses.csv (base_x_mm ...)." if registration is not None
                                      else "none given; poses.csv holds the target poses in the camera frame only."))
+    stations = params.z_stations_mm()
+    lines += ["", f"Station ladder ({len(stations)} stations, ratio {params.z_station_ratio:.4f}, Z_MIN {params.z_min_mm:g} "
+                  f"to Z_MAX {params.z_max_mm:g} mm): " + ", ".join(f"{z:g}" for z in stations),
+              "  B-HV shape stations: " + ", ".join(f"{z:g}" for z in params.z_shape_stations_mm()),
+              "  B-Z and tilt reduced stations: " + ", ".join(f"{z:g}" for z in params.z_reduced_stations_mm()),
+              "  A legacy-metric extra stations: " + ", ".join(f"{z:g}" for z in params.noise_stations_mm()
+                                                               if z not in stations),
+              "  D zero-detection stations (extra trials): "
+              + ", ".join(f"{z:g}" for z in params.detection_zero_stations_mm()),
+              "  Feature diameters (mm): " + ", ".join(f"{d:.1f}" for d in params.feature_diameters_mm(geometry))
+              if geometry is not None and geometry.sensor_fx_px is not None else "  Feature diameters: geometry unknown"]
     lines += ["", f"Poses planned: {len(plan)}; frames: {sum(c.frames for c in plan)}", "",
               "Poses per station depth and series (R, the registration poses, span Z_MIN to Z_MAX and are not listed by station):"]
     lines += _station_table(plan)

@@ -16,13 +16,14 @@ needed to exercise every analysis once. It follows the same rules the real plann
 - every capture carries the seed of the draw that produced its offsets.
 
 The demonstration plan covers
-    R  registration: T1 at several tilted poses spread over the volume
+    R  registration: T2 (the noise plate; plane-only solve) at several tilted poses spread over the volume
     A  noise: T2 at three stations (center field), two tilt poses, and a drift sentinel at each end
     B  edges: T3a and T3b at two stations, one nominal pose and four jitter poses each, small gap
     Z  Z-step: T2 at one station, a ladder of three step sizes with two ABAB cycles each, and a
        short staircase
-    C  area: T4-S and T5-S at two stations, four jitter poses each, small gap
-    D  detection: T5-S at one station, twelve single-frame jitter poses
+    C  area: T4 (disks) and T5 (cutouts) at the five shape stations (400, 566, 800, 1131, 1600 mm), a few
+       jitter poses each, small gap; the stations make the three features of a plate overlap in D_px
+    D  detection: T4 and T5 at the same five stations, single-frame jitter poses per station
 
 Units: millimeters, degrees, pixels. Poses are target -> camera (see sensorperf.geometry.targets).
 """
@@ -45,8 +46,7 @@ from sensorperf.io.manifest import (
 from sensorperf.parameters import (
     CharacterizationParameters, FIELD_POSITION_CENTER, PROCEDURE_AREA, PROCEDURE_DETECTION, PROCEDURE_EDGES,
     PROCEDURE_NOISE, PROCEDURE_REGISTRATION, PROCEDURE_SENTINEL, PROCEDURE_ZSTEP, SensorGeometry,
-    TARGET_CUTOUTS_SMALL, TARGET_DISKS_SMALL, TARGET_NOISE_PLATE, TARGET_RAISED_SQUARE,
-    TARGET_REGISTRATION_PLATE, TARGET_SQUARE_WINDOW,
+    TARGET_CUTOUTS, TARGET_DISKS, TARGET_NOISE_PLATE, TARGET_RAISED_SQUARE, TARGET_SQUARE_WINDOW,
 )
 from sensorperf.simulate.sensor_model import INDICATIVE_DISPARITY_QUANTUM_PX
 
@@ -80,10 +80,10 @@ DEMO_TILT_POSES_A = ((TILT_AXIS_H, 15.0), (TILT_AXIS_V, 30.0))
 """(axis, degrees) of the two A tilt poses."""
 DEMO_EDGE_JITTER_POSES = 4
 """Random-offset poses per B edge station (after the nominal pose)."""
-DEMO_AREA_JITTER_POSES = 4
-"""Random-offset poses per C configuration."""
-DEMO_DETECTION_POSES = 12
-"""Single-frame random-offset poses of the D demonstration."""
+DEMO_AREA_JITTER_POSES = 3
+"""Random-offset poses per C configuration (a plate, a station)."""
+DEMO_DETECTION_POSES = 16
+"""Single-frame random-offset poses per D configuration (a plate, a station)."""
 DEMO_ZSTEP_LADDER_INDICES = (1, 3, 5)
 """Indices into ``params.z_step_ladder_mm`` of the three demonstration step sizes."""
 DEMO_ZSTEP_CYCLES = 2
@@ -189,7 +189,7 @@ class _PlanBuilder:
 
 
 def _plan_registration(builder: _PlanBuilder, quick: bool) -> None:
-    """Section 4, Step 6: T1 at poses spread over the volume, each tilted about both axes within
+    """Section 4, Step 6: T2 at poses spread over the volume, each tilted about both axes within
     +/- REGISTRATION_TILT_RANGE_DEG (the hand-eye solve needs rotation about two axes)."""
     params, geometry, rng = builder.params, builder.geometry, builder.rng
     count = DEMO_REGISTRATION_POSES_QUICK if quick else DEMO_REGISTRATION_POSES
@@ -203,7 +203,7 @@ def _plan_registration(builder: _PlanBuilder, quick: bool) -> None:
         # Rotation about the target's H axis, then about its V axis (both through the reference point).
         rotation = (tilted_pose(h_mm, v_mm, z_mm, TILT_AXIS_H, float(tilt_h)).rotation
                     @ tilted_pose(h_mm, v_mm, z_mm, TILT_AXIS_V, float(tilt_v)).rotation)
-        builder.add(PROCEDURE_REGISTRATION, TARGET_REGISTRATION_PLATE, None, params.z_reference_mm,
+        builder.add(PROCEDURE_REGISTRATION, TARGET_NOISE_PLATE, None, params.z_reference_mm,
                     FIELD_POSITION_CENTER, params.frames_per_registration_pose, SUBSERIES_MAIN,
                     RigidTransform(rotation, np.array([h_mm, v_mm, z_mm])),
                     notes={"tilt_h_deg": float(tilt_h), "tilt_v_deg": float(tilt_v)})
@@ -255,19 +255,21 @@ def _plan_zstep(builder: _PlanBuilder) -> None:
 
 
 def _plan_area(builder: _PlanBuilder) -> None:
-    """Section 7: T4-S and T5-S at two stations, jitter poses each, small gap."""
+    """Section 7: T4 and T5 at the shape stations, jitter poses each, small gap."""
     params = builder.params
-    for target_id in (TARGET_DISKS_SMALL, TARGET_CUTOUTS_SMALL):
-        for station in (params.z_min_mm, params.z_reference_mm):
+    for target_id in (TARGET_DISKS, TARGET_CUTOUTS):
+        for station in params.z_shape_stations_mm():
             builder.add_jitter_poses(PROCEDURE_AREA, target_id, params.gap_small_mm, station,
                                      DEMO_AREA_JITTER_POSES, params.frames_per_area_pose)
 
 
 def _plan_detection(builder: _PlanBuilder) -> None:
-    """Section 8: T5-S at the reference station, single-frame jitter poses."""
+    """Section 8: T4 and T5 at the shape stations, single-frame jitter poses."""
     params = builder.params
-    builder.add_jitter_poses(PROCEDURE_DETECTION, TARGET_CUTOUTS_SMALL, params.gap_small_mm, params.z_reference_mm,
-                             DEMO_DETECTION_POSES, params.frames_per_detection_trial)
+    for target_id in (TARGET_DISKS, TARGET_CUTOUTS):
+        for station in params.z_shape_stations_mm():
+            builder.add_jitter_poses(PROCEDURE_DETECTION, target_id, params.gap_small_mm, station,
+                                     DEMO_DETECTION_POSES, params.frames_per_detection_trial)
 
 
 def demo_plan(params: CharacterizationParameters, geometry: SensorGeometry, rng: np.random.Generator,

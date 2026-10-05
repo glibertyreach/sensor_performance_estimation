@@ -7,9 +7,9 @@ in the camera frame (from registration), and the environmental readings.
 File name rule (Section 9)
 --------------------------
 ``<proc>_<target>_G<gap>_Z<zzzz>_F<field>_P<pose>_f<frame>.mc``, for example
-``C_T5S_G15_Z0750_F0_P017_f03.mc``: procedure C (area), target T5-S (the
-hyphen is dropped in file names), gap 15 mm, station Z = 750 mm, field position
-0 (center), pose 17, frame 3. A target without a back plate (T1, T2) writes
+``C_T5_G15_Z0800_F0_P017_f03.mc``: procedure C (area), target T5 (the
+cutout plate), gap 15 mm, station Z = 800 mm, field position
+0 (center), pose 17, frame 3. A target without a back plate (T2) writes
 ``G0``. :func:`format_file_name` and :func:`parse_file_name` are the two
 directions of this rule; the manifest is the authority when both exist.
 
@@ -81,11 +81,9 @@ SUBSERIES_FIELD = "field"
 SUBSERIES_OPEN = "open"
 """The C open-background variant (Section 7, Step 4)."""
 SUBSERIES_PILOT = "pilot"
-"""A D pilot frame (Section 8, Step 1)."""
+"""A D pilot frame (the post check, Section 8, Step 1)."""
 SUBSERIES_EXTENDED = "extended"
-"""The D extended 0 percent series (Section 8, Step 4)."""
-SUBSERIES_CONTINUOUS = "continuous"
-"""The optional continuous-angle D variant (Section 8, Step 7)."""
+"""The D extended 0 percent trials at the farthest stations (Section 8)."""
 
 VISIT_A = "A"
 VISIT_B = "B"
@@ -110,12 +108,11 @@ MANIFEST_COLUMNS = (
     ("file", "procedure", "target_id", "gap_mm", "station_z_mm", "field", "pose_index", "frame_index",
      "seed", "offset_h_mm", "offset_v_mm")
     + ROBOT_POSE_COLUMNS + TARGET_POSE_COLUMNS
-    + ("timestamp", "sensor_temp_c", "air_temp_c", "ambient_ir", "sensor_config_id",
+    + ("timestamp", "sensor_temp_c", "air_temp_c", "sensor_config_id",
        "subseries", "tilt_axis", "tilt_deg", "step_mm", "visit", "level_index"))
 """All manifest columns in order. Any further column is kept as string metadata."""
 
-OPTIONAL_FLOAT_COLUMNS = ("gap_mm", "sensor_temp_c", "air_temp_c", "ambient_ir", "step_mm",
-                          "tilt_deg")
+OPTIONAL_FLOAT_COLUMNS = ("gap_mm", "sensor_temp_c", "air_temp_c", "step_mm", "tilt_deg")
 """Float columns that may be empty."""
 
 FILE_NAME_PATTERN = re.compile(
@@ -130,24 +127,10 @@ POSE_INDEX_DIGITS = 3
 FRAME_INDEX_DIGITS = 2
 """Digit counts of the pose and frame fields in file names (more digits are accepted on read)."""
 
-TARGET_ID_FILE_FORMS = {"T4-S": "T4S", "T4-L": "T4L", "T5-S": "T5S", "T5-L": "T5L"}
-"""Target ids as written in file names (hyphen dropped); other ids are unchanged."""
-_FILE_FORM_TO_TARGET_ID = {v: k for k, v in TARGET_ID_FILE_FORMS.items()}
-
 
 # ---------------------------------------------------------------------------
 # File-name rule
 # ---------------------------------------------------------------------------
-def target_id_file_form(target_id: str) -> str:
-    """The target id as it appears in a file name (T4-S -> T4S)."""
-    return TARGET_ID_FILE_FORMS.get(target_id, target_id)
-
-
-def target_id_from_file_form(file_form: str) -> str:
-    """Inverse of target_id_file_form."""
-    return _FILE_FORM_TO_TARGET_ID.get(file_form, file_form)
-
-
 def _format_gap(gap_mm: float | None) -> str:
     """Gap field of a file name: an integer when whole, else a short decimal; 0 when none."""
     if gap_mm is None:
@@ -160,7 +143,7 @@ def _format_gap(gap_mm: float | None) -> str:
 def format_file_name(procedure: str, target_id: str, gap_mm: float | None, station_z_mm: float, field: int,
                      pose_index: int, frame_index: int) -> str:
     """The capture file name of Section 9 for these fields."""
-    return FILE_NAME_FORMAT.format(proc=procedure, target=target_id_file_form(target_id), gap=_format_gap(gap_mm),
+    return FILE_NAME_FORMAT.format(proc=procedure, target=target_id, gap=_format_gap(gap_mm),
                                    z=int(round(station_z_mm)), field=int(field), pose=int(pose_index),
                                    frame=int(frame_index))
 
@@ -176,7 +159,7 @@ def parse_file_name(name: str | Path) -> dict[str, Any]:
     gap = float(match.group("gap"))
     return {
         "procedure": match.group("proc"),
-        "target_id": target_id_from_file_form(match.group("target")),
+        "target_id": match.group("target"),
         "gap_mm": None if gap == 0.0 else gap,
         "station_z_mm": float(match.group("z")),
         "field": int(match.group("field")),
@@ -208,7 +191,6 @@ class FrameRecord:
     timestamp: str = ""
     sensor_temp_c: float | None = None
     air_temp_c: float | None = None
-    ambient_ir: float | None = None
     sensor_config_id: str = ""
     subseries: str = SUBSERIES_MAIN
     tilt_axis: str = TILT_AXIS_NONE
@@ -312,7 +294,7 @@ def record_to_row(record: FrameRecord, manifest_dir: Path) -> list[str]:
         "pose_index": record.pose_index, "frame_index": record.frame_index, "seed": record.seed,
         "offset_h_mm": record.offset_h_mm, "offset_v_mm": record.offset_v_mm,
         "timestamp": record.timestamp,
-        "sensor_temp_c": record.sensor_temp_c, "air_temp_c": record.air_temp_c, "ambient_ir": record.ambient_ir,
+        "sensor_temp_c": record.sensor_temp_c, "air_temp_c": record.air_temp_c,
         "sensor_config_id": record.sensor_config_id, "subseries": record.subseries,
         "tilt_axis": record.tilt_axis, "tilt_deg": record.tilt_deg, "step_mm": record.step_mm,
         "visit": record.visit, "level_index": record.level_index,
@@ -373,7 +355,6 @@ def load_manifest(path: str | Path) -> list[FrameRecord]:
                 timestamp=(row.get("timestamp") or "").strip(),
                 sensor_temp_c=_optional_float(row.get("sensor_temp_c"), "sensor_temp_c", index),
                 air_temp_c=_optional_float(row.get("air_temp_c"), "air_temp_c", index),
-                ambient_ir=_optional_float(row.get("ambient_ir"), "ambient_ir", index),
                 sensor_config_id=(row.get("sensor_config_id") or "").strip(),
                 subseries=(row.get("subseries") or SUBSERIES_MAIN).strip() or SUBSERIES_MAIN,
                 tilt_axis=(row.get("tilt_axis") or "").strip(),

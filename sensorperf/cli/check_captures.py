@@ -2,7 +2,7 @@
 Command line: a quick-look check of a capture session before the long analyses.
 
     python3 -m sensorperf.cli.check_captures --session Characterization_20261005/ --out check.json
-    python3 -m sensorperf.cli.check_captures --session Characterization_20261005/ --pilot 750
+    python3 -m sensorperf.cli.check_captures --session Characterization_20261005/ --pilot 800
 
 What it checks, per pose (all frames of one commanded pose)
     frames          number of capture files of the pose.
@@ -18,11 +18,11 @@ What it checks, per pose (all frames of one commanded pose)
                     normals.
     back plane      the same for the back plate, where the target has one.
 
-``--pilot Z`` instead prints the pilot detection counts of Section 8, Step 1 (the
-rule of Section 13, Step 2) on the first frame of each C pose at station Z: per
-array and gap the detection fraction per diameter level, the pilot D_50, the
-pilot D_0 and the post-site detection fraction. The values feed
-``plan_stations --pilot-d50-mm / --pilot-d0-mm``.
+``--pilot Z`` instead prints the D pilot of Section 8, Step 1, which keeps only the post
+check (the rule of Section 13, Step 2 on the first frame of each C pose at station Z, normally
+the reference station): per disk plate and gap the threshold and the fraction of post-only
+sites that are detected (a bare post must not be). The detection levels are no longer chosen
+from a pilot D_50.
 
 Inputs: a session folder (sensor_config.json, targets.json, manifest.csv,
 optionally parameters.json and registration.json; Section 9).
@@ -42,7 +42,7 @@ from pathlib import Path
 
 from sensorperf.acquisition.check import (
     EXIT_FLAGGED, EXIT_INPUT_ERROR, EXIT_OK, REPORT_JSON_INDENT, UNREADABLE_ERRORS, CheckParameters, check_session,
-    format_pilot_table, json_safe, pilot_detection_counts,
+    format_post_check_table, json_safe, pilot_post_check,
 )
 from sensorperf.io.manifest import SUBSERIES_JITTER
 from sensorperf.io.session import Session
@@ -53,7 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
     d = CheckParameters()
     parser = argparse.ArgumentParser(
         description="Quick-look check of a capture session: valid fraction, border contact and the front and back "
-                    "plane fits against the registered target, or (with --pilot) the D pilot detection counts.")
+                    "plane fits against the registered target, or (with --pilot) the D pilot post check.")
     parser.add_argument("--session", required=True, type=Path, metavar="DIR",
                         help="session folder with sensor_config.json, targets.json and manifest.csv")
     parser.add_argument("--out", type=Path, metavar="PATH", help="write a JSON report here")
@@ -72,7 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-plane-pixels", type=int, default=d.min_plane_pixels,
                         help="fewest pixels a plane fit is attempted with")
     parser.add_argument("--pilot", type=float, metavar="Z_MM", default=None,
-                        help="print the D pilot detection counts for the C poses at this station (mm) instead of the check")
+                        help="print the D pilot post check for the C poses at this station (mm, normally Z_REFERENCE_MM) instead of the check")
     parser.add_argument("--pilot-subseries", nargs="+", default=[SUBSERIES_JITTER], metavar="LABEL",
                         help="sub-series of the C poses used by --pilot (default: jitter)")
     return parser
@@ -91,9 +91,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"ERROR: the manifest of {args.session} lists no captures.", file=sys.stderr)
         return EXIT_INPUT_ERROR
     if args.pilot is not None:
-        results = pilot_detection_counts(session, session.params, session.geometry, args.pilot,
+        results = pilot_post_check(session, session.params, session.geometry, args.pilot,
                                          tuple(args.pilot_subseries))
-        print(format_pilot_table(results))
+        print(format_post_check_table(results))
         if args.out is not None:
             args.out.parent.mkdir(parents=True, exist_ok=True)
             args.out.write_text(json.dumps(json_safe({f"{t}@{g}": asdict(r) for (t, g), r in results.items()}),

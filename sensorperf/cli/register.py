@@ -2,8 +2,8 @@
 Command line: solve the robot-to-sensor registration (procedure document,
 Section 4, Steps 6 and 7) from the registration observations.
 
-    python3 -m sensorperf.cli.register --observations observations.csv --out registration.json
-    python3 -m sensorperf.cli.register --observations planes.csv --method planes --accept-mm 0.15
+    python3 -m sensorperf.cli.register --observations planes.csv --out registration.json
+    python3 -m sensorperf.cli.register --observations poses.csv --method fiducial --accept-mm 0.15
 
 What it computes
 ----------------
@@ -11,10 +11,14 @@ The two transforms that turn a read-back robot pose into a ground-truth target
 pose in the camera frame: ``camera_to_base`` (camera -> robot base) and
 ``target_to_flange`` (target frame -> flange). Target pose in the camera frame =
 camera_to_base^-1 . flange_to_base . target_to_flange. The hand-eye equation
-A_i X = Y B_i is solved by ``sensorperf.geometry.registration``: closed-form start
-and nonlinear least squares from full target poses (``--method fiducial``), or from
-depth-plane fits only (``--method planes``; a constant depth offset is then not
-observable and is absorbed into camera_to_base, Section 15).
+A_i X = Y B_i is solved by ``sensorperf.geometry.registration``. The default is the
+plane-only solve (``--method planes``, ``solve_from_planes``): the registration target is
+the patternless noise plate T2 (the patterned plate T1 no longer exists, redesign note
+Section 3), so each pose gives the plate's front plane from a depth-plane fit. camera_to_base
+is then fully observable; the in-plane position of the plate on the flange and its rotation
+about its normal are not, and are not needed for T2; a constant depth offset is absorbed into
+camera_to_base (Section 15). ``--method fiducial`` keeps the closed-form start and nonlinear
+least squares from full target poses for observations that come from another source.
 
 Input: --observations, a CSV with one row per registration pose
     pose_id
@@ -134,14 +138,14 @@ def build_parser() -> argparse.ArgumentParser:
     """The argument parser (every option has help text)."""
     parser = argparse.ArgumentParser(
         description="Solve the robot-to-sensor registration (camera_to_base, target_to_flange) from registration "
-                    "observations: the read-back flange poses with the fiducial solve's target poses (hand-eye) or "
-                    "with depth-plane fits. Writes registration.json and prints the residual and the accept verdict.")
+                    "observations: the read-back flange poses with depth-plane fits of the noise plate (the "
+                    "default) or with full target poses (hand-eye). Writes registration.json and prints the residual and the accept verdict.")
     parser.add_argument("--observations", required=True, type=Path, metavar="CSV",
                         help="one row per registration pose: pose_id, x_mm, y_mm, z_mm, rotation_type, r1..r9, and either "
                              + ", ".join(POSE_COLUMNS) + " (rotation vector in degrees) or " + ", ".join(PLANE_COLUMNS))
-    parser.add_argument("--method", choices=(METHOD_FIDUCIAL, METHOD_PLANES), default=METHOD_FIDUCIAL,
-                        help="fiducial: hand-eye from full target poses; planes: from depth-plane fits only "
-                             "(default %(default)s)")
+    parser.add_argument("--method", choices=(METHOD_FIDUCIAL, METHOD_PLANES), default=METHOD_PLANES,
+                        help="planes: from depth-plane fits of the noise plate T2 only (the standard, no pattern "
+                             "needed); fiducial: hand-eye from full target poses (default %(default)s)")
     parser.add_argument("--accept-mm", type=float, default=None, metavar="MM",
                         help="acceptance limit of the RMS residual in mm (default: REGISTRATION_RESIDUAL_ACCEPT_MM, "
                              f"{CharacterizationParameters().registration_residual_accept_mm:g})")

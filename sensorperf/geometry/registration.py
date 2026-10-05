@@ -31,7 +31,8 @@ solves it from a closed-form start followed by nonlinear least squares, and
 reports the RMS pose residual used by the acceptance gate
 (REGISTRATION_RESIDUAL_ACCEPT_MM).
 
-When only depth-plane fits are available (Step 4.6, second bullet), each
+The standard path has no pattern: the registration target is the noise plate T2 (redesign note,
+Section 3), so only depth-plane fits are available (Step 4.6, second bullet). Each
 observation gives the target's front plane in the camera frame (unit normal
 toward the camera, signed distance), not a full pose. :func:`solve_from_planes`
 fits the same unknowns to plane observations; the in-plane position and the
