@@ -202,3 +202,29 @@ record names the datum offsets and the measured reflectance; R4 folded into R1; 
 (the live document already renders its latex blocks; refresh_spec.py now typesets them for the PDF); P2 figure
 captions numbered Figure 1–3 with in-text references in Sections 1, 3.3 and 4. R3 is a code follow-up (post
 diameter derived from the rule).
+
+## C05 — Section 4 Setup, warm-up, and registration (opened 2026-10-05)
+
+Reviewer findings (proposals; nothing executed until the person closes the chunk):
+- C05-R1 (serious): the settle and vibration check runs at Z_MAX, where σ_t is largest (it grows as Z²: 16× from
+  400 to 1600 mm) while a robot vibration has the same millimeter amplitude at every Z, so the 10 % excess test is
+  least sensitive exactly where it is run. Proposal: run it at Z_MIN (optionally also at Z_MAX).
+- C05-R2 (serious): the mount check applies FRAME_CHECK_PX (a pixel tolerance) to Z and tilt as well as to H and V.
+  Proposal: Z within REGISTRATION_RESIDUAL_ACCEPT_MM, tilt within a new MOUNT_TILT_TOLERANCE_DEG (suggested 0.05°,
+  the tilt that moves a plate edge 200 mm from center by about 0.17 mm; value uncertain), H and V within
+  FRAME_CHECK_PX; add the row to Section 2.
+- C05-R3: the registration pose set must make the plate normals span three dimensions: tilts about H and about V,
+  of both signs, at several Z; and the solve must report the standard error of the camera's Z offset from the fit
+  covariance (the quantity Section 15 estimates at about 0.1 mm) as an acceptance output beside the RMS residual.
+  Note that larger tilts are bounded by the plate staying in the field of view.
+- C05-R4: the warm-up gate compares drift with σ_t before A has measured it. Proposal: state that σ_t here is the
+  temporal standard deviation of the warm-up frames themselves.
+- C05-R5 (style): step references mix "Step 8" and "Step 4.7". Proposal: "Step 4.N" throughout.
+- C05-R6 (low): the filters-off repeat of A and B is outside the Section 9 budget; say so. Record the SDK and
+  firmware versions in sensor_config.json.
+- C05-N1 (for C06): the plan tool reports that the 400 × 400 mm noise plate does not fill the field at the near
+  stations off-axis; Section 5's "check that the plate covers the region of interest" needs a rule.
+- Pipeline: numbered steps now render as numbered lists (nested sub-steps inside their step); fixed in
+  render_subsection.py during this chunk.
+
+Person's comments: (pending)

@@ -111,6 +111,59 @@ def para_images(p):
 
 esc = lambda s: s.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
 
+ORDERED_FORMATS = {"decimal", "lowerLetter", "upperLetter", "lowerRoman", "upperRoman"}
+"""Word numbering formats rendered as an ordered list; everything else is a bullet list."""
+
+def list_numbering(p):
+    """(kind, level, numId) of a list paragraph: kind is 'ol' or 'ul' from the numbering
+    definition's format at the paragraph's level, level is the indent level (0 = outermost)."""
+    num_pr = p._p.find(".//" + qn("w:numPr"))
+    if num_pr is None:
+        return "ul", 0, ""
+    ilvl = num_pr.find(qn("w:ilvl")); num_id = num_pr.find(qn("w:numId"))
+    level = int(ilvl.get(qn("w:val"))) if ilvl is not None else 0
+    num_val = num_id.get(qn("w:val")) if num_id is not None else ""
+    kind = "ul"
+    try:
+        numbering = d.part.numbering_part.element
+        num = numbering.find(f".//{qn('w:num')}[@{qn('w:numId')}='{num_val}']")
+        abstract_id = num.find(qn("w:abstractNumId")).get(qn("w:val"))
+        abstract = numbering.find(f".//{qn('w:abstractNum')}[@{qn('w:abstractNumId')}='{abstract_id}']")
+        lvl = abstract.find(f"{qn('w:lvl')}[@{qn('w:ilvl')}='{level}']")
+        fmt = lvl.find(qn("w:numFmt")).get(qn("w:val"))
+        kind = "ol" if fmt in ORDERED_FORMATS else "ul"
+    except Exception:
+        pass
+    return kind, level, num_val
+
+def group_list_items(items):
+    """Nest consecutive <li> markers into <ol>/<ul> by level. A deeper list opens inside the
+    open item (valid HTML, so the outer numbering is not disturbed); every ordered item carries
+    its running number as a value attribute, so a Word list that resumes after an interruption
+    keeps counting."""
+    html = ""; stack = []  # each entry: [kind, level, item_open]
+    for li in items:
+        m = re.match(r'<li data-kind="(\w+)" data-level="(\d+)" data-num="([^"]*)">', li)
+        kind, level, num_id = m.group(1), int(m.group(2)), m.group(3)
+        text = li[m.end():-len("</li>")]
+        while stack and stack[-1][1] > level:
+            top = stack.pop()
+            html += ("</li>" if top[2] else "") + f"</{top[0]}>"
+        if not stack or stack[-1][1] < level:
+            html += f"<{kind}>"; stack.append([kind, level, False])
+        elif stack[-1][2]:
+            html += "</li>"; stack[-1][2] = False
+        LIST_COUNTS[(num_id, level)] = LIST_COUNTS.get((num_id, level), 0) + 1
+        value = f' value="{LIST_COUNTS[(num_id, level)]}"' if kind == "ol" else ""
+        html += f"<li{value}>{text}"; stack[-1][2] = True
+    while stack:
+        top = stack.pop()
+        html += ("</li>" if top[2] else "") + f"</{top[0]}>"
+    return html
+
+LIST_COUNTS = {}
+"""Items emitted so far per (Word list id, level), so a resumed ordered list keeps counting."""
+
 def para_html(p):
     imgs = para_images(p)
     t = p.text
@@ -129,7 +182,9 @@ def para_html(p):
     if L == 2: return f'<h2>{esc(t)}</h2>'
     if L == 3: return f'<h3>{esc(t)}</h3>'
     if cap:    return f'<figcaption class="orphan">{esc(t)}</figcaption>'
-    if "List" in st: return f'<li>{esc(t)}</li>'
+    if "List" in st:
+        kind, level, num_id = list_numbering(p)
+        return f'<li data-kind="{kind}" data-level="{level}" data-num="{num_id}">{esc(t)}</li>'
     return f'<p>{esc(t)}</p>'
 
 def table_html(tbl):
@@ -158,14 +213,14 @@ for child in d.element.body.iterchildren():
     elif child.tag == qn("w:tbl") and inside:
         parts.append(table_html(Table(child, d)))
 
-# group <li> into <ul>
+# group consecutive <li> markers into nested <ol>/<ul>
 body = ""; buf = []
 for h in parts:
-    if h.startswith("<li>"): buf.append(h)
+    if h.startswith("<li "): buf.append(h)
     else:
-        if buf: body += "<ul>" + "".join(buf) + "</ul>"; buf = []
+        if buf: body += group_list_items(buf); buf = []
         body += h
-if buf: body += "<ul>" + "".join(buf) + "</ul>"
+if buf: body += group_list_items(buf)
 
 L, R = (A.header.split("|") + [""])[:2] if "|" in A.header else (A.header, "")
 foot = f'@bottom-center {{ content: "{A.page}"; font-family: Georgia, serif; font-size: 9pt; color:#999; }}' if A.page else ""
@@ -175,7 +230,7 @@ body {{ font-family: Georgia,'Times New Roman',serif; font-size:11pt; line-heigh
 .hdr {{ display:flex; justify-content:space-between; font-family:Arial,sans-serif; font-size:8pt; letter-spacing:.06em; color:#8a8a8a; text-transform:uppercase; border-bottom:.5pt solid #ddd; padding-bottom:5pt; margin-bottom:22pt; }}
 h1 {{ font-size:15pt; margin:0 0 12pt; }} h2 {{ font-size:12.5pt; margin:14pt 0 9pt; }} h3 {{ font-size:11.5pt; margin:12pt 0 7pt; }}
 p {{ text-align:justify; margin:0 0 11pt; }}
-ul {{ margin:0 0 11pt 0; padding-left:20pt; }} li {{ margin:0 0 6pt; text-align:justify; }}
+ul, ol {{ margin:0 0 11pt 0; padding-left:20pt; }} li > ol, li > ul {{ margin:6pt 0 0 0; }} li {{ margin:0 0 6pt; text-align:justify; }}
 figure {{ margin:14pt 0; text-align:center; page-break-inside:avoid; }}
 figure img {{ max-width:100%; max-height:340pt; border:.5pt solid #ccc; }}
 p.formula {{ text-align:center; margin:4pt 0 11pt; }} p.formula img {{ max-width:100%; }}
