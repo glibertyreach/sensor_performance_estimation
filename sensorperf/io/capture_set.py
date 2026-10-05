@@ -57,7 +57,11 @@ class PoseStack:
 
     def mean_depth(self) -> np.ndarray:
         """Per-pixel mean over the frames where the pixel was read (NaN where never read)."""
-        with np.errstate(invalid="ignore"):
+        # A pixel never read in any frame has an all-NaN column; numpy warns about the empty mean,
+        # which is the intended NaN result, so the warning is silenced here.
+        import warnings
+        with np.errstate(invalid="ignore"), warnings.catch_warnings():
+            warnings.simplefilter("ignore", category=RuntimeWarning)
             return np.nanmean(self.depth, axis=0)
 
 

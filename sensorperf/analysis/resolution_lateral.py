@@ -37,6 +37,7 @@ Conventions: docs/design/code_design.md Section 4 (millimeters, pixels; arrays a
 from __future__ import annotations
 
 import math
+import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -527,7 +528,9 @@ def _analyze_configuration(session: Session, records: list, options: LateralOpti
         footprint = geometry.pixel_footprint_mm
         frames_total += stack.frame_count
         # Steps 1-2: reference planes from the pose's mean frame, normalized height of every frame.
-        mean_depth = stack.mean_depth()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)          # pixels never read give an empty mean (NaN)
+            mean_depth = stack.mean_depth()
         planes = reference_planes(mean_depth, geometry, params)
         height = normalized_height(stack.depth, planes.z_front[None], planes.z_back[None])
         inward = inward_distances_px(geometry, square)
@@ -639,6 +642,7 @@ def _grid_figure(rows: int, columns: int):
     """A figure with a rows x columns grid of axes (Agg backend through common.new_figure)."""
     figure, axis = new_figure(FIGURE_PANEL_WIDTH_IN * columns, FIGURE_PANEL_HEIGHT_IN * rows)
     figure.delaxes(axis)
+    figure.set_layout_engine("constrained")        # keeps titles, labels and colorbars from overlapping
     return figure, figure.subplots(rows, columns, squeeze=False)
 
 

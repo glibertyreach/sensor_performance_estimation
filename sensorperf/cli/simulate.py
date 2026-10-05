@@ -75,7 +75,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                     disparity_noise_px=indicative.disparity_noise_px / pixel_divisor,
                     disparity_quantum_px=indicative.disparity_quantum_px / pixel_divisor)
     targets = make_standard_target_set(params, full_geometry)
-    plan = demo_plan(params, geometry, rng, arguments.quick, series=arguments.series)
+    plan = demo_plan(params, geometry, rng, arguments.quick, series=arguments.series,
+                     disparity_quantum_px=model.disparity_quantum_px)
 
     started = time.time()
     last_percent = -1

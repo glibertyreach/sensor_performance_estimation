@@ -88,8 +88,9 @@ DEMO_ZSTEP_LADDER_INDICES = (3, 5, 7)
 """Indices into ``params.z_step_ladder_mm`` of the three demonstration step sizes."""
 DEMO_ZSTEP_CYCLES = 2
 """ABAB cycles per step size."""
-DEMO_STAIRCASE_STEPS = 3
-"""Steps of the demonstration staircase."""
+DEMO_STAIRCASE_STEPS = 30
+"""Fine-staircase steps of the demonstration: the full Z_STAIRCASE_QUANTA x Z_STAIRCASE_SUBDIVISION sweep of
+Section 6.2, Step 3 (3 quanta at 10 steps each), so the plateau-width estimate of Analysis B-Z has data."""
 SEED_UPPER_BOUND = 2 ** 31 - 1
 """Exclusive upper bound of the per-capture seeds drawn for the plan (fits a signed 32-bit integer)."""
 
@@ -138,8 +139,11 @@ class _PlanBuilder:
     the acquisition order, and draws the seeds."""
 
     def __init__(self, params: CharacterizationParameters, geometry: SensorGeometry,
-                 rng: np.random.Generator) -> None:
+                 rng: np.random.Generator, disparity_quantum_px: float = INDICATIVE_DISPARITY_QUANTUM_PX) -> None:
         self.params, self.geometry, self.rng = params, geometry, rng
+        self.disparity_quantum_px = disparity_quantum_px
+        """The disparity quantum the staircase is sized with (the rendering model's, so that the
+        fine steps really are fractions of the quantum the frames carry)."""
         self.captures: list[PlannedCapture] = []
         self._next_pose_index: dict[tuple, int] = {}
 
@@ -241,9 +245,9 @@ def _plan_zstep(builder: _PlanBuilder) -> None:
                 builder.add(PROCEDURE_ZSTEP, TARGET_NOISE_PLATE, None, z0, FIELD_POSITION_CENTER,
                             params.frames_per_zstep_pose, SUBSERIES_LADDER,
                             fronto_parallel_pose(0.0, 0.0, z0 + offset), step_mm=step, visit=visit)
-    # Expected depth quantum at Z0 from the indicative disparity quantum (the staircase of Section 6.2,
+    # Expected depth quantum at Z0 from the model's disparity quantum (the staircase of Section 6.2,
     # Step 3 divides one quantum into Z_STAIRCASE_SUBDIVISION fine steps).
-    quantum_mm = geometry.depth_quantum_mm(INDICATIVE_DISPARITY_QUANTUM_PX, z0)
+    quantum_mm = geometry.depth_quantum_mm(builder.disparity_quantum_px, z0)
     for step_index in range(1, DEMO_STAIRCASE_STEPS + 1):
         offset = step_index * quantum_mm / params.z_staircase_subdivision
         builder.add(PROCEDURE_ZSTEP, TARGET_NOISE_PLATE, None, z0, FIELD_POSITION_CENTER, params.z_staircase_frames,
@@ -267,7 +271,8 @@ def _plan_detection(builder: _PlanBuilder) -> None:
 
 
 def demo_plan(params: CharacterizationParameters, geometry: SensorGeometry, rng: np.random.Generator,
-              quick: bool, series: Sequence[str] | None = None) -> list[PlannedCapture]:
+              quick: bool, series: Sequence[str] | None = None,
+              disparity_quantum_px: float = INDICATIVE_DISPARITY_QUANTUM_PX) -> list[PlannedCapture]:
     """The demonstration plan (module docstring) of the requested series (all of ALL_SERIES by default),
     in acquisition order R, A, B, Z, C, D with ``order`` set 0..N-1. ``geometry`` is the sensor the plan
     will be rendered with (it converts the jitter span from pixels to mm); ``quick`` uses fewer
@@ -277,7 +282,7 @@ def demo_plan(params: CharacterizationParameters, geometry: SensorGeometry, rng:
     unknown = [letter for letter in chosen if letter not in ALL_SERIES]
     if unknown:
         raise ValueError(f"unknown series {unknown}; expected a subset of {ALL_SERIES}")
-    builder = _PlanBuilder(params, geometry, rng)
+    builder = _PlanBuilder(params, geometry, rng, disparity_quantum_px)
     if PROCEDURE_REGISTRATION in chosen:
         _plan_registration(builder, quick)
     if PROCEDURE_NOISE in chosen:

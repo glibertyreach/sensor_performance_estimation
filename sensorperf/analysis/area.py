@@ -997,6 +997,7 @@ def _figure_transfer(result: AreaResult, out_dir: Path, key: str, label: str, st
             axis.grid(True, linewidth=0.3)
         axes[0].set_ylabel(label)
         axes[0].legend(fontsize=8)
+        figure.tight_layout()
         written += save_figure(figure, out_dir / f"{stem}_G{gap:g}")
     return written
 
@@ -1077,4 +1078,5 @@ def _figure_predicted(result: AreaResult, out_dir: Path) -> list[Path]:
         axis.grid(True, linewidth=0.3)
     axes[0].set_ylabel("area / A_true")
     axes[0].legend(fontsize=8)
+    figure.tight_layout()
     return save_figure(figure, out_dir / "C_predicted_vs_measured")

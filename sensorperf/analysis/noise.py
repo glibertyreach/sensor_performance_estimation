@@ -64,7 +64,7 @@ from scipy import fft as sp_fft
 from scipy.optimize import least_squares
 
 from sensorperf.analysis.common import (
-    PoseGeometry, central_patch_mask, depth_codes, new_figure, pose_geometry, region_of_interest, save_figure,
+    central_patch_mask, depth_codes, new_figure, pose_geometry, region_of_interest, save_figure,
     write_csv_rows, write_json,
 )
 from sensorperf.features.depth_features import temporal_statistics
@@ -912,6 +912,7 @@ def _grid_figure(panels: int, columns: int = HISTOGRAM_COLUMNS):
     columns = min(columns, max(panels, 1))
     figure, axis = new_figure(PANEL_WIDTH_IN * columns, PANEL_HEIGHT_IN * rows)
     figure.delaxes(axis)
+    figure.set_layout_engine("constrained")        # keeps titles, labels and colorbars from overlapping
     axes = figure.subplots(rows, columns, squeeze=False)
     for extra in axes.ravel()[panels:]:
         extra.set_visible(False)
