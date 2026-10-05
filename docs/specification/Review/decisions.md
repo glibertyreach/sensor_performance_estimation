@@ -359,3 +359,22 @@ Neil's comments: (pending)
   1-px-periodic pixel-locking bias, dot-pitch periodicity, approach hysteresis) can be added to Section 11.1 at no
   capture cost; a systematic fine sweep (0.1 px steps over 2 px, in H and in V, at the reference station) is an
   optional second pass that resolves the shape of the periodic bias better. Proposal carried to C12 (Analysis B).
+
+## C08 — Section 7 Acquisition C, disk and cutout area series (opened 2026-10-05)
+
+Reviewer findings (proposals; nothing executed until Neil closes the chunk):
+- C08-R1 (clarity, as C06-P1): Step 1 "Build the configuration list" is an imperative with no actor. Proposal:
+  rewrite the section in the pose-list, plain-language style: the pose list for C holds, for each plate (T4, T5)
+  and each gap (15 and 60 mm), every station of the ladder, centered and fronto-parallel; the plan tool randomizes
+  the order within each mounting; mount each plate with the mount check of Step 4.8.
+- C08-R2 (feasibility): the open-background variant requires "nothing within the sensor's range behind the holes";
+  with the range now 1600 mm and the variant at 800 mm, that is at least 800 mm of clear space behind the plate, or a
+  surface beyond the sensor's range. Proposal: state the clearance (Z_MAX − Z_REFERENCE_MM) explicitly.
+- C08-R3 (consistency with Section 5): the field sub-series requests the four off-axis positions at 0.6 of the half
+  field, but the 336 × 198 mm plates do not fit there at 800 mm; the plan tool pulls them inward (68 to 96 % of the
+  requested offset at the indicative geometry). Proposal: say that the rule of Section 5, Step 1 applies and that the
+  achieved fraction is logged and reported with the C field comparison.
+- C08-R4 (low): Step 2 should give the values (30 poses, ±4 px of the 8 px span, 10 frames) in the plain style;
+  Step 5's sentinel sentence is now consistent with Section 5 and needs no change.
+
+Neil's comments: (pending)
