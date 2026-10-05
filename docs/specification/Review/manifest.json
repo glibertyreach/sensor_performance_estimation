@@ -1,6 +1,6 @@
 {
   "document": "VSX3000_characterization_specification.docx",
-  "built": "2026-10-05T15:23:35",
+  "built": "2026-10-05T16:10:54",
   "source_of_truth": "https://claude.ai/code/artifact/20fd839b-0e95-4210-9e8f-959da07ce6c2",
   "elements": [
     {
@@ -66,7 +66,8 @@
         "Section 3.1",
         "Section 3.2",
         "Step 4.4",
-        "Step 4.5"
+        "Step 4.5",
+        "Step 4.8"
       ]
     },
     {
@@ -94,7 +95,8 @@
         "Section 3.1",
         "Section 3.2",
         "Step 4.4",
-        "Step 4.5"
+        "Step 4.5",
+        "Step 4.8"
       ]
     },
     {
@@ -136,7 +138,8 @@
       "refs": [
         "Section 3.3",
         "Section 4",
-        "Section 7"
+        "Section 7",
+        "Step 4.8"
       ]
     },
     {
@@ -193,8 +196,11 @@
       },
       "refs": [
         "Section 1",
+        "Section 15",
         "Section 2",
-        "Step 4.7"
+        "Section 9",
+        "Step 4.7",
+        "Step 4.8"
       ]
     },
     {

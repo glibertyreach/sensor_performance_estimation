@@ -227,7 +227,13 @@ Reviewer findings (proposals; nothing executed until the person closes the chunk
 - Pipeline: numbered steps now render as numbered lists (nested sub-steps inside their step); fixed in
   render_subsection.py during this chunk.
 
-Person's comments: (pending)
+Person's comments: none; closed 2026-10-05 with "close" (treated as acceptance of R1–R6; N1 carried to C06).
+Executed (document rev 77): R1 settle check at Z_MIN with the reason stated; R2 mount check with Z within
+REGISTRATION_RESIDUAL_ACCEPT_MM, tilt within the new MOUNT_TILT_TOLERANCE_DEG (0.05 †, row added to Section 2),
+H and V within FRAME_CHECK_PX; R3 registration poses with tilts about both axes and both signs, plate kept in the
+field, and the standard error of the camera Z offset reported and saved beside the residual; R4 σ_t of the warm-up
+gate defined from the warm-up frames; R5 "Step 4.8" in Sections 3.2 and 4; R6 filters-off repeat noted as outside
+the budget, SDK and firmware versions recorded. Code: mount_tilt_tolerance_deg added to the parameters.
 
 Forward note for C14 (Analysis D), found while making the zero-detection test honest (2026-10-05): with the
 false-alarm target γ = 0.01 per window and 300 extended trials, a feature that is truly never detected still

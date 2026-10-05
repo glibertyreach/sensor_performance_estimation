@@ -388,6 +388,10 @@ class CharacterizationParameters:
     """Acceptance limit of the registration residual, mm RMS."""
     mount_check_depth_mm: float = 800.0
     """Depth of the once-per-mount plane-fit check (Section 4, Step 8)."""
+    mount_tilt_tolerance_deg: float = 0.05
+    """Largest tilt difference between a mounted target's fitted front plane and the registered pose that the
+    mount check of Step 4.8 accepts (dagger: 0.05 degrees moves a plate edge 200 mm from center by about
+    0.17 mm). Z is held to registration_residual_accept_mm and H, V to frame_check_px."""
 
     # Equipment (redesign note, Section 4)
     adapter_remount_repeatability_mm: float = 0.02

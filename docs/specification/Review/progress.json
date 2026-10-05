@@ -25,9 +25,9 @@
  },
  "C05": {
   "title": "Setup, warm-up, registration",
-  "reviewed": null,
-  "tier": null,
-  "note": "not yet reviewed"
+  "reviewed": "2026-10-05",
+  "tier": "fable",
+  "note": "R1–R6 executed; N1 (noise-plate field coverage rule) carried to C06"
  },
  "C06": {
   "title": "Acquisition A, noise plate",
