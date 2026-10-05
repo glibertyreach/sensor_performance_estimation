@@ -146,3 +146,18 @@ Awaiting the person's decisions on P2 and P3 before closing the chunk.
   voxels, a minimum detectable diameter of at least 6 px (2·sqrt(40/π) = 7.1 px). The person calls this very
   conservative and asks the reviewer to check available sources and consider still larger patch sizes. The person
   also allows the 400–1600 mm distance variation for the rest of the tests if necessary.
+- C03 closed 2026-10-05 ("accepted. execute. next."): 3 features per plate at 7.0, 19.7, 55.8 mm (ratio 2√2 from 3 px at
+  Z_MAX); one geometric station ladder 400–1600 mm at 2^(1/4) (9 stations) for all series, B-HV at every second and
+  B-Z at every fourth station; Z_REFERENCE_MM = 800; registration by plane correspondence on T2 (T1 and its pattern
+  removed); in-plane datum from the as-built record and a once-per-mount IR-image check; enclosure/IR-meter row
+  removed with the ambient-IR manifest column; robot row requires the actual pose at POSE_LOG_RESOLUTION_MM; new
+  named constants ADAPTER_REMOUNT_REPEATABILITY_MM, TEMPERATURE_LOG_INTERVAL_MIN, BLANK_SITES_PER_PLATE,
+  POST_SITES_PER_PLATE, DETECTION_ZERO_STATION_COUNT, FEATURE_LADDER_RATIO, FEATURE_MIN_PX_AT_Z_MAX, FEATURE_COUNT,
+  Z_STATION_RATIO, Z_SHAPE_STATION_STRIDE, Z_REDUCED_STATION_STRIDE; DIAMETER_*, DETECTION_LEVEL*, FINE_LADDER and
+  CONTINUOUS_ANGLE_* rows removed; D pilot reduced to the post check; continuous-angle variant removed (it is the
+  design); Sections 12 and 13 pooled in D_px with the scaling test; Section 15 registration rows and limitations
+  reworded; open questions on fiducial imaging and pose reporting removed (now requirements). Literal replacements in
+  Sections 4, 5, 6, 7, 8 done while those sections were rewritten (C05–C09 deferred items cleared). The Section 9
+  budget table is refilled from the plan tool once the code lands. Gate: ALL CHECKS PASSED against baseline
+  20261005_131333, scope diff = 1, 2, 3.1, 3.2, 3.3, 4, 5, 6, 7, 8, 9, 10, 12, 13, 15 (all intended).
+  Figures: flow diagram ("9 Z × 5 fields", "post check"), setup diagram (400–1600 mm volume, enclosed laboratory).

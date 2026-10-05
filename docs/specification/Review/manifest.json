@@ -1,6 +1,6 @@
 {
   "document": "VSX3000_characterization_specification.docx",
-  "built": "2026-10-05T13:13:33",
+  "built": "2026-10-05T14:09:20",
   "source_of_truth": "https://claude.ai/code/artifact/20fd839b-0e95-4210-9e8f-959da07ce6c2",
   "elements": [
     {
@@ -17,7 +17,7 @@
       "title": "1. Purpose and scope",
       "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
       "asserts": {
-        "z_range_mm": "500–1000"
+        "z_range_mm": "400–1600"
       },
       "refs": [
         "Step 4.5"
@@ -47,12 +47,15 @@
       "title": "2. Parameters",
       "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
       "asserts": {
-        "noise_station_count": 11,
+        "noise_station_count": 9,
         "shape_station_count": 5,
         "reduced_station_count": 3,
         "zstep_rung_count": 6,
         "registration_poses": 30,
-        "z_range_mm": "500–1000",
+        "z_range_mm": "400–1600",
+        "feature_diameters_mm": "7.0, 19.7, 55.8",
+        "station_ladder_mm": "400, 476, 566, 673, 800, 951, 1131, 1345, 1600",
+        "feature_count": 3,
         "gap_small_mm": 15,
         "gap_large_mm": 60,
         "detection_zero_trials": 300,
@@ -61,6 +64,7 @@
       "refs": [
         "Section 10",
         "Section 3.1",
+        "Section 3.2",
         "Step 4.4",
         "Step 4.5"
       ]
@@ -72,11 +76,14 @@
       "caption": "Name",
       "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
       "asserts": {
-        "noise_station_count": 11,
+        "noise_station_count": 9,
         "shape_station_count": 5,
         "reduced_station_count": 3,
         "zstep_rung_count": 6,
         "registration_poses": 30,
+        "feature_diameters_mm": "7.0, 19.7, 55.8",
+        "station_ladder_mm": "400, 476, 566, 673, 800, 951, 1131, 1345, 1600",
+        "feature_count": 3,
         "gap_small_mm": 15,
         "gap_large_mm": 60,
         "detection_zero_trials": 300,
@@ -85,6 +92,7 @@
       "refs": [
         "Section 10",
         "Section 3.1",
+        "Section 3.2",
         "Step 4.4",
         "Step 4.5"
       ]
@@ -120,10 +128,16 @@
       "title": "3.2 Targets",
       "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
       "asserts": {
+        "feature_diameters_mm": "7.0, 19.7, 55.8",
+        "feature_count": 3,
         "gap_small_mm": 15,
         "gap_large_mm": 60
       },
-      "refs": []
+      "refs": [
+        "Section 3.3",
+        "Section 4",
+        "Section 7"
+      ]
     },
     {
       "id": "Table 4",
@@ -132,10 +146,14 @@
       "caption": "ID",
       "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
       "asserts": {
+        "feature_count": 3,
         "gap_small_mm": 15,
         "gap_large_mm": 60
       },
-      "refs": []
+      "refs": [
+        "Section 4",
+        "Section 7"
+      ]
     },
     {
       "id": "§3.3",
@@ -143,7 +161,9 @@
       "title": "3.3 Chamfered (knife-edge) boundaries",
       "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
       "asserts": {},
-      "refs": []
+      "refs": [
+        "Section 3.2"
+      ]
     },
     {
       "id": "Figure 2",
@@ -172,7 +192,7 @@
         "registration_residual_accept_mm": "0.15"
       },
       "refs": [
-        "Section 15",
+        "Section 1",
         "Section 2",
         "Step 4.7"
       ]
@@ -192,11 +212,12 @@
       "title": "5. Acquisition A: noise-plate series",
       "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
       "asserts": {
-        "noise_station_count": 11,
-        "reduced_station_count": 3,
-        "sentinel_frames": 30
+        "noise_station_count": 9,
+        "reduced_station_count": 3
       },
       "refs": [
+        "Section 10",
+        "Section 2",
         "Step 4.2"
       ]
     },
@@ -222,7 +243,7 @@
       "title": "7. Acquisition C: disk and cutout area series",
       "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
       "asserts": {
-        "shape_station_count": 5,
+        "noise_station_count": 9,
         "gap_small_mm": 15,
         "gap_large_mm": 60
       },
@@ -234,14 +255,15 @@
       "title": "8. Acquisition D: detection trials",
       "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
       "asserts": {
-        "shape_station_count": 5,
-        "reduced_station_count": 3,
+        "noise_station_count": 9,
+        "feature_count": 3,
         "gap_small_mm": 15,
         "gap_large_mm": 60,
         "detection_zero_trials": 300
       },
       "refs": [
-        "Section 13"
+        "Section 13",
+        "Section 7"
       ]
     },
     {
@@ -255,7 +277,9 @@
         "total_robot_hours": "6.8",
         "detection_zero_trials": 300
       },
-      "refs": []
+      "refs": [
+        "Section 2"
+      ]
     },
     {
       "id": "Table 5",
@@ -316,6 +340,7 @@
       "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
       "asserts": {},
       "refs": [
+        "Section 10",
         "Section 12",
         "Section 14",
         "Step 8.2"
@@ -339,12 +364,13 @@
       "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
       "asserts": {
         "registration_poses": 30,
+        "z_range_mm": "400–1600",
         "gap_small_mm": 15,
         "registration_residual_accept_mm": "0.15"
       },
       "refs": [
         "Step 4.4",
-        "Step 4.6",
+        "Step 4.5",
         "Step 4.7"
       ]
     },
@@ -367,7 +393,7 @@
   ],
   "invariants": [
     {
-      "name": "Noise station count agrees everywhere",
+      "name": "Station ladder count agrees everywhere",
       "key": "noise_station_count",
       "phrase": "Z stations"
     },
@@ -408,6 +434,18 @@
       "key": "z_range_mm"
     },
     {
+      "name": "Feature ladder agrees everywhere",
+      "key": "feature_diameters_mm"
+    },
+    {
+      "name": "Station ladder values agree everywhere",
+      "key": "station_ladder_mm"
+    },
+    {
+      "name": "Features per plate agree everywhere",
+      "key": "feature_count"
+    },
+    {
       "name": "Small gap agrees everywhere",
       "key": "gap_small_mm"
     },
@@ -425,7 +463,7 @@
     }
   ],
   "invariant_values": {
-    "noise_station_count": 11,
+    "noise_station_count": 9,
     "shape_station_count": 5,
     "reduced_station_count": 3,
     "zstep_rung_count": 6,
@@ -434,7 +472,10 @@
     "total_poses": "6,590",
     "total_frames": "45,710",
     "total_robot_hours": "6.8",
-    "z_range_mm": "500–1000",
+    "z_range_mm": "400–1600",
+    "feature_diameters_mm": "7.0, 19.7, 55.8",
+    "station_ladder_mm": "400, 476, 566, 673, 800, 951, 1131, 1345, 1600",
+    "feature_count": 3,
     "gap_small_mm": 15,
     "gap_large_mm": 60,
     "detection_zero_trials": 300,

@@ -43,7 +43,7 @@ DOC_ID = "20fd839b-0e95-4210-9e8f-959da07ce6c2"
 RUNNING_HEADER = "VSX3000 characterization specification | review"
 
 INVARIANTS = [
-    {"name": "Noise station count agrees everywhere", "key": "noise_station_count", "value": 11, "phrase": "Z stations"},
+    {"name": "Station ladder count agrees everywhere", "key": "noise_station_count", "value": 9, "phrase": "Z stations"},
     {"name": "Shape station count agrees everywhere", "key": "shape_station_count", "value": 5},
     {"name": "Reduced station count agrees everywhere", "key": "reduced_station_count", "value": 3},
     {"name": "Z-step rung count agrees everywhere", "key": "zstep_rung_count", "value": 6},
@@ -52,7 +52,10 @@ INVARIANTS = [
     {"name": "Budget total poses agree everywhere", "key": "total_poses", "value": "6,590"},
     {"name": "Budget total frames agree everywhere", "key": "total_frames", "value": "45,710"},
     {"name": "Budget total hours agree everywhere", "key": "total_robot_hours", "value": "6.8"},
-    {"name": "Range limits agree everywhere", "key": "z_range_mm", "value": "500–1000"},
+    {"name": "Range limits agree everywhere", "key": "z_range_mm", "value": "400–1600"},
+    {"name": "Feature ladder agrees everywhere", "key": "feature_diameters_mm", "value": "7.0, 19.7, 55.8"},
+    {"name": "Station ladder values agree everywhere", "key": "station_ladder_mm", "value": "400, 476, 566, 673, 800, 951, 1131, 1345, 1600"},
+    {"name": "Features per plate agree everywhere", "key": "feature_count", "value": 3},
     {"name": "Small gap agrees everywhere", "key": "gap_small_mm", "value": 15},
     {"name": "Large gap agrees everywhere", "key": "gap_large_mm", "value": 60},
     {"name": "Extended trials per level agree everywhere", "key": "detection_zero_trials", "value": 300},
@@ -62,16 +65,19 @@ INVARIANTS = [
 holds at the time of declaration; a decided change updates them here AND in the doc."""
 
 VALUE_PATTERNS = {
-    "noise_station_count": r"\b11 (?:Z )?stations\b",
-    "shape_station_count": r"\b5 (?:shape )?stations\b|Z_SHAPE_STATIONS_MM",
-    "reduced_station_count": r"Z_REDUCED_STATIONS_MM",
+    "noise_station_count": r"\b9 (?:Z )?stations\b|Z_STATION_RATIO",
+    "shape_station_count": r"\b5 (?:shape )?stations\b|Z_SHAPE_STATION_STRIDE",
+    "reduced_station_count": r"Z_REDUCED_STATION_STRIDE",
     "zstep_rung_count": r"Z_STEP_LADDER_MM",
     "registration_poses": r"REGISTRATION_POSES|\b30 poses\b",
     "sentinel_frames": r"\b30 frames\b",
     "total_poses": r"6,590",
     "total_frames": r"45,710",
     "total_robot_hours": r"\b6\.8\b",
-    "z_range_mm": r"500–1000|500–1,000",
+    "z_range_mm": r"400–1600|400–1,600|400 and 1600 mm",
+    "feature_diameters_mm": r"7\.0, 19\.7,? (?:and )?55\.8",
+    "station_ladder_mm": r"400, 476, 566, 673, 800, 951, 1131, 1345, 1600",
+    "feature_count": r"FEATURE_COUNT",
     "gap_small_mm": r"GAP_SMALL_MM|\b15 mm\b",
     "gap_large_mm": r"GAP_LARGE_MM|\b60 mm\b",
     "detection_zero_trials": r"DETECTION_ZERO_TRIALS|\b300 trials\b",
