@@ -1,6 +1,6 @@
 {
   "document": "VSX3000_characterization_specification.docx",
-  "built": "2026-10-05T15:11:41",
+  "built": "2026-10-05T15:12:15",
   "source_of_truth": "https://claude.ai/code/artifact/20fd839b-0e95-4210-9e8f-959da07ce6c2",
   "elements": [
     {
@@ -184,15 +184,6 @@
       "refs": []
     },
     {
-      "id": "Figure 4",
-      "kind": "figure",
-      "section": "§3.3",
-      "caption": "",
-      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
-      "asserts": {},
-      "refs": []
-    },
-    {
       "id": "Part I — Data acquisition procedure",
       "kind": "section",
       "title": "Part I — Data acquisition procedure",
@@ -216,7 +207,7 @@
       ]
     },
     {
-      "id": "Figure 5",
+      "id": "Figure 4",
       "kind": "figure",
       "section": "§4",
       "caption": "",
@@ -329,15 +320,6 @@
       "refs": []
     },
     {
-      "id": "Figure 6",
-      "kind": "figure",
-      "section": "§10",
-      "caption": "",
-      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
-      "asserts": {},
-      "refs": []
-    },
-    {
       "id": "§11",
       "kind": "section",
       "title": "11. Analysis B: effective resolution in H, V, Z",
@@ -374,15 +356,6 @@
       ]
     },
     {
-      "id": "Figure 7",
-      "kind": "figure",
-      "section": "§13",
-      "caption": "",
-      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
-      "asserts": {},
-      "refs": []
-    },
-    {
       "id": "§14",
       "kind": "section",
       "title": "14. Analysis E: boundary detection bias",
@@ -394,7 +367,7 @@
       ]
     },
     {
-      "id": "Figure 8",
+      "id": "Figure 5",
       "kind": "figure",
       "section": "§14",
       "caption": "",
@@ -403,7 +376,7 @@
       "refs": []
     },
     {
-      "id": "Figure 9",
+      "id": "Figure 6",
       "kind": "figure",
       "section": "§14",
       "caption": "",

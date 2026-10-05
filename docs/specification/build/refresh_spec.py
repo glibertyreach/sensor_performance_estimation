@@ -220,7 +220,12 @@ def outline():
             else:
                 if current is not None:
                     current["text"] += text + "\n"
-                if child.findall(".//" + qn("w:drawing")):
+                drawings = child.findall(".//" + qn("w:drawing"))
+                # A typeset formula is a picture whose alt text is its TeX; it is not a figure.
+                is_formula = any((d.find(".//" + qn("wp:docPr")) is not None
+                                  and (d.find(".//" + qn("wp:docPr")).get("descr") or "").startswith("\\"))
+                                 for d in drawings)
+                if drawings and not is_formula:
                     figure_number += 1
                     elements.append({"id": f"Figure {figure_number}", "kind": "figure", "section": current["id"] if current else "",
                                      "caption": text, "text": ""})
