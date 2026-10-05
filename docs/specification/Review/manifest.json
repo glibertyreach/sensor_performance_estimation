@@ -1,6 +1,6 @@
 {
   "document": "VSX3000_characterization_specification.docx",
-  "built": "2026-10-05T15:20:36",
+  "built": "2026-10-05T15:23:35",
   "source_of_truth": "https://claude.ai/code/artifact/20fd839b-0e95-4210-9e8f-959da07ce6c2",
   "elements": [
     {
@@ -28,7 +28,7 @@
       "kind": "figure",
       "section": "§1",
       "caption": "",
-      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "source": "figures/figure1_procedure_flow.jsx",
       "asserts": {},
       "refs": []
     },
@@ -170,7 +170,7 @@
       "kind": "figure",
       "section": "§3.3",
       "caption": "",
-      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "source": "figures/figure2_chamfer_section.jsx",
       "asserts": {},
       "refs": []
     },
@@ -202,7 +202,7 @@
       "kind": "figure",
       "section": "§4",
       "caption": "",
-      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "source": "figures/figure3_setup_side_view.jsx",
       "asserts": {},
       "refs": []
     },

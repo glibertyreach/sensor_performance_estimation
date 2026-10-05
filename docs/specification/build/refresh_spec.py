@@ -93,6 +93,11 @@ VALUE_PATTERNS = {
 # the TeX is typeset with matplotlib's mathtext and placed as an inline picture,
 # with the TeX kept as the picture's alt text.
 # ---------------------------------------------------------------------------
+FIGURE_SOURCES = ["figures/figure1_procedure_flow.jsx", "figures/figure2_chamfer_section.jsx",
+                  "figures/figure3_setup_side_view.jsx"]
+"""Exported copies of the three figure widgets' modules, in document order. The live widget in
+the Claude Docs document is the source of truth; refresh the copy whenever the widget is republished."""
+LIVE_SOURCE = "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)"
 FORMULA_STYLE_NAME = "Code"
 """Paragraph style the export gives a ```latex block."""
 FORMULA_FONT_PT = 11.0
@@ -228,8 +233,10 @@ def outline():
                                  for d in drawings if d.find(".//" + qn("wp:docPr")) is not None)
                 if drawings and not is_formula:
                     figure_number += 1
+                    figure_source = (FIGURE_SOURCES[figure_number - 1] if figure_number <= len(FIGURE_SOURCES)
+                                     else LIVE_SOURCE)
                     elements.append({"id": f"Figure {figure_number}", "kind": "figure", "section": current["id"] if current else "",
-                                     "caption": text, "text": ""})
+                                     "caption": text, "text": "", "source": figure_source})
         elif child.tag == qn("w:tbl"):
             table_number += 1
             table = Table(child, doc)
@@ -250,7 +257,8 @@ def build_manifest() -> dict:
             if re.search(pattern, element["text"]):
                 asserts[invariant["key"]] = invariant["value"]
         record = {k: v for k, v in element.items() if k != "text"}
-        record["source"] = f"Claude Docs {DOC_ID} (live document; edited through the connector)"
+        if record.get("kind") != "figure":
+            record["source"] = LIVE_SOURCE
         record["asserts"] = asserts
         record["refs"] = sorted(set(re.findall(r"Section \d+(?:\.\d+)?|Step \d+\.\d+", element["text"])))
         elements.append(record)

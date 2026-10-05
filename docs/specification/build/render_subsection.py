@@ -84,14 +84,30 @@ def lvl(p):
     if n.startswith("Heading 3"): return 3
     return 0
 
+EMU_PER_POINT = 12700
+"""Word stores picture extents in English Metric Units; 12,700 EMU make one point."""
+TEX_COMMAND_PATTERN = r"\\[A-Za-z]+"
+"""A TeX command in a picture's alt text marks it as a typeset formula, not a figure."""
+
 def para_images(p):
-    uris = []
-    for blip in p._p.findall(".//" + qn("a:blip")):
+    """(data-URI, width in points or None, is_formula) for every picture in the paragraph.
+    The width is the extent Word records for the picture, so the page shows it at the
+    size the document gives it rather than at the bitmap's pixel size."""
+    pictures = []
+    for drawing in p._p.findall(".//" + qn("w:drawing")):
+        blip = drawing.find(".//" + qn("a:blip"))
+        if blip is None:
+            continue
         rid = blip.get(qn("r:embed")) or blip.get(qn("r:link"))
-        if rid:
-            u = rid_to_uri(rid)
-            if u: uris.append(u)
-    return uris
+        u = rid_to_uri(rid) if rid else None
+        if not u:
+            continue
+        extent = drawing.find(".//" + qn("wp:extent"))
+        width_pt = int(extent.get("cx")) / EMU_PER_POINT if extent is not None and extent.get("cx") else None
+        doc_pr = drawing.find(".//" + qn("wp:docPr"))
+        descr = (doc_pr.get("descr") or "") if doc_pr is not None else ""
+        pictures.append((u, width_pt, bool(re.search(TEX_COMMAND_PATTERN, descr))))
+    return pictures
 
 esc = lambda s: s.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;")
 
@@ -102,7 +118,10 @@ def para_html(p):
     st = p.style.name if (p.style and p.style.name) else ""
     cap = re.match(r'(Figure|Fig\.|Table)\s', t.strip())
     if imgs:
-        tag = "".join(f'<img src="{u}"/>' for u in imgs)
+        if all(is_formula for _, _, is_formula in imgs):
+            tag = "".join(f'<img src="{u}"' + (f' style="width:{w:.1f}pt"' if w else "") + "/>" for u, w, _ in imgs)
+            return f'<p class="formula">{tag}</p>'
+        tag = "".join(f'<img src="{u}"' + (f' style="width:{w:.1f}pt"' if w else "") + "/>" for u, w, _ in imgs)
         capt = f'<figcaption>{esc(t)}</figcaption>' if t.strip() else ""
         return f'<figure>{tag}{capt}</figure>'
     if not t.strip(): return ""
@@ -159,6 +178,7 @@ p {{ text-align:justify; margin:0 0 11pt; }}
 ul {{ margin:0 0 11pt 0; padding-left:20pt; }} li {{ margin:0 0 6pt; text-align:justify; }}
 figure {{ margin:14pt 0; text-align:center; page-break-inside:avoid; }}
 figure img {{ max-width:100%; max-height:340pt; border:.5pt solid #ccc; }}
+p.formula {{ text-align:center; margin:4pt 0 11pt; }} p.formula img {{ max-width:100%; }}
 figcaption {{ font-size:9pt; color:#555; font-style:italic; text-align:justify; margin-top:5pt; }}
 .tbl {{ border-collapse:collapse; width:100%; font-family:Arial,sans-serif; font-size:8.5pt; margin:8pt 0 12pt; }}
 .tbl th,.tbl td {{ border:.5pt solid #bbb; padding:3pt 5pt; text-align:left; vertical-align:top; }}
