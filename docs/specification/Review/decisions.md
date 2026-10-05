@@ -113,4 +113,17 @@ Reviewer findings (proposals; nothing executed until the person closes the chunk
   correspondence (asked earlier in chat). If adopted, the T1 row changes to "plane-registration plate = T2" and
   the ChArUco pattern is dropped; the registration method in Section 4 changes with it.
 
-Person's comments: (pending)
+Person's comments (2026-10-05):
+- C03-P1: remove the "Enclosure or blackout curtains, IR light meter" row; the laboratory is enclosed and its lighting
+  is constant. Propagation: the ambient-IR manifest column (Section 9, C10) and any ambient-IR mention in Sections 4
+  and 15 go with it; the R7 note on the IR meter's logging interval is void.
+- C03-P2: the person does not like the pattern on the registration plate and asks whether it can be eliminated
+  (same question as Q1: plane-correspondence registration with the T2 plate). Answer given in chat with the
+  consequences (rotation and camera position stay observable; the camera-Z offset is conditioned by the tilt
+  range; the in-plane position of a target's features relative to the flange is not observable from planes and must
+  come from the dowel datum plus as-built metrology, or from an IR-image localization once per mount).
+- C03-P3: the person questions the need for a large number of disks and holes and asks how many are proposed.
+  Answer given in chat: 17 rungs (0.22 to 55.8 mm at the indicative f_x = 688 px); 17 disks + 17 blank sites +
+  4 post-only sites over T4-S/T4-L, 17 holes + 17 blank sites over T5-S/T5-L, 74 sites in all; reduction options
+  offered (12 rungs keeping √2 only over 0.5–8 mm, or 8 rungs at ratio 2).
+Awaiting the person's decisions on P2 and P3 before closing the chunk.
