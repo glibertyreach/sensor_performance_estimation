@@ -19,7 +19,7 @@ Placeholders in the template (all are replaced; an unknown one fails the build):
     {{FILE_TABLE}}                 the package files with line counts (software appendix)
     {{CLI_HELP:<module>}}          the --help output of python3 -m sensorperf.cli.<module>
     {{VALUE:<field>}}              a CharacterizationParameters field, formatted
-    {{DERIVED:<name>}}             a derived quantity from DERIVED below (counts, totals, dates)
+    {{DERIVED:<name>}}             a derived quantity from derived_values() (counts, station lists, totals, dates)
 
 Outputs
     docs/procedures/performance_test_procedure.md / .docx
@@ -71,6 +71,8 @@ HEADING_PATTERN = re.compile(r"^(#{1,3})\s+(?P<text>.+?)\s*$", re.MULTILINE)
 SECTION_NUMBER_PATTERN = re.compile(r"^(?:Appendix\s+)?(?P<num>[0-9]+(?:\.[0-9]+)*|[A-Z])[.\s]")
 
 sys.path.insert(0, str(REPO_ROOT))
+sys.path.insert(0, str(FIGURES_DIR))
+import figfacts  # noqa: E402  (feature_diameters_text: the figure and the text format the diameters alike)
 
 from sensorperf.acquisition.plan import MIN_POSE_LOG_DECIMALS  # noqa: E402
 from sensorperf.parameters import CharacterizationParameters, SensorGeometry, parameter_table_rows  # noqa: E402
@@ -110,8 +112,36 @@ def default_plan_and_budget(params: CharacterizationParameters, geometry: Sensor
     from sensorperf.acquisition import plan as planning
     rng = np.random.default_rng(0)
     plan = planning.plan_full_session(params, geometry, rng)
-    budget = planning.capture_budget(plan, BUDGET_FRAME_RATE_HZ, params.move_and_settle_time_s)
+    budget = budget_rows(plan, BUDGET_FRAME_RATE_HZ, params.move_and_settle_time_s)
     return plan, budget
+
+
+BUDGET_ROWS = (
+    ("Registration", {"R": None}),
+    ("A main + tilt + sentinels", {"A": None, "S": None}),
+    ("B-HV edges", {"B": None}),
+    ("B-Z ladder + staircase", {"Z": None}),
+    ("C main + field", {"C": None}),
+    ("D main", {"D": ("jitter",)}),
+    ("D extended (0% series)", {"D": ("extended",)}),
+)
+"""The rows of Section 9 of the specification: label and {procedure letter: sub-series or None for all}.
+The robot time of a row is (poses x move-and-settle time + frames / frame rate) / 3600, the planner's own rule
+(sensorperf.acquisition.plan.capture_budget); the totals equal the planner's."""
+
+
+def budget_rows(plan, frame_rate_hz: float, move_settle_s: float) -> list[tuple[str, int, int, float]]:
+    """(label, poses, frames, robot hours) per row of BUDGET_ROWS, from the default plan."""
+    rows = []
+    for label, members in BUDGET_ROWS:
+        chosen = [c for c in plan if c.procedure in members
+                  and (members[c.procedure] is None or c.subseries in members[c.procedure])]
+        if label == "C main + field" and any(c.subseries == "open" for c in chosen):
+            label = "C main + field + open"
+        poses = len(chosen)
+        frames = sum(c.frames for c in chosen)
+        rows.append((label, poses, frames, (poses * move_settle_s + frames / frame_rate_hz) / 3600.0))
+    return rows
 
 
 def budget_table(budget) -> tuple[str, dict]:
@@ -119,11 +149,11 @@ def budget_table(budget) -> tuple[str, dict]:
     lines = ["| Series | Poses | Frames | Robot time (h) |", "|---|---:|---:|---:|"]
     total_poses = total_frames = 0
     total_hours = 0.0
-    for row in budget:
-        lines.append(f"| {row.series} | {row.poses:,} | {row.frames:,} | {row.robot_hours:.2f} |")
-        total_poses += row.poses
-        total_frames += row.frames
-        total_hours += row.robot_hours
+    for label, poses, frames, hours in budget:
+        lines.append(f"| {label} | {poses:,} | {frames:,} | {hours:.2f} |")
+        total_poses += poses
+        total_frames += frames
+        total_hours += hours
     lines.append(f"| **Total** | **{total_poses:,}** | **{total_frames:,}** | **{total_hours:.1f}** |")
     return "\n".join(lines), {"total_poses": total_poses, "total_frames": total_frames,
                               "total_robot_hours": round(total_hours, 1)}
@@ -151,26 +181,70 @@ def cli_help(module: str) -> str:
     """The --help output of a command-line tool, captured in-process."""
     mod = importlib.import_module(f"sensorperf.cli.{module}")
     buffer = io.StringIO()
+    saved_argv0 = sys.argv[0]
+    sys.argv[0] = f"python3 -m sensorperf.cli.{module}"       # argparse prints this as the program name
     try:
         with redirect_stdout(buffer), redirect_stderr(buffer):
             mod.main(["--help"])
     except SystemExit:
         pass
+    finally:
+        sys.argv[0] = saved_argv0
     return buffer.getvalue().rstrip()
 
 
+def _list_text(values) -> str:
+    """Station lists as the document quotes them: 400, 476, 566 (whole millimeters)."""
+    return ", ".join(f"{v:g}" for v in values)
+
+
+def _and_text(values) -> str:
+    """1131, 1345 and 1600."""
+    texts = [f"{v:g}" for v in values]
+    return texts[0] if len(texts) == 1 else ", ".join(texts[:-1]) + " and " + texts[-1]
+
+
 def derived_values(params: CharacterizationParameters, geometry: SensorGeometry, budget_totals: dict) -> dict:
-    ladder = params.diameter_ladder_mm(geometry)
+    ladder = params.z_stations_mm()
+    shape = params.z_shape_stations_mm()
+    reduced = params.z_reduced_stations_mm()
+    zero = params.detection_zero_stations_mm()
+    legacy = tuple(z for z in params.noise_stations_mm() if z not in ladder)
+    diameters = params.feature_diameters_mm(geometry)
+
+    def px_range(diameter: float) -> str:
+        low = geometry.diameter_in_pixels(diameter, params.z_max_mm)
+        high = geometry.diameter_in_pixels(diameter, params.z_min_mm)
+        return f"{low:.2g} to {high:.2g}"
+
     values = {
         "build_date": dt.date.today().isoformat(),
-        "noise_station_count": len(params.noise_stations_mm()),
-        "shape_station_count": len(params.z_shape_stations_mm),
-        "reduced_station_count": len(params.z_reduced_stations_mm),
+        "z_min_mm": int(params.z_min_mm),
+        "z_max_mm": int(params.z_max_mm),
+        "station_count": len(ladder),
+        "shape_station_count": len(shape),
+        "reduced_station_count": len(reduced),
+        "zero_station_count": len(zero),
+        "legacy_depth_count": len(legacy),
+        "ladder_text": _list_text(ladder),
+        "shape_stations_text": _list_text(shape),
+        "reduced_stations_text": _list_text(reduced),
+        "zero_stations_text": _and_text(zero),
+        "legacy_depths_text": _and_text(legacy),
+        "station_ratio_text": "2^(1/4)" if abs(params.z_station_ratio - 2.0 ** 0.25) < 1e-12 else f"{params.z_station_ratio:.4g}",
         "field_position_count": 5,
         "tilt_count": len(params.tilt_angles_deg),
-        "diameter_rung_count": len(ladder),
-        "diameter_min_mm": f"{ladder[0]:.2f}",
-        "diameter_max_mm": f"{ladder[-1]:.1f}",
+        "feature_count": params.feature_count,
+        "level_count": params.feature_count * len(ladder),
+        "feature_diameters": figfacts.feature_diameters_text(diameters),
+        "feature_px_ranges_text": ", ".join(px_range(d) for d in diameters[:-1]) + f" and {px_range(diameters[-1])} px",
+        "feature_min_diameter_mm": f"{diameters[0]:.1f}",
+        "feature_ratio_text": "2 sqrt(2)" if abs(params.feature_ladder_ratio - 2.0 * 2.0 ** 0.5) < 1e-12 else f"{params.feature_ladder_ratio:.4g}",
+        "blank_site_count": params.blank_sites_per_plate,
+        "post_site_count": params.post_sites_per_plate,
+        "isolation_mm_at_z_max": f"{params.feature_isolation_px * geometry.pixel_footprint_mm(params.z_max_mm):.0f}",
+        "detection_trials_per_level": params.detection_trials_per_level,
+        "detection_zero_trials": params.detection_zero_trials,
         "zstep_rung_count": len(params.z_step_ladder_mm),
         "zstep_smallest_mm": f"{min(params.z_step_ladder_mm):g}",
         "zstep_largest_mm": f"{max(params.z_step_ladder_mm):g}",
@@ -260,18 +334,65 @@ def figure_index(text: str) -> str:
 # Review manifest and ledger
 # ---------------------------------------------------------------------------
 INVARIANTS = [
-    {"name": "Noise station count agrees everywhere", "key": "noise_station_count", "phrase": "noise station"},
+    {"name": "Station count of the ladder agrees everywhere", "key": "station_count", "phrase": "stations of the ladder"},
     {"name": "Shape station count agrees everywhere", "key": "shape_station_count", "phrase": "shape station"},
+    {"name": "Reduced station count agrees everywhere", "key": "reduced_station_count", "phrase": "reduced station"},
+    {"name": "Count of the farthest (extended-trial) stations agrees everywhere", "key": "zero_station_count",
+     "phrase": "farthest station"},
     {"name": "Field position count agrees everywhere", "key": "field_position_count", "phrase": "field position"},
-    {"name": "Diameter rung count agrees everywhere", "key": "diameter_rung_count", "phrase": "diameter"},
+    {"name": "Features per plate agree everywhere", "key": "feature_count", "phrase": "features per plate"},
+    {"name": "Feature diameters agree everywhere", "key": "feature_diameters", "pattern": "{value}"},
+    {"name": "Blank sites per plate agree everywhere", "key": "blank_site_count", "phrase": "blank sites per plate"},
     {"name": "Z-step rung count agrees everywhere", "key": "zstep_rung_count", "phrase": "step size"},
+    {"name": "Trials per feature and station agree everywhere", "key": "detection_trials_per_level",
+     "phrase": "trials per feature and station"},
+    {"name": "Extended-series trials agree everywhere", "key": "detection_zero_trials", "pattern": "{value} trials"},
+    {"name": "Working range minimum agrees everywhere", "key": "z_min_mm", "pattern": "{value} mm"},
+    {"name": "Working range maximum agrees everywhere", "key": "z_max_mm", "pattern": "{value} mm"},
     {"name": "Total planned poses agree everywhere", "key": "total_poses"},
     {"name": "Total planned frames agree everywhere", "key": "total_frames"},
     {"name": "Total robot hours agree everywhere", "key": "total_robot_hours"},
     {"name": "Frames per noise station agree everywhere", "key": "noise_station_frames"},
     {"name": "Sentinel frames agree everywhere", "key": "sentinel_frames"},
 ]
-"""The shared counts the gate proves consistent. A phrase turns on the prose-drift check."""
+"""The shared numbers the gate proves consistent. A phrase (the counted noun) turns on the prose-drift check of the
+gate; a pattern ({value} is replaced by the value) only records which sections quote the number."""
+
+STALE_TERMS = (
+    (r"\bT1\b", "the registration plate T1 no longer exists"),
+    (r"ChArUco|circle-grid", "no pattern plate"),
+    (r"fiducial", "registration is by plane correspondence on T2"),
+    (r"T4-S|T4-L|T5-S|T5-L", "one disk plate T4 and one cutout plate T5"),
+    (r"500 to 1000|500\u20131000|500-1000", "the working range is 400 to 1600 mm"),
+    (r"\b11 (?:Z |noise )?stations", "one ladder of 9 stations"),
+    (r"\b17\b (?:diameter|rung|level)", "the diameter ladder of 17 rungs is gone"),
+    (r"DIAMETER_LADDER|DETECTION_LEVELS|DETECTION_FINE_LADDER", "removed parameters"),
+    (r"pilot D_?50|pilot D_?0", "no pilot-based level selection"),
+    (r"continuous-angle", "the continuous-angle variant is removed"),
+    (r"ambient IR|IR light meter", "the laboratory is enclosed with constant lighting"),
+    (r"enclosure|blackout", "the laboratory is enclosed with constant lighting"),
+    (r"\b750 mm|Z0750", "no station at 750 mm"),
+    (r"\bdial\b", "the dial indicator is not used"),
+)
+"""Terms of the old design that must not survive in the rendered Markdown (checked at every build)."""
+
+
+ALLOWED_STALE_LINES = (
+    r"Design change: the specification of 2026-10-04 used a dial indicator",   # history of the Z-step truth, section 8
+    r"\{fiducial,planes\}|no pattern needed\); fiducial:",                      # the register tool's own --help text
+)
+"""Lines where a stale term is legitimate, with the reason in the comment (reported in the build summary)."""
+
+
+def stale_term_hits(text: str) -> list[str]:
+    hits = []
+    for number, line in enumerate(text.splitlines(), start=1):
+        if any(re.search(allowed, line) for allowed in ALLOWED_STALE_LINES):
+            continue
+        for pattern, why in STALE_TERMS:
+            for match in re.finditer(pattern, line):
+                hits.append(f"line {number}: {match.group(0)!r} ({why}): {line.strip()[:110]}")
+    return hits
 
 
 def section_elements(text: str, derived: dict) -> list[dict]:
@@ -290,7 +411,10 @@ def section_elements(text: str, derived: dict) -> list[dict]:
         for invariant in INVARIANTS:
             value = derived.get(invariant["key"])
             phrase = invariant.get("phrase")
+            pattern = invariant.get("pattern")
             if phrase and re.search(rf"\b{value}\b[^.\n]{{0,40}}{re.escape(phrase)}", body):
+                asserts[invariant["key"]] = value
+            elif pattern and re.search(rf"(?<![\d.]){re.escape(pattern.format(value=value))}", body):
                 asserts[invariant["key"]] = value
         if "{{BUDGET" in body or "Robot time (h)" in body:
             for key_name in ("total_poses", "total_frames", "total_robot_hours"):
@@ -404,16 +528,19 @@ def main(argv: list[str] | None = None) -> int:
     text = render(template, params, geometry, budget, derived)
     MARKDOWN_PATH.write_text(text, encoding="utf-8")
     print(f"wrote {MARKDOWN_PATH}")
+    stale = stale_term_hits(text)
+    for hit in stale:
+        print("STALE:", hit)
     write_manifest(text, derived)
     print(f"wrote {MANIFEST_PATH}")
     if args.no_docx:
-        return 0
+        return 1 if stale else 0
     baseline = latest_baseline()
     build_docx()
     print(f"wrote {DOCX_PATH}")
-    status = 0
+    status = 1 if stale else 0
     if not args.no_gate:
-        status = run_gate(baseline, args.intended)
+        status = run_gate(baseline, args.intended) or status
     if not args.no_baseline:
         print(f"baseline {snapshot_baseline()}")
     return status

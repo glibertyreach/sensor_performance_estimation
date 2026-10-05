@@ -78,7 +78,7 @@ def draw_ladder(ax) -> int:
     ax.set_xlim(-2, len(visits) + 1)
     ax.set_xlabel("visit number (A, B, A, B, ... for each step size in turn)", fontsize=9)
     ax.set_ylabel("commanded offset from Z0 (mm, symmetric-log scale)", fontsize=9)
-    ax.set_title(f"(a) step ladder: {len(PARAMS.z_step_ladder_mm)} step sizes (labels, mm), {PARAMS.z_step_repeats} ABAB cycles each",
+    ax.set_title(f"(a) step ladder at one Z0: {len(PARAMS.z_step_ladder_mm)} step sizes (labels, mm), {PARAMS.z_step_repeats} ABAB cycles each",
                  fontsize=9.5)
     ax.text(0.99, 0.03, f"every visit: {PARAMS.frames_per_zstep_pose} frames",
             transform=ax.transAxes, ha="right", fontsize=7.5, color=GRAY)
@@ -87,7 +87,7 @@ def draw_ladder(ax) -> int:
 
 
 def draw_staircase(ax) -> None:
-    z0 = PARAMS.z_reference_mm
+    z0 = PARAMS.z_reference_mm       # a reduced station (400, 800, 1600 mm); the middle one is drawn
     quantum = GEOMETRY.depth_quantum_mm(INDICATIVE_QUANTUM_PX, z0)
     step = quantum / PARAMS.z_staircase_subdivision
     count = int(round(PARAMS.z_staircase_quanta * PARAMS.z_staircase_subdivision)) + 1
@@ -100,7 +100,7 @@ def draw_staircase(ax) -> None:
                 color=GRAY, va="bottom", ha="right")
     ax.set_xlabel("step number (one visit per step)", fontsize=9)
     ax.set_ylabel("commanded offset from Z0 (mm)", fontsize=9)
-    ax.set_title(f"(b) fine staircase at Z0 = {z0:g} mm",
+    ax.set_title(f"(b) fine staircase at Z0 = {z0:g} mm (one of the reduced stations)",
                  fontsize=9.5)
     ax.text(0.02, 0.88, f"steps of one expected quantum / {PARAMS.z_staircase_subdivision};\nexpected quantum q Z^2 / k = {quantum:.2f} mm (indicative q);\n"
             f"{PARAMS.z_staircase_frames} frames per step",

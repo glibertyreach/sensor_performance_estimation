@@ -2,9 +2,11 @@
 fig_stations.png -- where the targets are put: the Z stations (left) and the positions in the image
 (right).
 
-Left panel: the Z axis from Z_MIN to Z_MAX with three rows of ticks: the noise stations of series A
-(Z_MIN to Z_MAX in steps of Z_NOISE_STEP_MM), the shape stations of B, C and D, and the reduced
-stations used for the slow tests (B-Z, the D 0 percent series, the A tilt sub-series).
+Left panel: the Z axis from Z_MIN to Z_MAX with five rows of ticks: the one geometric ladder of
+stations (Z_STATION_RATIO, nine stations) that A, C and D visit, the two legacy depths that A adds,
+the shape stations of B-HV (every second station), the reduced stations of B-Z and the A tilt
+sub-series (every fourth station), and the farthest stations that carry the extended D trials. The
+reference station Z_REFERENCE_MM is marked by a dotted line.
 
 Right panel: the image rectangle of the indicative sensor geometry with the five field positions
 (code 0 at the center, codes 1 to 4 at the corners, offset by FIELD_OFFSET_FRACTION of the half
@@ -38,7 +40,7 @@ PARAMS = CharacterizationParameters()
 GEOMETRY = SensorGeometry.indicative()
 
 OUTPUT_DPI = 200
-FIGURE_SIZE_IN = (13.0, 4.5)
+FIGURE_SIZE_IN = (13.0, 5.2)
 FIGURE_NAME = "fig_stations"
 
 # Okabe-Ito palette.
@@ -51,42 +53,45 @@ VERMILLION = "#D55E00"
 REDDISH_PURPLE = "#CC79A7"
 GRAY = "#595959"
 
-ROW_Y = {"noise": 3.0, "shape": 2.0, "reduced": 1.0}
+ROW_Y = {"ladder": 5.0, "legacy": 4.0, "shape": 3.0, "reduced": 2.0, "zero": 1.0}
 TICK_HALF_HEIGHT = 0.28
 INSET_PIXELS = 4            # the inset shows this many pixels either side of the offset square
 FIELD_MARKER_SIZE = 9
 
 
-def draw_z_stations(ax) -> tuple[int, int, int]:
-    noise = PARAMS.noise_stations_mm()
-    shape = PARAMS.z_shape_stations_mm
-    reduced = PARAMS.z_reduced_stations_mm
-    rows = (("noise", noise, BLUE, "A: noise stations"),
-            ("shape", shape, BLUISH_GREEN, "B, C, D: shape stations"),
-            ("reduced", reduced, VERMILLION, "slow tests: reduced stations"))
+def draw_z_stations(ax) -> dict[str, int]:
+    ladder = PARAMS.z_stations_mm()
+    legacy = tuple(z for z in PARAMS.noise_stations_mm() if z not in ladder)
+    shape = PARAMS.z_shape_stations_mm()
+    reduced = PARAMS.z_reduced_stations_mm()
+    zero = PARAMS.detection_zero_stations_mm()
+    rows = (("ladder", ladder, BLUE, f"A, C, D: ladder\n({len(ladder)} stations, ratio 2^(1/4))"),
+            ("legacy", legacy, REDDISH_PURPLE, f"A: legacy depths\n({len(legacy)} extra stations)"),
+            ("shape", shape, BLUISH_GREEN, f"B-HV: shape stations\n(every {PARAMS.z_shape_station_stride}nd, {len(shape)} stations)"),
+            ("reduced", reduced, VERMILLION, f"B-Z, A tilt: reduced stations\n(every {PARAMS.z_reduced_station_stride}th, {len(reduced)} stations)"),
+            ("zero", zero, ORANGE, f"D extended trials:\n{len(zero)} farthest stations"))
     for key, values, color, label in rows:
         y = ROW_Y[key]
         ax.plot([PARAMS.z_min_mm, PARAMS.z_max_mm], [y, y], color=GRAY, lw=0.8)
         for z in values:
             ax.plot([z, z], [y - TICK_HALF_HEIGHT, y + TICK_HALF_HEIGHT], color=color, lw=2.4)
-        ax.text(PARAMS.z_min_mm - 18, y, f"{label}\n({len(values)} stations)", ha="right", va="center",
-                fontsize=8.5, color=color)
-    for z in shape:
-        ax.text(z, ROW_Y["shape"] - TICK_HALF_HEIGHT - 0.05, f"{z:g}", ha="center", va="top", fontsize=7, color=BLUISH_GREEN)
-    for z in reduced:
-        ax.text(z, ROW_Y["reduced"] - TICK_HALF_HEIGHT - 0.05, f"{z:g}", ha="center", va="top", fontsize=7, color=VERMILLION)
-    for z in noise:
-        ax.text(z, ROW_Y["noise"] + TICK_HALF_HEIGHT + 0.05, f"{z:g}", ha="center", va="bottom", fontsize=6.5, color=BLUE)
+            ax.text(z, y + TICK_HALF_HEIGHT + 0.04, f"{z:g}", ha="center", va="bottom", fontsize=6.5, color=color)
+        ax.text(PARAMS.z_min_mm - 18, y, label, ha="right", va="center", fontsize=8, color=color)
+    z_ref = PARAMS.z_reference_mm
+    ax.plot([z_ref, z_ref], [ROW_Y["zero"] - 0.45, ROW_Y["ladder"] + 0.75], color=BLACK, lw=0.9, linestyle=":")
+    ax.text(z_ref + 12, ROW_Y["zero"] - 0.42, f"Z_REFERENCE_MM = {z_ref:g}: warm-up, sentinels, re-mount check,\n"
+            "C field sub-series, open background, D post check", fontsize=7.5, color=BLACK, va="bottom", ha="left")
     ax.set_xlim(PARAMS.z_min_mm - 330, PARAMS.z_max_mm + 40)
-    ax.set_xticks(range(int(PARAMS.z_min_mm), int(PARAMS.z_max_mm) + 1, 100))
-    ax.set_ylim(0.2, 3.8)
+    ax.set_xticks(range(int(PARAMS.z_min_mm), int(PARAMS.z_max_mm) + 1, 200))
+    ax.set_ylim(ROW_Y["zero"] - 0.6, ROW_Y["ladder"] + 1.0)
     ax.set_xlabel("Z (mm), along the left IR camera's optical axis", fontsize=9)
     ax.set_yticks([])
     ax.spines["bottom"].set_bounds(PARAMS.z_min_mm, PARAMS.z_max_mm)
     for side in ("left", "right", "top"):
         ax.spines[side].set_visible(False)
     ax.set_title("(a) Z stations", fontsize=10)
-    return len(noise), len(shape), len(reduced)
+    return {"station_count": len(ladder), "shape_station_count": len(shape), "reduced_station_count": len(reduced),
+            "zero_station_count": len(zero), "legacy_depth_count": len(legacy)}
 
 
 def field_positions_px() -> dict[int, tuple[float, float]]:
@@ -151,14 +156,13 @@ def draw_field_positions(ax) -> int:
 def main() -> None:
     fig, (ax_z, ax_f) = plt.subplots(1, 2, figsize=FIGURE_SIZE_IN, dpi=OUTPUT_DPI,
                                      gridspec_kw={"width_ratios": [1.15, 1.0]})
-    noise, shape, reduced = draw_z_stations(ax_z)
+    counts = draw_z_stations(ax_z)
     positions = draw_field_positions(ax_f)
     fig.subplots_adjust(left=0.05, right=0.99, top=0.92, bottom=0.12, wspace=0.12)
     out = Path(__file__).resolve().parent / f"{FIGURE_NAME}.png"
     fig.savefig(out, dpi=OUTPUT_DPI, facecolor="white")
     plt.close(fig)
-    figfacts.emit(FIGURE_NAME, noise_station_count=noise, shape_station_count=shape, field_position_count=positions,
-                  reduced_station_count=reduced)
+    figfacts.emit(FIGURE_NAME, field_position_count=positions, **counts)
     print(f"wrote {out}")
 
 

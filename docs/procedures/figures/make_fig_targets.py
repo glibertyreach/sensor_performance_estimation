@@ -1,10 +1,10 @@
 """
 fig_targets.png -- front views, to one common scale, of the seven targets the technician mounts
-for the edge, noise, area and detection series: T2, T3a, T3b, T4-S, T4-L, T5-S, T5-L.
+for the edge, noise, area and detection series: T2, T3a, T3b, T4 and T5.
 
 The layouts are not drawn by hand. They come from make_standard_target_set(), called with the
 default CharacterizationParameters and the indicative SensorGeometry, so the plate sizes, the
-diameter ladder, the blank sites, the post sites and the 5 degree slant are exactly those the
+feature ladder, the blank sites, the post sites and the 5 degree slant are exactly those the
 analysis code will read from targets.json. The real layout is fixed by the fabricator from the
 final sensor geometry (the f_x value is unconfirmed); this figure shows the structure.
 
@@ -36,8 +36,8 @@ from sensorperf.geometry.targets import (  # noqa: E402
     make_standard_target_set,
 )
 from sensorperf.parameters import (  # noqa: E402
-    CharacterizationParameters, SensorGeometry, TARGET_CUTOUTS_LARGE, TARGET_CUTOUTS_SMALL, TARGET_DISKS_LARGE,
-    TARGET_DISKS_SMALL, TARGET_NOISE_PLATE, TARGET_RAISED_SQUARE, TARGET_SQUARE_WINDOW,
+    CharacterizationParameters, SensorGeometry, TARGET_CUTOUTS, TARGET_DISKS, TARGET_NOISE_PLATE,
+    TARGET_RAISED_SQUARE, TARGET_SQUARE_WINDOW,
 )
 
 PARAMS = CharacterizationParameters()
@@ -63,15 +63,13 @@ BACK_GRAY = "#D9D9D9"
 FRONT_ALPHA = 0.55
 
 ROW_ONE = (TARGET_NOISE_PLATE, TARGET_RAISED_SQUARE, TARGET_SQUARE_WINDOW)
-ROW_TWO = (TARGET_DISKS_SMALL, TARGET_DISKS_LARGE, TARGET_CUTOUTS_SMALL, TARGET_CUTOUTS_LARGE)
+ROW_TWO = (TARGET_DISKS, TARGET_CUTOUTS)
 TITLES = {
-    TARGET_NOISE_PLATE: "T2 noise plate",
+    TARGET_NOISE_PLATE: "T2 noise and registration plate",
     TARGET_RAISED_SQUARE: "T3a raised square",
     TARGET_SQUARE_WINDOW: "T3b square window",
-    TARGET_DISKS_SMALL: "T4-S small disks",
-    TARGET_DISKS_LARGE: "T4-L large disks",
-    TARGET_CUTOUTS_SMALL: "T5-S small cutouts",
-    TARGET_CUTOUTS_LARGE: "T5-L large cutouts",
+    TARGET_DISKS: "T4 disk plate",
+    TARGET_CUTOUTS: "T5 cutout plate",
 }
 
 
@@ -133,13 +131,17 @@ def describe(target) -> str:
         text += f"\nsquare {square.diameter_mm:g} mm, slant {square.rotation_deg:g} deg"
     elif target.features:
         sizes = [f.diameter_mm for f in target.features if f.kind in (FEATURE_DISK, FEATURE_CUTOUT)]
-        text += f"\n{len(sizes)} diameters, {min(sizes):.2f} to {max(sizes):.1f} mm"
+        blanks = [f for f in target.features if f.kind == FEATURE_BLANK]
+        posts = [f for f in target.features if f.kind == FEATURE_POST]
+        text += f"\n{len(sizes)} features: {figfacts.feature_diameters_text(sorted(sizes))}\n{len(blanks)} blank sites"
+        if posts:
+            text += f", {len(posts)} post-only site"
     return text
 
 
 def main() -> None:
     targets = make_standard_target_set(PARAMS, GEOMETRY)
-    ladder = PARAMS.diameter_ladder_mm(GEOMETRY)
+    diameters = PARAMS.feature_diameters_mm(GEOMETRY)
 
     def panel_size_mm(target_id):
         target = targets.targets[target_id]
@@ -173,7 +175,10 @@ def main() -> None:
     out = Path(__file__).resolve().parent / f"{FIGURE_NAME}.png"
     fig.savefig(out, dpi=OUTPUT_DPI, facecolor="white")
     plt.close(fig)
-    figfacts.emit(FIGURE_NAME, diameter_rung_count=len(ladder), target_panel_count=len(ROW_ONE) + len(ROW_TWO))
+    blank_counts = {len([f for f in targets.targets[i].features if f.kind == FEATURE_BLANK]) for i in ROW_TWO}
+    assert blank_counts == {PARAMS.blank_sites_per_plate}, blank_counts
+    figfacts.emit(FIGURE_NAME, feature_count=len(diameters), feature_diameters=figfacts.feature_diameters_text(diameters),
+                  blank_site_count=PARAMS.blank_sites_per_plate, target_panel_count=len(ROW_ONE) + len(ROW_TWO))
     print(f"wrote {out}")
 
 

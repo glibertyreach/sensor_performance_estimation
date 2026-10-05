@@ -1,11 +1,11 @@
 {
-"pose_count": 10615,
+"pose_count": 7292,
 "poses_series_A": 80,
 "poses_series_B": 520,
-"poses_series_C": 1360,
-"poses_series_D": 8160,
+"poses_series_C": 1160,
+"poses_series_D": 5040,
 "poses_series_R": 30,
-"poses_series_S": 12,
+"poses_series_S": 9,
 "poses_series_Z": 453,
-"total_poses": 10615
+"total_poses": 7292
 }

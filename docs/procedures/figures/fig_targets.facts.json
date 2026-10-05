@@ -1,4 +1,6 @@
 {
-"diameter_rung_count": 17,
-"target_panel_count": 7
+"blank_site_count": 3,
+"feature_count": 3,
+"feature_diameters": "7.0, 19.7 and 55.8 mm",
+"target_panel_count": 5
 }

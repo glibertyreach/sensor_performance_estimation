@@ -1,15 +1,23 @@
 {
   "document": "performance_test_procedure.docx",
-  "built": "2026-10-05T12:39:38",
+  "built": "2026-10-05T15:12:10",
   "invariant_values": {
-    "noise_station_count": 11,
+    "station_count": 9,
     "shape_station_count": 5,
+    "reduced_station_count": 3,
+    "zero_station_count": 3,
     "field_position_count": 5,
-    "diameter_rung_count": 17,
+    "feature_count": 3,
+    "feature_diameters": "7.0, 19.7 and 55.8 mm",
+    "blank_site_count": 3,
     "zstep_rung_count": 6,
-    "total_poses": 10615,
-    "total_frames": 49350,
-    "total_robot_hours": 10.2,
+    "detection_trials_per_level": 60,
+    "detection_zero_trials": 300,
+    "z_min_mm": 400,
+    "z_max_mm": 1600,
+    "total_poses": 7292,
+    "total_frames": 44140,
+    "total_robot_hours": 7.3,
     "noise_station_frames": 100,
     "sentinel_frames": 30
   },
@@ -48,7 +56,8 @@
       "asserts": {},
       "refs": [
         "Figure 2",
-        "Table 1"
+        "Table 1",
+        "\u00a73"
       ]
     },
     {
@@ -57,12 +66,16 @@
       "source": "performance_test_procedure.template.md",
       "title": "2. Targets",
       "asserts": {
-        "diameter_rung_count": 17
+        "feature_count": 3,
+        "feature_diameters": "7.0, 19.7 and 55.8 mm",
+        "z_min_mm": 400
       },
       "refs": [
         "Figure 3",
         "Table 2",
-        "\u00a74"
+        "\u00a714",
+        "\u00a74",
+        "\u00a79"
       ]
     },
     {
@@ -83,7 +96,8 @@
       "title": "The as-built record",
       "asserts": {},
       "refs": [
-        "Table 3"
+        "Table 3",
+        "\u00a74"
       ]
     },
     {
@@ -91,7 +105,10 @@
       "kind": "section",
       "source": "performance_test_procedure.template.md",
       "title": "3. Before anything else",
-      "asserts": {},
+      "asserts": {
+        "z_min_mm": 400,
+        "z_max_mm": 1600
+      },
       "refs": [
         "\u00a75",
         "\u00a76"
@@ -106,7 +123,7 @@
       "refs": [
         "Figure 2",
         "\u00a711",
-        "\u00a715",
+        "\u00a72",
         "\u00a75"
       ]
     },
@@ -116,9 +133,12 @@
       "source": "performance_test_procedure.template.md",
       "title": "5. The plan",
       "asserts": {
-        "noise_station_count": 11,
+        "station_count": 9,
         "shape_station_count": 5,
-        "field_position_count": 5
+        "reduced_station_count": 3,
+        "zero_station_count": 3,
+        "field_position_count": 5,
+        "z_max_mm": 1600
       },
       "refs": [
         "Figure 1",
@@ -142,8 +162,11 @@
       "source": "performance_test_procedure.template.md",
       "title": "6. Series A: the noise plate",
       "asserts": {
-        "noise_station_count": 11,
-        "field_position_count": 5
+        "station_count": 9,
+        "reduced_station_count": 3,
+        "field_position_count": 5,
+        "z_min_mm": 400,
+        "z_max_mm": 1600
       },
       "refs": [
         "Figure 5",
@@ -157,7 +180,10 @@
       "kind": "section",
       "source": "performance_test_procedure.template.md",
       "title": "7. Series B: the edge targets",
-      "asserts": {},
+      "asserts": {
+        "shape_station_count": 5,
+        "z_max_mm": 1600
+      },
       "refs": [
         "\u00a74"
       ]
@@ -168,7 +194,9 @@
       "source": "performance_test_procedure.template.md",
       "title": "8. Series Z: depth steps",
       "asserts": {
-        "zstep_rung_count": 6
+        "reduced_station_count": 3,
+        "zstep_rung_count": 6,
+        "z_max_mm": 1600
       },
       "refs": [
         "Figure 7",
@@ -180,7 +208,9 @@
       "kind": "section",
       "source": "performance_test_procedure.template.md",
       "title": "9. Series C: disk and cutout areas",
-      "asserts": {},
+      "asserts": {
+        "station_count": 9
+      },
       "refs": [
         "\u00a710",
         "\u00a74",
@@ -192,7 +222,13 @@
       "kind": "section",
       "source": "performance_test_procedure.template.md",
       "title": "10. Series D: detection trials",
-      "asserts": {},
+      "asserts": {
+        "station_count": 9,
+        "zero_station_count": 3,
+        "detection_trials_per_level": 60,
+        "detection_zero_trials": 300,
+        "z_max_mm": 1600
+      },
       "refs": []
     },
     {
@@ -222,9 +258,9 @@
       "source": "performance_test_procedure.template.md",
       "title": "13. Data layout, deliverables, and the capture budget",
       "asserts": {
-        "total_poses": 10615,
-        "total_frames": 49350,
-        "total_robot_hours": 10.2
+        "total_poses": 7292,
+        "total_frames": 44140,
+        "total_robot_hours": 7.3
       },
       "refs": [
         "Figure 8",
@@ -247,7 +283,9 @@
       "kind": "section",
       "source": "performance_test_procedure.template.md",
       "title": "15. Things that spoil a session",
-      "asserts": {},
+      "asserts": {
+        "z_max_mm": 1600
+      },
       "refs": [
         "Table 8",
         "\u00a710",
@@ -260,7 +298,10 @@
       "kind": "section",
       "source": "performance_test_procedure.template.md",
       "title": "Appendix A. Parameters",
-      "asserts": {},
+      "asserts": {
+        "zero_station_count": 3,
+        "z_max_mm": 1600
+      },
       "refs": [
         "Table 9",
         "\u00a73"
@@ -302,8 +343,10 @@
       "source": "performance_test_procedure.template.md",
       "title": "Appendix D. Figure index",
       "asserts": {
-        "noise_station_count": 11,
+        "station_count": 9,
         "shape_station_count": 5,
+        "reduced_station_count": 3,
+        "zero_station_count": 3,
         "field_position_count": 5,
         "zstep_rung_count": 6
       },
@@ -313,8 +356,11 @@
       "id": "Figure 1",
       "kind": "figure",
       "source": "figures/make_fig_procedure_flow.py",
-      "caption": "Procedure order and data dependencies. Shaded boxes are captures and open boxes are analyses. Registration poses feed every analysis, the noise level from A sets the thresholds of B, C and D, the edge spread function from B predicts the area bias measured in C, and E reuses the B and C frames. The quick-look count on C data sets the D levels (dashed).",
-      "asserts": {},
+      "caption": "Procedure order and data dependencies. Shaded boxes are captures and open boxes are analyses. Registration poses feed every analysis, the noise level from A sets the thresholds of B, C and D, the edge spread function from B predicts the area bias measured in C, and E reuses the B and C frames. The quick-look count on C data checks the disk posts before D (dashed).",
+      "asserts": {
+        "field_position_count": 5,
+        "station_count": 9
+      },
       "refs": [],
       "facts": "figures/fig_procedure_flow.facts.json"
     },
@@ -322,8 +368,11 @@
       "id": "Figure 2",
       "kind": "figure",
       "source": "figures/make_fig_setup.py",
-      "caption": "The experimental setup, side view. The sensor stands on its own rigid stand, separate from the robot. The robot carries the target on the dowel-pinned adapter anywhere between Z_MIN and Z_MAX. The enclosure holds the ambient IR constant.",
-      "asserts": {},
+      "caption": "The experimental setup, side view. The sensor stands on its own rigid stand, separate from the robot. The robot carries the target on the dowel-pinned adapter anywhere between Z_MIN and Z_MAX. The laboratory is enclosed and its lighting is constant.",
+      "asserts": {
+        "z_max_mm": 1600.0,
+        "z_min_mm": 400.0
+      },
       "refs": [],
       "facts": "figures/fig_setup.facts.json"
     },
@@ -331,9 +380,11 @@
       "id": "Figure 3",
       "kind": "figure",
       "source": "figures/make_fig_targets.py",
-      "caption": "Front views of T2, T3a, T3b, T4-S, T4-L, T5-S and T5-L to one scale, drawn from the code's own target definitions with the indicative sensor geometry. The real layout depends on the final focal length (unconfirmed). Gray is the back plate, dashed circles are blank sites, vermillion dots are post-only control sites.",
+      "caption": "Front views of T2, T3a, T3b, T4 and T5 to one scale, drawn from the code's own target definitions with the indicative sensor geometry. The real layout depends on the final focal length (unconfirmed). Gray is the back plate, dashed circles are blank sites, vermillion dots are post-only control sites.",
       "asserts": {
-        "diameter_rung_count": 17
+        "blank_site_count": 3,
+        "feature_count": 3,
+        "feature_diameters": "7.0, 19.7 and 55.8 mm"
       },
       "refs": [],
       "facts": "figures/fig_targets.facts.json"
@@ -351,11 +402,13 @@
       "id": "Figure 5",
       "kind": "figure",
       "source": "figures/make_fig_stations.py",
-      "caption": "Left: the 11 noise stations of A, the 5 shape stations of B, C and D, and the 3 reduced stations of the slow tests, along Z. Right: the 5 field positions (codes 0 to 4) in the image, and the square span of the random lateral offsets (phase jitter) at one corner, true size and magnified.",
+      "caption": "Left: the 9 stations of the ladder, used by A, C and D (A adds the 2 legacy depths), the 5 shape stations of B, the 3 reduced stations of Z and the tilt sub-series, and the 3 farthest stations of the extended D trials, along Z; the dotted line is the reference station. Right: the 5 field positions (codes 0 to 4) in the image, and the square span of the random lateral offsets (phase jitter) at one corner, true size and magnified.",
       "asserts": {
         "field_position_count": 5,
-        "noise_station_count": 11,
-        "shape_station_count": 5
+        "reduced_station_count": 3,
+        "shape_station_count": 5,
+        "station_count": 9,
+        "zero_station_count": 3
       },
       "refs": [],
       "facts": "figures/fig_stations.facts.json"
@@ -366,7 +419,7 @@
       "source": "figures/make_fig_plan.py",
       "caption": "The default full plan: target centers in the sensor frame, side view (H against Z) and front view (H against V), colored by series, with the frustum. Each cloud around a station is a set of random lateral offsets.",
       "asserts": {
-        "total_poses": 10615
+        "total_poses": 7292
       },
       "refs": [],
       "facts": "figures/fig_plan.facts.json"
@@ -474,9 +527,9 @@
   ],
   "invariants": [
     {
-      "name": "Noise station count agrees everywhere",
-      "key": "noise_station_count",
-      "phrase": "noise station"
+      "name": "Station count of the ladder agrees everywhere",
+      "key": "station_count",
+      "phrase": "stations of the ladder"
     },
     {
       "name": "Shape station count agrees everywhere",
@@ -484,19 +537,59 @@
       "phrase": "shape station"
     },
     {
+      "name": "Reduced station count agrees everywhere",
+      "key": "reduced_station_count",
+      "phrase": "reduced station"
+    },
+    {
+      "name": "Count of the farthest (extended-trial) stations agrees everywhere",
+      "key": "zero_station_count",
+      "phrase": "farthest station"
+    },
+    {
       "name": "Field position count agrees everywhere",
       "key": "field_position_count",
       "phrase": "field position"
     },
     {
-      "name": "Diameter rung count agrees everywhere",
-      "key": "diameter_rung_count",
-      "phrase": "diameter"
+      "name": "Features per plate agree everywhere",
+      "key": "feature_count",
+      "phrase": "features per plate"
+    },
+    {
+      "name": "Feature diameters agree everywhere",
+      "key": "feature_diameters",
+      "pattern": "{value}"
+    },
+    {
+      "name": "Blank sites per plate agree everywhere",
+      "key": "blank_site_count",
+      "phrase": "blank sites per plate"
     },
     {
       "name": "Z-step rung count agrees everywhere",
       "key": "zstep_rung_count",
       "phrase": "step size"
+    },
+    {
+      "name": "Trials per feature and station agree everywhere",
+      "key": "detection_trials_per_level",
+      "phrase": "trials per feature and station"
+    },
+    {
+      "name": "Extended-series trials agree everywhere",
+      "key": "detection_zero_trials",
+      "pattern": "{value} trials"
+    },
+    {
+      "name": "Working range minimum agrees everywhere",
+      "key": "z_min_mm",
+      "pattern": "{value} mm"
+    },
+    {
+      "name": "Working range maximum agrees everywhere",
+      "key": "z_max_mm",
+      "pattern": "{value} mm"
     },
     {
       "name": "Total planned poses agree everywhere",

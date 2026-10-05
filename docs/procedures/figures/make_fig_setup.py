@@ -10,7 +10,8 @@ What to see:
     - Z runs along the left IR camera's optical axis from its optical center; V is vertical in
       this view and H points into the page;
     - the frustum is the indicative field of view of the left camera;
-    - the enclosure (or blackout curtains) surrounds everything.
+    - the laboratory is enclosed and its lighting constant (dashed outline); the temperature loggers of the
+      sensor housing and of the air run every TEMPERATURE_LOG_INTERVAL_MIN.
 The robot arm is a sketch and is not to scale; the Z axis, the target and the frustum are.
 
     python3 docs/procedures/figures/make_fig_setup.py      (from the repository root)
@@ -63,7 +64,7 @@ ROBOT_BASE_SIZE_MM = (170.0, 70.0)
 ROBOT_ELBOW_MM = (1380.0, 300.0)
 ROBOT_SHOULDER_MM = (1560.0, -250.0)
 LINK_WIDTH_PT = 14
-ENCLOSURE_MARGIN_MM = (170.0, 40.0)
+LAB_MARGIN_MM = (170.0, 40.0)
 
 
 def target_x(z_mm: float) -> float:
@@ -133,7 +134,7 @@ def main() -> None:
     for z in (z_min, z_max):
         draw_target(ax, z, half_plate, ghost=True)
     draw_target(ax, z_ref, half_plate, ghost=False)
-    ax.text(z_ref - 20, half_plate - 10, f"target (T2 shown)\nat Z = {z_ref:g} mm", ha="right",
+    ax.text(z_ref - 20, half_plate - 10, f"target (T2 shown) at the\nreference station Z = {z_ref:g} mm", ha="right",
             fontsize=7.5)
 
     # Dowel-pinned adapter, flange and a stylized arm.
@@ -164,14 +165,13 @@ def main() -> None:
                 arrowprops=dict(arrowstyle="-", color=BLACK, lw=0.8))
     ax.text(flange_x + 30, -FLANGE_HALF_HEIGHT_MM - 8, "robot flange", fontsize=7.5, va="top", ha="left")
 
-    # Enclosure boundary.
-    margin_x, margin_y = ENCLOSURE_MARGIN_MM
+    # Boundary of the enclosed laboratory.
     left, right = -body_w - 160.0, 1800.0 + 120.0
     bottom, top = FLOOR_Y_MM - 110.0, y_dim + 110.0
     ax.add_patch(Rectangle((left, bottom), right - left, top - bottom, facecolor="none", edgecolor=VERMILLION,
                            linestyle=(0, (6, 4)), lw=1.3))
-    ax.text(left + 15, top - 15, "enclosure or blackout curtains; ambient IR and air temperature logged "
-            "(IR light meter, temperature loggers)", fontsize=7.5, color=VERMILLION, va="top")
+    ax.text(left + 15, top - 15, "enclosed laboratory, constant lighting; sensor-housing and air temperatures logged "
+            f"every {PARAMS.temperature_log_interval_min:g} min", fontsize=7.5, color=VERMILLION, va="top")
 
     ax.set_xlim(left - 40, right + 40)
     ax.set_ylim(bottom - 40, top + 30)

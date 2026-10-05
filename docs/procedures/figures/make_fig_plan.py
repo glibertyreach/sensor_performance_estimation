@@ -8,9 +8,11 @@ CharacterizationParameters, the indicative SensorGeometry and a fixed seed, whic
 that the capture budget of the document is computed from (see build/build.py). Each point is the
 reference point of the target (its center on the front face) at that pose.
 
-What to see: the A stations in two columns of five field positions each across Z, the shape
-stations (five depths) of B, C and D, the registration poses scattered through the volume, the
-off-axis field poses and the phase-jitter clouds (small blobs around every station).
+What to see: the A stations at five field positions each across Z (the nine stations of the ladder and
+the two legacy depths), the shape stations (five depths) of B-HV, the three reduced stations of B-Z,
+the nine stations of C and D, the registration poses scattered through the volume (plane registration
+of T2 over Z_MIN to Z_MAX), the off-axis field poses and the phase-jitter clouds (small blobs around
+every station).
 
     python3 docs/procedures/figures/make_fig_plan.py      (from the repository root)
 """

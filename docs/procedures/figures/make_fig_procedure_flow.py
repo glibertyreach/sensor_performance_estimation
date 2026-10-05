@@ -10,7 +10,8 @@ What the arrows say (specification Section 1):
     - Analysis A supplies the noise level that sets the detection thresholds of B, C and D.
     - Analysis B-HV supplies the edge spread function that predicts the area bias measured in C.
     - Analysis E needs no captures of its own; it reuses the B and C frames.
-    - The D pilot comes from the quick-look detection count on C data (dashed): it sets the D levels.
+    - The D post check comes from the quick-look detection count on C data (dashed): it confirms that the
+      disk posts are not detected before the D trials run. It does not select any D levels.
 
 Why draw it: the technician captures in the order A, B, C, D, and sees at once why that order is
 fixed and why registration comes first.
@@ -64,8 +65,8 @@ LANE_DROP_OFFSET = 0.5     # lane arrows land this far from the box center, so t
 FONT_SIZE = 8
 
 CAPTURES = [
-    ("R", f"R  registration\nT1 at {PARAMS.registration_poses} poses"),
-    ("A", f"A  noise plate\nT2, {len(PARAMS.noise_stations_mm())} Z x {len(FIELD_POSITION_CODES)} field pos."),
+    ("R", f"R  registration\nT2 planes, {PARAMS.registration_poses} poses"),
+    ("A", f"A  noise plate\nT2, {len(PARAMS.z_stations_mm())} Z x {len(FIELD_POSITION_CODES)} field pos."),
     ("B-HV", "B-HV  edges\nT3a, T3b, 2 gaps"),
     ("B-Z", "B-Z  depth steps\nT2"),
     ("C", "C  area arrays\nT4, T5, 2 gaps"),
@@ -165,11 +166,11 @@ def main() -> None:
     ax.text(COLUMN_X["D"] + 0.2, E_LANE_Y - 0.28, "E reuses the data of B and C", fontsize=7.5, color=VERMILLION,
             ha="left", va="top")
 
-    # The D pilot comes from the quick-look count on C data (dashed).
+    # The D post check comes from the quick-look count on C data (dashed).
     top_capture = CAPTURE_Y + BOX_HEIGHT / 2
     arrow(ax, (COLUMN_X["C"] + 0.4, top_capture), (COLUMN_X["D"] - 0.4, top_capture), color=REDDISH_PURPLE,
           dashed=True, lw=1.6, rad=-0.6)
-    ax.text((COLUMN_X["C"] + COLUMN_X["D"]) / 2, CAPTURE_Y + 0.9, "dashed: the pilot. A quick-look\ncount on C sets the D levels",
+    ax.text((COLUMN_X["C"] + COLUMN_X["D"]) / 2, CAPTURE_Y + 0.9, "dashed: the post check. A quick-look\ncount on C checks the disk posts",
             fontsize=7.5, color=REDDISH_PURPLE, ha="center", va="bottom")
 
     # Capture order, left to right.
@@ -185,7 +186,8 @@ def main() -> None:
     out = Path(__file__).resolve().parent / f"{FIGURE_NAME}.png"
     fig.savefig(out, dpi=OUTPUT_DPI, facecolor="white")
     plt.close(fig)
-    figfacts.emit(FIGURE_NAME, capture_box_count=len(CAPTURES), analysis_box_count=len(ANALYSES))
+    figfacts.emit(FIGURE_NAME, capture_box_count=len(CAPTURES), analysis_box_count=len(ANALYSES),
+                  station_count=len(PARAMS.z_stations_mm()), field_position_count=len(FIELD_POSITION_CODES))
     print(f"wrote {out}")
 
 

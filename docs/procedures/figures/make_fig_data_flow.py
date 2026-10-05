@@ -54,8 +54,8 @@ BLUE = "#0072B2"
 VERMILLION = "#D55E00"
 GRAY = "#595959"
 
-FOLDER_X, ANALYSIS_X, OUTPUT_X, MODEL_X = 1.7, 6.6, 10.4, 14.0
-FOLDER_W, ANALYSIS_W, OUTPUT_W, MODEL_W = 2.9, 2.5, 3.5, 2.4
+FOLDER_X, ANALYSIS_X, OUTPUT_X, MODEL_X = 1.7, 6.6, 10.2, 14.1
+FOLDER_W, ANALYSIS_W, OUTPUT_W, MODEL_W = 2.9, 2.5, 4.0, 2.4
 BOX_H = 0.62
 FONT = 8
 
@@ -64,7 +64,8 @@ ANALYSIS_Y = {"A": 5.0, "B-HV": 4.0, "B-Z": 3.0, "C": 2.0, "D": 1.0, "E": 0.0}
 ANALYSIS_TEXT = {"A": "Analysis A: noise vs Z", "B-HV": "Analysis B-HV: H, V resolution", "B-Z": "Analysis B-Z: Z resolution",
                  "C": "Analysis C: true vs sensed area", "D": "Analysis D: D_50, D_10, D_0", "E": "Analysis E: boundary bias"}
 OUTPUTS = {"A": "A_noise_summary.csv + figures", "B-HV": "B-HV tables + figures", "B-Z": "B-Z tables + figures",
-           "C": "C_area_summary.csv + figures", "D": "D_detect_summary.csv + figures",
+           "C": "C_area_summary.csv, C_overlap_test.csv\n+ figures",
+           "D": "D_detect_summary.csv, D_pooled_summary.csv,\nD_overlap_test.csv + figures",
            "E": "E_boundary_bias.csv + figures"}
 FOLDER_ORDER = [(PROCEDURE_NOISE, 5.3), (PROCEDURE_SENTINEL, 4.55), (PROCEDURE_EDGES, 3.6), (PROCEDURE_ZSTEP, 3.0),
                 (PROCEDURE_AREA, 2.0), (PROCEDURE_DETECTION, 1.0)]
@@ -112,7 +113,7 @@ def main() -> None:
     for name in ANALYSES:
         y = ANALYSIS_Y[name]
         box(ax, ANALYSIS_X, y, ANALYSIS_W, BOX_H, ANALYSIS_TEXT[name])
-        box(ax, OUTPUT_X, y, OUTPUT_W, BOX_H - 0.1, f"{ANALYSIS_DIR_NAME}/{OUTPUTS[name]}", face="#f2f2f2", fontsize=7.5)
+        box(ax, OUTPUT_X, y, OUTPUT_W, BOX_H - 0.1, f"{ANALYSIS_DIR_NAME}/{OUTPUTS[name]}", face="#f2f2f2", fontsize=7)
         arrow(ax, (ANALYSIS_X + ANALYSIS_W / 2, y), (OUTPUT_X - OUTPUT_W / 2, y), color=BLACK, lw=1.2)
     # forward_model_parameters.json
     model_y = (ANALYSIS_Y["A"] + ANALYSIS_Y["E"]) / 2
