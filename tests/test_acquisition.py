@@ -125,7 +125,14 @@ def test_optional_variants_keep_keys_unique():
                              open_background=True, extended=False)
     assert len({c.pose_key() for c in plan}) == len(plan)
     off = [c for c in plan if c.subseries == "filters_off"]
-    assert len(off) == 55 + 24 and all(c.pose_index >= FILTERS_OFF_POSE_INDEX_BASE for c in off)
+    assert all(c.pose_index >= FILTERS_OFF_POSE_INDEX_BASE for c in off)
+    # Section 4, Step 4.2: the repeat covers A, B-HV and B-Z (A: 55 station poses + 24 tilt poses).
+    off_by_series = {p: sum(1 for c in off if c.procedure == p) for p in ("A", "B", "Z")}
+    assert len(off) == sum(off_by_series.values())
+    assert off_by_series["A"] == 55 + 24
+    assert off_by_series["B"] == sum(1 for c in plan if c.procedure == "B" and c.subseries in ("nominal", "jitter"))
+    assert off_by_series["Z"] == sum(1 for c in plan if c.procedure == "Z" and c.subseries in ("ladder", "staircase"))
+    assert off_by_series["B"] > 0 and off_by_series["Z"] > 0
     open_poses = [c for c in plan if c.subseries == "open"]
     assert len(open_poses) == PARAMS.phase_jitter_poses_area
     assert all(c.gap_mm is None and c.station_z_mm == PARAMS.z_reference_mm for c in open_poses)
@@ -335,6 +342,23 @@ def test_zstep_visits_are_approached_from_below():
     from sensorperf.acquisition.plan import plan_summary_text
     text = plan_summary_text(plan, SMALL_PARAMS, GEOMETRY)
     assert "approach: every visit from below" in text and "at least 2 decimals" in text
+
+
+def test_filters_off_repeat_is_outside_the_main_budget(full_plan):
+    """Section 4, Step 4.2: the filters-off repeat (A, B-HV, B-Z) is listed on its own and leaves every series row of
+    the main budget unchanged (the drift sentinels follow the plan's total duration, so their row is not compared)."""
+    from sensorperf.acquisition.plan import filters_off_budget, plan_summary_text
+    base_plan, _ = full_plan
+    plan = plan_full_session(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), filters_off=True)
+    args = (GEOMETRY.frame_rate_hz, PARAMS.move_and_settle_time_s)
+    main = {r.procedure: r for r in capture_budget(plan, *args) if r.procedure != "S"}
+    reference = {r.procedure: r for r in capture_budget(base_plan, *args) if r.procedure != "S"}
+    assert main.keys() == reference.keys()
+    assert all((main[k].poses, main[k].frames) == (reference[k].poses, reference[k].frames) for k in main)
+    assert {r.procedure for r in filters_off_budget(plan, *args)} == {"A", "B", "Z"}
+    assert filters_off_budget(base_plan, *args) == []
+    text = plan_summary_text(plan, PARAMS, GEOMETRY)
+    assert "Outside the main budget" in text and "outside the main budget" not in plan_summary_text(base_plan, PARAMS, GEOMETRY).lower()
 
 
 def test_budget_totals_are_the_stored_estimate(full_plan, capsys):

@@ -73,6 +73,15 @@ LEAST_SQUARES_TOLERANCE = 1.0e-12
 """Convergence tolerances of the nonlinear refinement."""
 LEAST_SQUARES_MAX_EVALUATIONS = 2000
 """Evaluation budget of the nonlinear refinement."""
+PLANE_SOLVE_PARAMETER_COUNT = 9
+"""Parameters of the plane-only solve: two tilt angles and the Z translation of X (3), the rotation vector and the
+translation of Y (6)."""
+PLANE_SOLVE_PARAMETERS_Y_TRANSLATION = slice(6, 9)
+"""Where the translation of Y (camera_to_base) sits in the plane-only solve's parameter vector."""
+PLANE_RESIDUALS_PER_OBSERVATION = 3
+"""Independent scalar equations per plane observation: two for the unit normal (its three components are
+constrained to unit length, so one is redundant) and one for the distance. Used for the degrees of freedom of the
+residual variance."""
 
 
 @dataclass
@@ -83,6 +92,10 @@ class Registration:
     target_to_flange: RigidTransform
     residual_rms_mm: float = float("nan")
     """RMS distance between solved and observed target poses (Step 4.7)."""
+    camera_z_offset_se_mm: float = float("nan")
+    """Standard error (mm) of the camera's Z offset from the fit covariance (Step 4.7): the camera_to_base
+    translation along the mean plate normal in the base frame. NaN for the fiducial method (not computed) and when
+    the covariance cannot be estimated (rank-deficient fit or no residual degrees of freedom)."""
     rotation_residual_rms_deg: float = float("nan")
     pose_count: int = 0
     method: str = METHOD_FIDUCIAL
@@ -109,6 +122,7 @@ class Registration:
             "camera_to_base": self.camera_to_base.as_matrix().reshape(-1).tolist(),
             "target_to_flange": self.target_to_flange.as_matrix().reshape(-1).tolist(),
             "residual_rms_mm": self.residual_rms_mm,
+            "camera_z_offset_se_mm": self.camera_z_offset_se_mm,
             "rotation_residual_rms_deg": self.rotation_residual_rms_deg,
             "pose_count": self.pose_count,
             "method": self.method,
@@ -126,6 +140,7 @@ class Registration:
             camera_to_base=RigidTransform.from_matrix(np.asarray(document["camera_to_base"]).reshape(4, 4)),
             target_to_flange=RigidTransform.from_matrix(np.asarray(document["target_to_flange"]).reshape(4, 4)),
             residual_rms_mm=float(document.get("residual_rms_mm", float("nan"))),
+            camera_z_offset_se_mm=float(document.get("camera_z_offset_se_mm", float("nan"))),
             rotation_residual_rms_deg=float(document.get("rotation_residual_rms_deg", float("nan"))),
             pose_count=int(document.get("pose_count", 0)),
             method=str(document.get("method", METHOD_FIDUCIAL)),
@@ -248,6 +263,35 @@ def solve_hand_eye(flange_to_base: Sequence[RigidTransform], target_to_camera: S
                         accepted=None if accept_rms_mm is None else bool(rms_mm <= accept_rms_mm))
 
 
+def camera_z_offset_standard_error_mm(jacobian: np.ndarray, residuals: np.ndarray, plate_normals_base: np.ndarray,
+                                      observation_count: int) -> float:
+    """Standard error (mm) of the camera's Z offset from the Gauss-Newton covariance of a plane-only fit.
+
+    The covariance of the solved parameters is the residual variance times the inverse of J^T J, with J the
+    Jacobian of the residual vector with respect to the parameters at the solution and the residual variance
+    s^2 = sum(r^2) / (PLANE_RESIDUALS_PER_OBSERVATION x observations - parameters). The camera's Z offset is the
+    component of the camera_to_base translation along the mean plate normal in the base frame. That is the
+    direction the plane-distance equations condition only through the tilt range: moving the camera along the plate
+    normal changes every plane distance by nearly the same amount, which the constant part of the distance (the
+    unobservable depth offset, Section 15) can mimic, so only the cosine of the tilt, 1 - cos(tilt) at best, tells the
+    two apart. The standard error is sqrt(u^T C u) with C the 3 x 3 block of the covariance for the camera
+    translation and u the unit mean plate normal (held fixed at its value at the solution).
+
+    ``jacobian`` is the (residual count x PLANE_SOLVE_PARAMETER_COUNT) Jacobian and ``residuals`` the residual
+    vector at the solution (the optimizer's, in its own units: normals times ROTATION_RESIDUAL_LEVER_MM, distances in mm);
+    ``plate_normals_base`` is one plate normal in the base frame per observation. Returns NaN when the Jacobian
+    is rank-deficient or there are no residual degrees of freedom."""
+    degrees_of_freedom = PLANE_RESIDUALS_PER_OBSERVATION * observation_count - PLANE_SOLVE_PARAMETER_COUNT
+    if degrees_of_freedom <= 0 or np.linalg.matrix_rank(jacobian) < PLANE_SOLVE_PARAMETER_COUNT:
+        return float("nan")
+    residual_variance = float(np.sum(np.square(residuals))) / degrees_of_freedom
+    covariance = residual_variance * np.linalg.inv(jacobian.T @ jacobian)
+    mean_normal = np.mean(plate_normals_base, axis=0)
+    mean_normal = mean_normal / np.linalg.norm(mean_normal)
+    translation_covariance = covariance[PLANE_SOLVE_PARAMETERS_Y_TRANSLATION, PLANE_SOLVE_PARAMETERS_Y_TRANSLATION]
+    return float(np.sqrt(max(mean_normal @ translation_covariance @ mean_normal, 0.0)))
+
+
 def plane_of_pose(target_to_camera: RigidTransform) -> PlaneObservation:
     """The target's front plane (z = 0 of the target frame) in the camera frame,
     normal toward the camera (minus the target z axis)."""
@@ -266,7 +310,8 @@ def solve_from_planes(flange_to_base: Sequence[RigidTransform], planes: Sequence
     difference (mm). The unobservable parts of X (in-plane translation and
     rotation about the target normal) are held at zero: X is parametrized by a
     translation along the flange z axis and two tilt angles. The reported RMS is
-    the RMS plane-distance residual. ``initial`` gives (X, Y) start values; by
+    the RMS plane-distance residual. The result also carries the standard error of the camera's Z offset
+    (:func:`camera_z_offset_standard_error_mm`, from the Gauss-Newton covariance of this fit). ``initial`` gives (X, Y) start values; by
     default X is the identity and Y is estimated by aligning the mean normals."""
     if len(flange_to_base) != len(planes):
         raise ValueError("flange_to_base and planes must have the same length")
@@ -318,7 +363,13 @@ def solve_from_planes(flange_to_base: Sequence[RigidTransform], planes: Sequence
         angle_residuals.append(np.arccos(np.clip(predicted.normal @ observed_plane.normal, -1.0, 1.0)))
     rms_mm = float(np.sqrt(np.mean(np.square(distance_residuals))))
     rms_deg = float(np.degrees(np.sqrt(np.mean(np.square(angle_residuals)))))
+    # Plate normals (toward the camera) in the base frame at the solution: the target z axis of A_i X, negated.
+    plate_normals_base = np.asarray([-a.compose(x).rotation[:, 2] for a in flange_to_base])
+    # result.jac is the optimizer's numerical (finite-difference) Jacobian of the residual vector at the solution.
+    z_offset_se_mm = camera_z_offset_standard_error_mm(result.jac, result.fun, plate_normals_base,
+                                                       len(flange_to_base))
     return Registration(camera_to_base=y, target_to_flange=x, residual_rms_mm=rms_mm,
+                        camera_z_offset_se_mm=z_offset_se_mm,
                         rotation_residual_rms_deg=rms_deg, pose_count=len(flange_to_base),
                         method=METHOD_DEPTH_PLANES,
                         accepted=None if accept_rms_mm is None else bool(rms_mm <= accept_rms_mm),

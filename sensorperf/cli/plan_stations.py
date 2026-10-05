@@ -10,13 +10,13 @@ What it computes
 ----------------
 Every commanded pose of the series of Part I, in the order of the procedure:
 the registration poses of Section 4 (R, on the noise plate T2, from Z_MIN to Z_MAX), the noise series of Section 5 (A:
-main stations in a seeded random order, tilt sub-series, repeat-mount check,
-optional filters-off repeat), the edge series of Section 6.1 (B), the Z-step
-series of Section 6.2 (Z: step ladder and fine staircase), the area series of
+main stations in a seeded random order, tilt sub-series, repeat-mount check), the edge series
+of Section 6.1 (B), the Z-step series of Section 6.2 (Z: step ladder and fine staircase), the area series of
 Section 7 (C: jittered poses, field sub-series, optional open-background
 variant) and the detection series of Section 8 (D: main trials at every station and
 extended zero-detection trials at the farthest stations),
-with drift sentinels inserted on the budget clock. Every random draw uses
+with drift sentinels inserted on the budget clock. ``--filters-off`` appends the filters-off repeat of A, B-HV and
+B-Z (Section 4, Step 4.2) after each filters-on series; the summary lists it outside the main budget. Every random draw uses
 ``np.random.default_rng(seed)`` with a seed derived from ``--seed`` and logged in
 poses.csv. A target that would not fit the field of view at its station is pulled
 inward along its field direction and the summary says so (Section 5, Step 1).
@@ -99,7 +99,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-extended", action="store_true",
                         help="skip the extended 0 percent trials of the D series at the farthest stations (Section 8)")
     parser.add_argument("--filters-off", action="store_true",
-                        help="append the filters-off repeat of the A series (Section 5, Step 7)")
+                        help="append the filters-off repeat of the A and B series (A, B-HV and B-Z; Section 4, Step 4.2) "
+                             "after each filters-on series; its poses are labeled filters_off and are listed outside "
+                             "the main budget in plan_summary.txt")
     parser.add_argument("--open-background", action="store_true",
                         help="add the open-background variant of the C series for the cutout arrays (Section 7, Step 4)")
     return parser

@@ -93,10 +93,12 @@ from sensorperf.parameters import (
 SEED_UPPER_BOUND = 2 ** 31 - 1
 """Exclusive upper bound of the seeds drawn from the master generator (a 31-bit
 integer, so a seed survives a CSV round trip and any 32-bit consumer)."""
-FILTERS_OFF_POSE_INDEX_BASE = 100
-"""First pose index of the filters-off repeat of series A (Section 5, Step 7). The
-file-name rule has no field for the filter state, so the repeat takes pose
-indices above those of the filters-on series at the same station."""
+FILTERS_OFF_POSE_INDEX_BASE = 1000
+"""First pose index of the filters-off repeat of series A, B-HV and B-Z (Section 4, Step 4.2; the
+repeat of Section 5, Step 7 extended to the edge and depth-step series). The file-name rule has no
+field for the filter state, so the repeat takes pose indices above those of the filters-on series at
+the same station. The B-Z series has up to about 150 poses at one station (ladder plus staircase), so
+the base must clear that; the four-digit index (P1000) is accepted by the file-name pattern."""
 TIER_A_DISPARITY_QUANTUM_PX = 0.125
 """Disparity quantum q assumed for the expected depth quantum dZ_q = q Z^2 / k of the
 B-Z staircase until Analysis A measures one (Section 6.2, Step 3: "using the Tier-A q").
@@ -135,7 +137,7 @@ DOCUMENT_ESTIMATE_HOURS = 7.3
 redesigned plan: the totals of ``plan_full_session`` with the default parameters, the indicative geometry (10
 frames/s) and no optional variants (no filters-off repeat, no open-background variant; 7,292 poses, 44,140 frames,
 7.30 h). plan_summary.txt compares the plan it summarizes with these numbers, so a change of the parameters shows
-up as a ratio away from 1."""
+up as a ratio away from 1. The filters-off repeat is never part of these totals (see ``capture_budget``)."""
 
 PLAN_CSV_NAME = "poses.csv"
 PLAN_SUMMARY_NAME = "plan_summary.txt"
@@ -621,7 +623,8 @@ def plan_noise_series(params: CharacterizationParameters, geometry: SensorGeomet
 # ---------------------------------------------------------------------------
 def plan_edge_series(params: CharacterizationParameters, geometry: SensorGeometry, rng: np.random.Generator,
                      targets: TargetSet | None = None,
-                     diagnostics: PlanDiagnostics | None = None) -> list[PlannedCapture]:
+                     diagnostics: PlanDiagnostics | None = None,
+                     filters_off: bool = False) -> list[PlannedCapture]:
     """Section 6.1 (Series B-HV): T3a (raised square) then T3b (square window), each with G =
     GAP_SMALL_MM and then GAP_LARGE_MM. The slant of the square is part of the target definition.
 
@@ -629,9 +632,15 @@ def plan_edge_series(params: CharacterizationParameters, geometry: SensorGeometr
     frames at the nominal pose (subseries "nominal"); Step 3, PHASE_JITTER_POSES_EDGE further poses,
     each with its own logged random lateral offset uniform over +/- PHASE_JITTER_SPAN_PX / 2 in both
     H and V (subseries "jitter"), FRAMES_PER_EDGE_POSE frames each. Steps 4 and 5 are the loop over the
-    two gaps and the two targets; stations run in ascending Z."""
+    two gaps and the two targets; stations run in ascending Z.
+
+    Section 4, Step 4.2 (``filters_off=True``): returns the filters-off repeat of the whole series instead,
+    with the same poses (new logged jitter offsets) and the sub-series "filters_off" on every one, and pose
+    indices from FILTERS_OFF_POSE_INDEX_BASE, as the A repeat of :func:`plan_noise_series`."""
     target_set = _targets(params, geometry, targets)
-    counter = _PoseCounter()
+    counter = _PoseCounter(FILTERS_OFF_POSE_INDEX_BASE if filters_off else 0)
+    nominal_label = SUBSERIES_FILTERS_OFF if filters_off else SUBSERIES_NOMINAL
+    jitter_label = SUBSERIES_FILTERS_OFF if filters_off else SUBSERIES_JITTER
     camera = camera_of(geometry)
     plan: list[PlannedCapture] = []
     for target_id in (TARGET_RAISED_SQUARE, TARGET_SQUARE_WINDOW):
@@ -643,11 +652,11 @@ def plan_edge_series(params: CharacterizationParameters, geometry: SensorGeometr
                     _warn(diagnostics, f"B: {target_id} (G = {gap:g} mm) does not fit the field of view at Z = "
                                        f"{z:g} mm with the phase-jitter margin; features may be cut off")
                 plan.append(_new_capture(counter, PROCEDURE_EDGES, target_id, gap, z, FIELD_POSITION_CENTER,
-                                         params.frames_per_edge_pose, SUBSERIES_NOMINAL, nominal))
+                                         params.frames_per_edge_pose, nominal_label, nominal))
                 for _ in range(params.phase_jitter_poses_edge):
                     plan.append(_jitter_capture(counter, params, geometry, rng, PROCEDURE_EDGES, target_id, gap, z,
                                                 FIELD_POSITION_CENTER, params.frames_per_edge_pose,
-                                                SUBSERIES_JITTER, 0.0, 0.0))
+                                                jitter_label, 0.0, 0.0))
     return _renumber(plan)
 
 
@@ -676,7 +685,8 @@ def default_expected_quantum_mm(geometry: SensorGeometry,
 def plan_zstep_series(params: CharacterizationParameters, geometry: SensorGeometry, rng: np.random.Generator,
                       expected_quantum_mm: Callable[[float], float] | float | None = None,
                       targets: TargetSet | None = None,
-                      diagnostics: PlanDiagnostics | None = None) -> list[PlannedCapture]:
+                      diagnostics: PlanDiagnostics | None = None,
+                      filters_off: bool = False) -> list[PlannedCapture]:
     """Section 6.2 (Series B-Z, procedure letter Z), target T2 centered and fronto-parallel at each Z0
     in the reduced stations (``params.z_reduced_stations_mm()``, Step 1).
 
@@ -696,8 +706,14 @@ def plan_zstep_series(params: CharacterizationParameters, geometry: SensorGeomet
     of Z, or one number in mm; default: the Tier-A disparity quantum, TIER_A_DISPARITY_QUANTUM_PX).
     Step 4: the Z0 visits of the ladder serve as the no-step reference, so no extra poses are planned.
 
+    Section 4, Step 4.2 (``filters_off=True``): returns the filters-off repeat of the whole series instead (the
+    ladder and the staircase; visit and step_mm are kept), with the sub-series "filters_off" on every pose and pose
+    indices from FILTERS_OFF_POSE_INDEX_BASE, as the A repeat of :func:`plan_noise_series`.
+
     No random draws occur in this series; ``rng`` is accepted so all planners share one signature."""
     del rng, targets                       # no randomness and no target geometry needed here
+    ladder_label = SUBSERIES_FILTERS_OFF if filters_off else SUBSERIES_LADDER
+    staircase_label = SUBSERIES_FILTERS_OFF if filters_off else SUBSERIES_STAIRCASE
     if expected_quantum_mm is None:
         quantum_at = default_expected_quantum_mm(geometry)
     elif callable(expected_quantum_mm):
@@ -705,7 +721,7 @@ def plan_zstep_series(params: CharacterizationParameters, geometry: SensorGeomet
     else:
         constant = float(expected_quantum_mm)
         quantum_at = lambda depth_mm: constant      # noqa: E731 (a constant quantum at every depth)
-    counter = _PoseCounter()
+    counter = _PoseCounter(FILTERS_OFF_POSE_INDEX_BASE if filters_off else 0)
     plan: list[PlannedCapture] = []
     for z0 in params.z_reduced_stations_mm():
         for delta in params.z_step_ladder_mm:
@@ -713,7 +729,7 @@ def plan_zstep_series(params: CharacterizationParameters, geometry: SensorGeomet
                 for visit, displacement in ((VISIT_A, 0.0), (VISIT_B, float(delta))):
                     plan.append(_new_capture(
                         counter, PROCEDURE_ZSTEP, TARGET_NOISE_PLATE, None, z0, FIELD_POSITION_CENTER,
-                        params.frames_per_zstep_pose, SUBSERIES_LADDER,
+                        params.frames_per_zstep_pose, ladder_label,
                         fronto_parallel_pose(0.0, 0.0, z0 + displacement), step_mm=float(delta), visit=visit,
                         notes={"displacement_mm": displacement, "approach": APPROACH_FROM_BELOW,
                                "approach_overshoot_mm": params.z_step_approach_overshoot_mm}))
@@ -728,7 +744,7 @@ def plan_zstep_series(params: CharacterizationParameters, geometry: SensorGeomet
             displacement = k * step
             plan.append(_new_capture(
                 counter, PROCEDURE_ZSTEP, TARGET_NOISE_PLATE, None, z0, FIELD_POSITION_CENTER,
-                params.z_staircase_frames, SUBSERIES_STAIRCASE, fronto_parallel_pose(0.0, 0.0, z0 + displacement),
+                params.z_staircase_frames, staircase_label, fronto_parallel_pose(0.0, 0.0, z0 + displacement),
                 step_mm=displacement, notes={"displacement_mm": displacement, "staircase_step": k,
                                              "approach": APPROACH_FROM_BELOW,
                                              "approach_overshoot_mm": params.z_step_approach_overshoot_mm}))
@@ -968,7 +984,8 @@ def plan_full_session(params: CharacterizationParameters, geometry: SensorGeomet
     the whole plan and ``order`` renumbered 0..N-1.
 
     ``series`` selects a subset by procedure letter (any of R, A, B, Z, C, D; default all). ``filters_off``
-    appends the filters-off repeat of Series A (Section 5, Step 7) to A. ``registration`` is only checked here: a
+    appends the filters-off repeat (Section 4, Step 4.2: series A, B-HV and B-Z, each right after its filters-on
+    series; sub-series "filters_off", outside the main budget) to each of those series. ``registration`` is only checked here: a
     registration whose residual was not accepted triggers a warning (the commanded flange poses depend on it; they
     are computed by :func:`write_plan`). The other arguments are those of the series planners."""
     chosen = set(PLANNED_SERIES) if series is None else {s.upper() for s in series}
@@ -989,8 +1006,13 @@ def plan_full_session(params: CharacterizationParameters, geometry: SensorGeomet
             parts += plan_noise_series(params, geometry, rng, True, False, target_set, diagnostics)
     if PROCEDURE_EDGES in chosen:
         parts += plan_edge_series(params, geometry, rng, target_set, diagnostics)
+        if filters_off:
+            parts += plan_edge_series(params, geometry, rng, target_set, diagnostics, filters_off=True)
     if PROCEDURE_ZSTEP in chosen:
         parts += plan_zstep_series(params, geometry, rng, expected_quantum_mm, target_set, diagnostics)
+        if filters_off:
+            parts += plan_zstep_series(params, geometry, rng, expected_quantum_mm, target_set, diagnostics,
+                                       filters_off=True)
     if PROCEDURE_AREA in chosen:
         parts += plan_area_series(params, geometry, rng, open_background, target_set, diagnostics)
     if PROCEDURE_DETECTION in chosen:
@@ -1016,10 +1038,23 @@ class BudgetRow:
 def capture_budget(plan: Sequence[PlannedCapture], frame_rate_hz: float, move_settle_s: float) -> list[BudgetRow]:
     """The Section 9 table: poses, frames and robot hours per series, in the order of the procedure.
     "The estimate assumes 10 frames/s and 3 s per move plus settle": hours = (poses x move_settle_s + frames /
-    frame_rate_hz) / 3600. Series without poses are omitted."""
+    frame_rate_hz) / 3600. Series without poses are omitted. The optional filters-off repeat (sub-series
+    "filters_off") is outside the main budget and is not counted here; see :func:`filters_off_budget`."""
+    return _budget_rows([c for c in plan if c.subseries != SUBSERIES_FILTERS_OFF], frame_rate_hz, move_settle_s)
+
+
+def filters_off_budget(plan: Sequence[PlannedCapture], frame_rate_hz: float, move_settle_s: float) -> list[BudgetRow]:
+    """The same table for the filters-off repeat alone (Section 4, Step 4.2: series A, B-HV and B-Z), which is
+    outside the main budget of the document's estimate. Empty when the plan has no filters-off poses."""
+    return _budget_rows([c for c in plan if c.subseries == SUBSERIES_FILTERS_OFF], frame_rate_hz, move_settle_s)
+
+
+def _budget_rows(members_of_plan: Sequence[PlannedCapture], frame_rate_hz: float,
+                 move_settle_s: float) -> list[BudgetRow]:
+    """Budget rows (poses, frames, robot hours) per series for the given captures."""
     rows = []
     for procedure in SERIES_ORDER:
-        members = [c for c in plan if c.procedure == procedure]
+        members = [c for c in members_of_plan if c.procedure == procedure]
         if not members:
             continue
         poses = len(members)
@@ -1214,6 +1249,11 @@ def plan_summary_text(plan: Sequence[PlannedCapture], params: CharacterizationPa
                      f"{DOCUMENT_ESTIMATE_HOURS:g} h. This plan: {total.poses:,} poses ({total.poses / DOCUMENT_ESTIMATE_POSES:.2f} x), "
                      f"{total.frames:,} frames ({total.frames / DOCUMENT_ESTIMATE_FRAMES:.2f} x), "
                      f"{total.robot_hours:.1f} h ({total.robot_hours / DOCUMENT_ESTIMATE_HOURS:.2f} x).")
+        # The optional filters-off repeat is listed on its own: it is outside the main budget and the comparison above.
+        off_rows = filters_off_budget(plan, rate, params.move_and_settle_time_s)
+        if off_rows:
+            lines += ["", "Outside the main budget (filters-off repeat, Section 4, Step 4.2; not in the totals above "
+                          "or in the comparison with the document's estimate):", format_budget_table(off_rows)]
     if any(c.procedure == PROCEDURE_ZSTEP for c in plan):
         lines += ["", f"Series Z approach: every visit {APPROACH_FROM_BELOW} (back off {params.z_step_approach_overshoot_mm:g} mm "
                       "toward smaller Z, then move up onto the pose), so that backlash does not enter the A / B difference.",

@@ -11,10 +11,11 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from scipy.spatial.transform import Rotation
 
 from sensorperf.features.planes import fit_plane_robust, normalized_height, plane_depth_image
 from sensorperf.geometry.registration import (
-    METHOD_DEPTH_PLANES, Registration, plane_of_pose, solve_from_planes, solve_hand_eye,
+    METHOD_DEPTH_PLANES, PlaneObservation, Registration, plane_of_pose, solve_from_planes, solve_hand_eye,
 )
 from sensorperf.geometry.targets import (
     FEATURE_CUTOUT, FEATURE_DISK, SQUARE_EDGES, SURFACE_BACK, SURFACE_FRONT, SURFACE_NONE, StereoGeometry,
@@ -38,6 +39,18 @@ HAND_EYE_TOLERANCE_MM = 0.1
 """Allowed camera_to_base translation error with that noise."""
 PLANE_SOLVE_POSES = 12
 PLANE_SOLVE_ROTATION_TOLERANCE_DEG = 0.01
+Z_OFFSET_SE_POSES = 30
+"""Registration poses of the camera Z offset standard error test."""
+Z_OFFSET_SE_PLANE_NOISE_MM = 0.02
+"""Plane-distance noise (one standard deviation) added to the observed planes in that test."""
+Z_OFFSET_SE_LARGE_TILT_DEG = 20.0
+Z_OFFSET_SE_SMALL_TILT_DEG = 5.0
+"""Tilt ranges (+/- about both axes) compared in that test."""
+Z_OFFSET_SE_FACTOR = 3.0
+"""Allowed ratio between the observed standard error and the conditioning estimate, in either direction."""
+Z_OFFSET_SE_DEPTH_RANGE_MM = (500.0, 1000.0)
+Z_OFFSET_SE_LATERAL_RANGE_MM = 50.0
+"""Plate distance range and lateral spread (half range) of the synthetic poses."""
 RNG_SEED = 7
 
 
@@ -288,3 +301,45 @@ def test_plane_only_registration_recovers_rotation_and_scale():
     assert solved.method == METHOD_DEPTH_PLANES
     assert solved.residual_rms_mm < 1e-6
     assert solved.camera_to_base.difference_from(y_true)[1] < PLANE_SOLVE_ROTATION_TOLERANCE_DEG
+
+
+def _z_offset_standard_error_mm(tilt_range_deg: float, seed: int = RNG_SEED + 2) -> float:
+    """camera_z_offset_se_mm of a plane-only solve of synthetic poses: Z_OFFSET_SE_POSES plate poses with tilts
+    uniform over +/- tilt_range_deg about both axes, and plane distances with Gaussian noise."""
+    rng = np.random.default_rng(seed)
+    x_true = RigidTransform(np.eye(3), np.array([0.0, 0.0, 120.0]))
+    y_true = RigidTransform.from_rotation_vector_degrees([175.0, 5.0, -10.0], [700.0, 50.0, 400.0])
+    flange, planes = [], []
+    for _ in range(Z_OFFSET_SE_POSES):
+        tilt = np.radians(rng.uniform(-tilt_range_deg, tilt_range_deg, 2))
+        position = [rng.uniform(-Z_OFFSET_SE_LATERAL_RANGE_MM, Z_OFFSET_SE_LATERAL_RANGE_MM),
+                    rng.uniform(-Z_OFFSET_SE_LATERAL_RANGE_MM, Z_OFFSET_SE_LATERAL_RANGE_MM),
+                    rng.uniform(*Z_OFFSET_SE_DEPTH_RANGE_MM)]
+        target_to_camera = RigidTransform(Rotation.from_euler("xy", tilt).as_matrix(), np.array(position))
+        flange.append(y_true.compose(target_to_camera).compose(x_true.inverse()))
+        plane = plane_of_pose(target_to_camera)
+        planes.append(PlaneObservation(plane.normal, plane.distance_mm + rng.normal(0.0, Z_OFFSET_SE_PLANE_NOISE_MM)))
+    return solve_from_planes(flange, planes).camera_z_offset_se_mm
+
+
+def test_camera_z_offset_standard_error_follows_the_tilt_conditioning(tmp_path: Path):
+    """Section 4, Step 4.7: the standard error of the camera's Z offset (the camera_to_base translation along the mean
+    plate normal) comes from the Gauss-Newton fit covariance. Plane distances condition that offset only through the
+    tilt range: a plate tilted by theta changes the distance along the normal by the factor cos(theta), so the offset
+    is known to about sigma / ((1 - cos(theta)) sqrt(N)) for N poses, plane-distance noise sigma and tilts up to
+    theta. With 30 poses, sigma = 0.02 mm and +/- 20 degrees about both axes that is 0.02 / (1 - cos 20 deg) /
+    sqrt(30), about 0.06 mm; the solve must land within a factor of 3 of it, and the +/- 5 degree range (conditioning
+    1 / (1 - cos 5 deg), 14 times worse) must give a larger standard error. The value is saved in registration.json."""
+    large = _z_offset_standard_error_mm(Z_OFFSET_SE_LARGE_TILT_DEG)
+    small = _z_offset_standard_error_mm(Z_OFFSET_SE_SMALL_TILT_DEG)
+    print(f"camera Z offset standard error: {large:.4f} mm at +/-{Z_OFFSET_SE_LARGE_TILT_DEG:g} deg, "
+          f"{small:.4f} mm at +/-{Z_OFFSET_SE_SMALL_TILT_DEG:g} deg")
+    expected = Z_OFFSET_SE_PLANE_NOISE_MM / (1.0 - np.cos(np.radians(Z_OFFSET_SE_LARGE_TILT_DEG))) \
+        / np.sqrt(Z_OFFSET_SE_POSES)
+    assert np.isfinite(large) and large > 0.0
+    assert expected / Z_OFFSET_SE_FACTOR < large < expected * Z_OFFSET_SE_FACTOR
+    assert np.isfinite(small) and small > large
+    # The standard error is part of registration.json and round-trips.
+    registration = Registration(RigidTransform.identity(), RigidTransform.identity(), camera_z_offset_se_mm=large)
+    registration.save(tmp_path / "registration.json")
+    assert Registration.load(tmp_path / "registration.json").camera_z_offset_se_mm == pytest.approx(large)

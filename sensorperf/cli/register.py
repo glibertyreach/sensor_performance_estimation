@@ -35,8 +35,9 @@ Input: --observations, a CSV with one row per registration pose
                     n . p + distance = 0 for points p on the plane.
 
 Output: --out (default registration.json), with the residual RMS in mm, the
-rotation residual in degrees, the pose count, the method and the accept verdict;
-the same numbers are printed. --accept-mm is the acceptance limit (default
+standard error of the camera's Z offset in mm (plane method only: from the fit covariance, along the mean plate
+normal; null/NaN for the fiducial method), the rotation residual in degrees, the pose count, the method and the
+accept verdict; the same numbers are printed. --accept-mm is the acceptance limit (default
 REGISTRATION_RESIDUAL_ACCEPT_MM of the parameter table).
 
 Exit code: 0 when the residual is within the accept limit, 1 when it is not (the
@@ -175,8 +176,11 @@ def main(argv: list[str] | None = None) -> int:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     registration.save(args.out)
     verdict = "ACCEPTED" if registration.accepted else "NOT ACCEPTED"
+    z_offset_se = ("not available" if not np.isfinite(registration.camera_z_offset_se_mm)
+                   else f"{registration.camera_z_offset_se_mm:.4f} mm")
     print(f"Registration ({registration.method}) from {registration.pose_count} poses: residual RMS "
-          f"{registration.residual_rms_mm:.4f} mm, rotation residual {registration.rotation_residual_rms_deg:.4f} deg; "
+          f"{registration.residual_rms_mm:.4f} mm, camera Z offset standard error {z_offset_se}, "
+          f"rotation residual {registration.rotation_residual_rms_deg:.4f} deg; "
           f"limit {accept:g} mm -> {verdict}. Wrote {args.out}")
     if not registration.accepted:
         print("The residual is above the limit: re-check the fiducial solve, the tool frame and the flange pose "
