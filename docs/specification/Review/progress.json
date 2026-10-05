@@ -19,9 +19,9 @@
  },
  "C04": {
   "title": "Chamfered boundaries",
-  "reviewed": null,
-  "tier": null,
-  "note": "not yet reviewed"
+  "reviewed": "2026-10-05",
+  "tier": "fable",
+  "note": "R1, R2, R4 and P2 executed; P1 fixed in the render pipeline; R3 code follow-up"
  },
  "C05": {
   "title": "Setup, warm-up, registration",

@@ -186,7 +186,7 @@ Reviewer findings (proposals; nothing executed until the person closes the chunk
 - C04-N1 (note): the bevel formula exports as raw LaTeX in the review PDF; verify the live rendering.
 
 Person's comments: (pending)
-Person's comments (2026-10-05):
+Person's comments (2026-10-05), closed with "close":
 - C04-P1: the LaTeX math in Section 3.3 is not formatted. Finding: the bevel formula is stored in the live document as
   a code block (as are the relations in Section 2, the noise model in Section 10, the psychometric model in Section
   13, and the two boundary-bias formulas in Section 14), so it is unformatted in the live document too, not only in
@@ -196,3 +196,9 @@ Person's comments (2026-10-05):
   To execute: number the three figures in document order in their captions (Figure 1 flow diagram §1, Figure 2
   chamfer cross-section §3.3, Figure 3 setup side view §4), add the in-text references, and let the renderer and the
   gate's cross-reference check pick them up.
+Executed 2026-10-05 (document rev 72): R1 worked value rewritten around the poses the plan uses (24° centered at
+Z_MIN, 29° off-axis at Z_REFERENCE_MM, 39° with margin, 45° passes; the figure's 45° named as the example); R2 as-built
+record names the datum offsets and the measured reflectance; R4 folded into R1; P1 handled in the review pipeline
+(the live document already renders its latex blocks; refresh_spec.py now typesets them for the PDF); P2 figure
+captions numbered Figure 1–3 with in-text references in Sections 1, 3.3 and 4. R3 is a code follow-up (post
+diameter derived from the rule).
