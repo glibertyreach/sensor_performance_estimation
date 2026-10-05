@@ -244,3 +244,29 @@ Step 6 cannot be met reliably as specified. Options to put to the person in C14:
 0.03, lower the false-alarm target for the extended trials, raise the trial count, or define the 0% point as
 "not distinguishable from the blank sites" with a two-sample bound. Also a code follow-up (C04-R3): derive the
 nominal post diameter from POST_DIAMETER_FRACTION_OF_D0 × the expected D_0 instead of a fixed 0.5 mm.
+
+## C06 — Section 5 Acquisition A, noise-plate series (opened 2026-10-05)
+
+Reviewer findings (proposals; nothing executed until the person closes the chunk):
+- C06-R1 (serious, geometry): the tilt sub-series at the reduced stations includes Z_MIN = 400 mm with tilts up to
+  45°. A 400 mm plate tilted 45° about its center at 400 mm puts its near edge at about 259 mm, inside the sensor's
+  near limit (Z_MIN is the dagger-marked limit of valid depth), and its far edge at 541 mm; the plan tool already
+  warns that the tilted plate fits worse. Proposal: tilt only where the tilted plate's near edge stays at or beyond
+  Z_MIN (near edge = Z − half-plate × sin tilt), which the planner checks; at the indicative plate size that drops
+  400 mm and leaves 800 and 1600 mm. If a near tilt station is wanted, add 566 mm, where 45° keeps the edge at 425 mm.
+- C06-R2 (serious, procedure cost): a drift sentinel is defined on T2, so each of the 8 sentinels that fall during B,
+  C and D forces a re-mount of T2 (the plan tool reports it), which costs time and injects the re-mount error it is
+  meant to watch. Proposal: define the sentinel as the front plane of whatever target is mounted, captured centered
+  at Z_REFERENCE_MM, with the first sentinel after each mount as that target's reference; T2 sentinels remain at
+  the series boundaries. Decision for the person (changes Sections 5, 7, 8, 9 and the plan tool).
+- C06-R3 (from C05-N1): "check that the plate fully covers the analysis region of interest" has no rule. The plan
+  tool places the plate as far off-axis as keeps it inside the field with a margin and logs the achieved fraction
+  (36 % of the requested offset at 476 mm). Proposal: state that rule, with the margin BOUNDARY_BAND_HALF_WIDTH_PX,
+  and require the achieved field fraction to be logged per station and reported with the A results.
+- C06-R4 (budget): the legacy stations 700 and 1000 mm are captured at all five field positions, but the legacy
+  metrics use the center only. Proposal: legacy stations at the center only (A drops from 80 to 72 poses; the
+  Section 9 budget and the plan tool change accordingly).
+- C06-R5 (low): Step 4 logs the sensor temperature; the air temperature comes from the loggers of Step 4.1, say
+  so; Step 8's "Steps 1–5" should include Step 6 (the repeat-mount check is part of the filters-off repeat).
+
+Person's comments: (pending)
