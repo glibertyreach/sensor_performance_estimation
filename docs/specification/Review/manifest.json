@@ -1,6 +1,6 @@
 {
   "document": "VSX3000_characterization_specification.docx",
-  "built": "2026-10-05T16:10:54",
+  "built": "2026-10-05T16:33:00",
   "source_of_truth": "https://claude.ai/code/artifact/20fd839b-0e95-4210-9e8f-959da07ce6c2",
   "elements": [
     {
@@ -183,7 +183,11 @@
       "title": "Part I — Data acquisition procedure",
       "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
       "asserts": {},
-      "refs": []
+      "refs": [
+        "Section 2",
+        "Section 4",
+        "Section 9"
+      ]
     },
     {
       "id": "§4",
@@ -218,13 +222,15 @@
       "title": "5. Acquisition A: noise-plate series",
       "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
       "asserts": {
-        "noise_station_count": 9,
-        "reduced_station_count": 3
+        "sentinel_frames": 30
       },
       "refs": [
         "Section 10",
         "Section 2",
-        "Step 4.2"
+        "Section 9",
+        "Step 4.1",
+        "Step 4.2",
+        "Step 4.8"
       ]
     },
     {
@@ -253,7 +259,9 @@
         "gap_small_mm": 15,
         "gap_large_mm": 60
       },
-      "refs": []
+      "refs": [
+        "Section 5"
+      ]
     },
     {
       "id": "§8",
@@ -314,7 +322,9 @@
       "title": "10. Analysis A: noise vs Z",
       "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
       "asserts": {},
-      "refs": []
+      "refs": [
+        "Section 5"
+      ]
     },
     {
       "id": "§11",
