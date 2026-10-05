@@ -76,3 +76,41 @@ Deferred follow-ups: replace each literal with its parameter name in its own chu
 C08 §7: 750 mm, 10 poses; C09 §8: 750 mm, 2^(1/4), 10 mm, 20 poses; C10 §9: 10 fps, 3 s; C11 §10: 20 × 20 px, 1/e,
 0.2 closure, legacy 700/1000 mm; C12 §11: 10–90 %, 0.5, 1 bin, 0.1 h, patch sizes; C13 §12: h ≥ 0.5; C14 §13: 0.05
 lapse, ±2/√n). C06 §5: add the quick-look autocorrelation check between A and B capture (from R4).
+
+## C03 — Sections 3.1 Equipment and 3.2 Targets (opened 2026-10-05)
+
+Reviewer findings (proposals; nothing executed until the person closes the chunk):
+- C03-R1 (serious, truth chain): 3.1 does not require what B-Z now rests on. The robot row asks only for ISO 9283
+  repeatability; the read-back pose is the step truth, so 3.1 must require that the controller reports the actual
+  (encoder-derived) pose, at POSE_LOG_RESOLUTION_MM, with a stated pose-reporting accuracy, and that the pose is
+  time-stamped against the frames. Proposal: reword the robot row and the capture-PC row to name
+  ROBOT_REPEATABILITY_MM and POSE_LOG_RESOLUTION_MM, and add "actual, not commanded" as a requirement here (the
+  Section 15 checklist item then becomes a verified requirement rather than an open question).
+- C03-R2 (serious, consistency): "Targets can be swapped without re-registering" holds only if each target's feature
+  geometry relative to the dowel pins is known. The as-built record of 3.3 measures feature geometry on the plate but
+  says nothing about the plate-to-adapter datum. Proposal: state in 3.2 that every target carries the same dowel
+  datum and that the as-built record includes the datum-to-feature offsets; Step 4.8's once-per-mount plane check
+  then verifies Z and tilt, and the datum record covers H and V.
+- C03-R3 (literals): 3.1 and 3.2 carry four unnamed constants: adapter re-mount repeatability 0.02 mm, temperature
+  logging 1 sample/min, T1 pattern geometry tolerance 0.02 mm, T1 size 400 × 300 mm. Proposal: name them
+  (ADAPTER_REMOUNT_REPEATABILITY_MM, TEMPERATURE_LOG_INTERVAL_MIN, PATTERN_GEOMETRY_TOLERANCE_MM,
+  REGISTRATION_PLATE_SIZE_MM) in Section 2 (scope: Section 2 touched again, declared as intended) and cite them here.
+- C03-R4 (omission): T5 construction says the back plate sits at G, but Section 7 Step 4 removes it for the
+  open-background variant. Proposal: "back plate at G, removable for the open-background variant of Section 7".
+- C03-R5 (omission): plate extents are unspecified for T3a/T3b back and front plates and for the T4/T5 arrays. The
+  edge analyses need the back plate to extend past the square by at least the boundary band plus the shadow at
+  GAP_LARGE_MM at the worst ray angle; the arrays need room for 16 diameters, blank sites per window size, and
+  post-only sites at FEATURE_ISOLATION_PX. Proposal: one sentence per target family giving the rule (not a number),
+  with the plan tool's layout (make_feature_array) as the source of the as-built drawing.
+- C03-R6 (claim check): "about 0.3 mm to 60 mm in about 16 steps" at f_x ≈ 500 px reconciles (p(500) = 1.0 mm,
+  p(1000) = 2.0 mm, ln 200 / ln √2 = 15.3). No change; the worked example should say it is superseded once
+  SENSOR_FX_PX is known.
+- C03-R7 (low): the 3.1 robot row should also require the approach-from-below move (Z_STEP_APPROACH_OVERSHOOT_MM) to
+  be programmable, and the enclosure row should name the IR meter's logging interval (same as the temperature
+  loggers). Surface-finish paragraph: "mid-range IR reflectance" is unquantified; propose recording the measured
+  reflectance as a required field in targets_asbuilt.csv rather than fixing a number.
+- C03-Q1 (person's pending decision, not executed): merging T1 and T2 into one plate registered by plane
+  correspondence (asked earlier in chat). If adopted, the T1 row changes to "plane-registration plate = T2" and
+  the ChArUco pattern is dropped; the registration method in Section 4 changes with it.
+
+Person's comments: (pending)
