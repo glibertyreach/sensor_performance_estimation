@@ -20,8 +20,8 @@ The demonstration plan covers
     A  noise: T2 at three stations (center field), two tilt poses, and a T2 drift sentinel before and after
        (the plan ends with a sentinel on the target mounted there)
     B  edges: T3a and T3b at two shape stations (566 and 800 mm), one nominal pose and four jitter poses each, small gap
-    Z  Z-step: T2 at one station, a ladder of three step sizes with two ABAB cycles each, and a
-       short staircase
+    Z  Z-step: T2 at one station, a ladder of three step sizes (rungs of the station's expected quantum) with two ABAB
+       cycles each, a ramp (T2 tilted about H) at each of the three A stations, and the optional staircase
     C  area: T4 (disks) and T5 (cutouts) at the five shape stations (400, 566, 800, 1131, 1600 mm), a few
        jitter poses each, small gap; the stations make the three features of a plate overlap in D_px
     D  detection: T4 and T5 at the same five stations, single-frame jitter poses per station
@@ -36,12 +36,14 @@ from typing import Sequence
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from sensorperf.acquisition.plan import PlannedCapture
+from sensorperf.acquisition.plan import (
+    PlannedCapture, ramp_pose, ramp_tilt_deg, staircase_step_mm, z_step_rungs_mm,
+)
 from sensorperf.geometry.registration import Registration
-from sensorperf.geometry.targets import fronto_parallel_pose, tilted_pose
+from sensorperf.geometry.targets import fronto_parallel_pose, make_noise_plate, tilted_pose
 from sensorperf.geometry.transforms import RigidTransform
 from sensorperf.io.manifest import (
-    SUBSERIES_JITTER, SUBSERIES_LADDER, SUBSERIES_MAIN, SUBSERIES_NOMINAL, SUBSERIES_SENTINEL,
+    SUBSERIES_JITTER, SUBSERIES_LADDER, SUBSERIES_MAIN, SUBSERIES_NOMINAL, SUBSERIES_RAMP, SUBSERIES_SENTINEL,
     SUBSERIES_STAIRCASE, SUBSERIES_TILT, TILT_AXIS_H, TILT_AXIS_V, VISIT_A, VISIT_B,
 )
 from sensorperf.parameters import (
@@ -86,12 +88,14 @@ DEMO_AREA_JITTER_POSES = 3
 DEMO_DETECTION_POSES = 24
 """Single-frame random-offset poses per D configuration (a plate, a station)."""
 DEMO_ZSTEP_LADDER_INDICES = (1, 3, 5)
-"""Indices into ``params.z_step_ladder_mm`` of the three demonstration step sizes."""
+"""Indices into the station's ladder rungs (``plan.z_step_rungs_mm``: 0.25, 0.5, 1, 2, 4 and 8 expected quanta) of the
+three demonstration step sizes: half, two and eight quanta (0.78, 3.1 and 12.4 mm at 800 mm)."""
 DEMO_ZSTEP_CYCLES = 2
 """ABAB cycles per step size."""
 DEMO_STAIRCASE_STEPS = 30
-"""Fine-staircase steps of the demonstration: the full Z_STAIRCASE_QUANTA x Z_STAIRCASE_SUBDIVISION sweep of
-Section 6.2, Step 3 (3 quanta at 10 steps each), so the plateau-width estimate of Analysis B-Z has data."""
+"""Fine-staircase steps of the demonstration (the optional second pass of Section 6.2): the full Z_STAIRCASE_QUANTA x
+Z_STAIRCASE_SUBDIVISION sweep (3 quanta at 10 steps each), so the staircase analysis of Analysis B-Z has data and its
+quantum can be set beside the ramp's."""
 SEED_UPPER_BOUND = 2 ** 31 - 1
 """Exclusive upper bound of the per-capture seeds drawn for the plan (fits a signed 32-bit integer)."""
 
@@ -242,22 +246,35 @@ def _plan_edges(builder: _PlanBuilder) -> None:
 
 def _plan_zstep(builder: _PlanBuilder) -> None:
     """Section 6.2: T2 at the reference station. The ladder moves the plate between Z0 (visit A) and
-    Z0 + step (visit B) in ABAB cycles for three step sizes; the staircase then moves it in fractions of
-    the expected depth quantum. ``station_z_mm`` is Z0 for every pose; the plate pose carries the move."""
+    Z0 + step (visit B) in ABAB cycles for three step sizes (rungs of the expected depth quantum at Z0). The ramp, one
+    pose of T2 tilted about H per station with the tilt of ``plan.ramp_tilt_deg``, is planned at the stations of series A
+    of the demonstration (Z_MIN, Z_REFERENCE and Z_MAX), where Analysis A supplies the fixed-pattern map the ramp
+    analysis subtracts. The staircase (optional second pass) then moves the plate in fractions of the expected depth
+    quantum. ``station_z_mm`` is Z0 for every pose; the plate pose carries the move."""
     params, geometry = builder.params, builder.geometry
     z0 = params.z_reference_mm
+    quantum_mm = geometry.depth_quantum_mm(builder.disparity_quantum_px, z0)
+    rungs = z_step_rungs_mm(params, quantum_mm)
     for ladder_index in DEMO_ZSTEP_LADDER_INDICES:
-        step = params.z_step_ladder_mm[ladder_index]
+        step = rungs[ladder_index]
         for _ in range(DEMO_ZSTEP_CYCLES):
             for visit, offset in ((VISIT_A, 0.0), (VISIT_B, step), (VISIT_A, 0.0), (VISIT_B, step)):
                 builder.add(PROCEDURE_ZSTEP, TARGET_NOISE_PLATE, None, z0, FIELD_POSITION_CENTER,
                             params.frames_per_zstep_pose, SUBSERIES_LADDER,
                             fronto_parallel_pose(0.0, 0.0, z0 + offset), step_mm=step, visit=visit)
-    # Expected depth quantum at Z0 from the model's disparity quantum (the staircase of Section 6.2,
-    # Step 3 divides one quantum into Z_STAIRCASE_SUBDIVISION fine steps).
-    quantum_mm = geometry.depth_quantum_mm(builder.disparity_quantum_px, z0)
+    # The ramp at the A stations (the plate does not depend on the pixel size of the --quick sensor).
+    plate = make_noise_plate(params)
+    for station in (params.z_min_mm, params.z_reference_mm, params.z_max_mm):
+        station_quantum_mm = geometry.depth_quantum_mm(builder.disparity_quantum_px, station)
+        tilt = ramp_tilt_deg(params, geometry, plate, station, station_quantum_mm)
+        pose, notes = ramp_pose(params, geometry, plate, station, station_quantum_mm, tilt)
+        builder.add(PROCEDURE_ZSTEP, TARGET_NOISE_PLATE, None, station, FIELD_POSITION_CENTER,
+                    params.frames_per_ramp_pose, SUBSERIES_RAMP, pose, tilt_axis=TILT_AXIS_H, tilt_deg=tilt, notes=notes)
+    # The optional staircase divides one expected quantum at Z0 into Z_STAIRCASE_SUBDIVISION fine steps (never below
+    # the smallest move the robot is trusted to make).
+    fine_step_mm = staircase_step_mm(params, quantum_mm)
     for step_index in range(1, DEMO_STAIRCASE_STEPS + 1):
-        offset = step_index * quantum_mm / params.z_staircase_subdivision
+        offset = step_index * fine_step_mm
         builder.add(PROCEDURE_ZSTEP, TARGET_NOISE_PLATE, None, z0, FIELD_POSITION_CENTER, params.z_staircase_frames,
                     SUBSERIES_STAIRCASE, fronto_parallel_pose(0.0, 0.0, z0 + offset), step_mm=offset)
 

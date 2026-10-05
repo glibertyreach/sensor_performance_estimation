@@ -11,7 +11,8 @@ What it computes
 Every commanded pose of the series of Part I, in the order of the procedure:
 the registration poses of Section 4 (R, on the noise plate T2, from Z_MIN to Z_MAX), the noise series of Section 5 (A:
 main stations in a seeded random order, tilt sub-series, repeat-mount check), the edge series
-of Section 6.1 (B), the Z-step series of Section 6.2 (Z: step ladder and fine staircase), the area series of
+of Section 6.1 (B), the Z-step series of Section 6.2 (Z: step ladder with rungs in expected quanta at the reduced
+stations, and one tilted ramp pose at every station; ``--staircase`` adds the optional fine staircase), the area series of
 Section 7 (C: jittered poses, field sub-series, optional open-background
 variant) and the detection series of Section 8 (D: main trials at every station and
 extended zero-detection trials at the farthest stations),
@@ -102,6 +103,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="append the filters-off repeat of the A and B series (A, B-HV and B-Z; Section 4, Step 4.2) "
                              "after each filters-on series; its poses are labeled filters_off and are listed outside "
                              "the main budget in plan_summary.txt")
+    parser.add_argument("--staircase", action="store_true",
+                        help="add the optional second pass of the B-Z series, the fine staircase (Section 6.2), at the "
+                             "reduced stations; its poses are labeled staircase and are listed outside the main budget "
+                             "in plan_summary.txt (the ramp and the step ladder are always planned)")
     parser.add_argument("--open-background", action="store_true",
                         help="add the open-background variant of the C series for the cutout arrays (Section 7, Step 4)")
     return parser
@@ -124,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
         plan = plan_full_session(params, geometry, np.random.default_rng(args.seed), registration=registration,
                                  filters_off=args.filters_off,
                                  open_background=args.open_background, extended=not args.no_extended, targets=targets,
-                                 series=args.series, diagnostics=diagnostics)
+                                 series=args.series, diagnostics=diagnostics, staircase=args.staircase)
     except (OSError, ValueError, MissingSensorValue, PlanInputError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return EXIT_INPUT_ERROR

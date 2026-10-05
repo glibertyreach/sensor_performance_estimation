@@ -30,7 +30,7 @@ Frames and conventions
 
 The columns of Section 9 are all present (``MANIFEST_COLUMNS``); the columns
 after the document's list (sub-series, tilt, step, visit) carry the details of
-the A tilt sub-series, the B-Z ladder and staircase, and the C and D variants,
+the A tilt sub-series, the B-Z ladder, ramp and staircase, and the C and D variants,
 which the document names in its steps but not in the column list.
 """
 from __future__ import annotations
@@ -74,8 +74,11 @@ SUBSERIES_JITTER = "jitter"
 """A random-offset pose (B-HV Step 3, C Step 2, D)."""
 SUBSERIES_LADDER = "ladder"
 """A B-Z step-ladder visit (Section 6.2, Step 2)."""
+SUBSERIES_RAMP = "ramp"
+"""The B-Z ramp pose of a station: T2 tilted about H so that the depth across the visible plate spans a few quanta
+(Section 6.2)."""
 SUBSERIES_STAIRCASE = "staircase"
-"""A B-Z fine-staircase step (Section 6.2, Step 3)."""
+"""A step of the OPTIONAL B-Z second pass, the fine staircase (Section 6.2)."""
 SUBSERIES_FIELD = "field"
 """The C field sub-series (Section 7, Step 3)."""
 SUBSERIES_OPEN = "open"

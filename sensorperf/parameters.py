@@ -230,7 +230,10 @@ class CharacterizationParameters:
     frames_per_edge_pose: int = 30
     """Frames per edge pose (B-HV)."""
     frames_per_zstep_pose: int = 10
-    """Frames per Z-step pose (B-Z)."""
+    """Frames per Z-step pose (B-Z ladder visits)."""
+    frames_per_ramp_pose: int = 50
+    """Frames per pose of the B-Z ramp sub-series (Section 6.2): the ramp is one pose per station, so it takes more
+    frames than a ladder visit (the same as a tilt pose of A)."""
     frames_per_area_pose: int = 10
     """Frames per area pose (C)."""
     frames_per_detection_trial: int = 1
@@ -251,8 +254,14 @@ class CharacterizationParameters:
     """Random-offset poses per array at each off-axis field position (Section 7, Step 3)."""
 
     # Z-step test
-    z_step_ladder_mm: tuple[float, ...] = (0.1, 0.2, 0.5, 1.0, 2.0, 4.0)
-    """Commanded step sizes of the B-Z ladder."""
+    z_step_ladder_quanta: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0, 4.0, 8.0)
+    """Commanded rungs of the B-Z step ladder, as multiples of the expected depth quantum at the station,
+    dZ_q(Z0) = q Z0^2 / k with the Tier-A q until Analysis A has measured one (Section 6.2). Each rung is raised to at
+    least ``robot_min_resolvable_move_mm``. At the indicative geometry the rungs run from 0.1 to 3.1 mm at 400 mm, 0.39 to
+    12.4 mm at 800 mm and 1.55 to 50 mm at 1600 mm; the planner lists them per station in plan_summary.txt."""
+    robot_min_resolvable_move_mm: float = 0.1
+    """The smallest Z move the robot is trusted to execute (Neil's figure, mm). A ladder rung or a staircase step smaller
+    than this is raised to it; the analysis takes the read-back displacement as the truth in any case."""
     robot_repeatability_mm: float = 0.05
     """Position repeatability of the robot (ISO 9283), the equipment requirement of Section 3.1; a commanded Z step
     smaller than this has a step truth no better than the robot itself, so such ladder rungs are reported but flagged."""
@@ -263,12 +272,17 @@ class CharacterizationParameters:
     the pose, in the direction of increasing Z."""
     z_step_repeats: int = 10
     """ABAB cycles for each step size."""
+    ramp_quanta: float = 4.0
+    """The B-Z ramp tilts the plate about H so that the true depth across the plate's VISIBLE height (the smaller of the
+    plate height and the field height at that Z) spans this many expected depth quanta (Section 6.2)."""
     z_staircase_subdivision: int = 10
-    """Fine-sweep points per expected depth quantum."""
+    """OPTIONAL second pass (staircase): fine-sweep points per expected depth quantum; the step is
+    max(dZ_q / this, ``robot_min_resolvable_move_mm``)."""
     z_staircase_quanta: float = 3.0
-    """The fine staircase sweeps from Z0 to Z0 plus this many expected quanta (Section 6.2, Step 3)."""
+    """OPTIONAL second pass (staircase): the sweep runs from Z0 to Z0 plus this many expected quanta (Section 6.2). The
+    staircase is planned only when ``plan_stations --staircase`` asks for it and is outside the Section 9 budget."""
     z_staircase_frames: int = 10
-    """Frames per staircase step."""
+    """OPTIONAL second pass (staircase): frames per step."""
     zstep_patch_sizes_px: tuple[int, ...] = (1, 5, 20)
     """Side lengths of the square patches of the B-Z analysis (1 px, 5 x 5, 20 x 20)."""
 

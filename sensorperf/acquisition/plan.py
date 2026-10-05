@@ -84,7 +84,7 @@ from sensorperf.geometry.targets import (
 from sensorperf.geometry.transforms import RigidTransform
 from sensorperf.io.manifest import (
     FIELD_FRACTION_ACHIEVED_KEY, SUBSERIES_EXTENDED, SUBSERIES_FIELD, SUBSERIES_FILTERS_OFF, SUBSERIES_JITTER, SUBSERIES_LADDER, SUBSERIES_MAIN,
-    SUBSERIES_NOMINAL, SUBSERIES_OPEN, SUBSERIES_REMOUNT, SUBSERIES_SENTINEL, SUBSERIES_STAIRCASE, SUBSERIES_TILT,
+    SUBSERIES_NOMINAL, SUBSERIES_OPEN, SUBSERIES_RAMP, SUBSERIES_REMOUNT, SUBSERIES_SENTINEL, SUBSERIES_STAIRCASE, SUBSERIES_TILT,
     TARGET_POSE_COLUMNS, TILT_AXIS_H, TILT_AXIS_V, VISIT_A, VISIT_B, format_file_name, pose_to_six,
     six_to_pose,
 )
@@ -105,7 +105,7 @@ FILTERS_OFF_POSE_INDEX_BASE = 1000
 """First pose index of the filters-off repeat of series A, B-HV and B-Z (Section 4, Step 4.2; the
 repeat of Section 5, Step 7 extended to the edge and depth-step series). The file-name rule has no
 field for the filter state, so the repeat takes pose indices above those of the filters-on series at
-the same station. The B-Z series has up to about 150 poses at one station (ladder plus staircase), so
+the same station. The B-Z series has up to about 150 poses at one station (ladder, ramp and optional staircase), so
 the base must clear that; the four-digit index (P1000) is accepted by the file-name pattern."""
 TIER_A_DISPARITY_QUANTUM_PX = 0.125
 """Disparity quantum q assumed for the expected depth quantum dZ_q = q Z^2 / k of the
@@ -120,6 +120,10 @@ TILT_NEAR_EDGE_TOLERANCE_MM = 1.0e-9
 (numerical guard of the tilt feasibility rule, :func:`tilt_is_feasible`)."""
 FIT_VIOLATION_TOLERANCE_PX = 1.0e-6
 """A fit violation at or below this many pixels counts as fitting (numerical guard)."""
+RAMP_FIT_WORSENING_TOLERANCE_PX = 1.0
+"""A ramp pose (a tilt of a fraction of a degree to a few degrees) that fits the field of view worse than the untilted plate
+by more than this many pixels raises a warning; the sub-pixel worsening that a small tilt always causes at a station where
+the untilted plate already touches the edge margin (the principal point is off the image center) is not worth one."""
 FIELD_PULL_REPORT_TOLERANCE = 1.0e-9
 """A kept fraction below 1 by more than this counts as an adjustment worth reporting."""
 FEATURE_OUTLINE_SAMPLES = 64
@@ -141,17 +145,21 @@ PERCENT = 100.0
 PLOT_GRID_ALPHA = 0.3
 """Opacity of the grid lines of plan.png."""
 
-DOCUMENT_ESTIMATE_POSES = 7278
-DOCUMENT_ESTIMATE_FRAMES = 43000
-DOCUMENT_ESTIMATE_HOURS = 7.26
+DOCUMENT_ESTIMATE_POSES = 7194
+DOCUMENT_ESTIMATE_FRAMES = 42520
+DOCUMENT_ESTIMATE_HOURS = 7.18
 """The capture-budget estimate printed in Section 9 of the procedure document (poses, frames, robot hours) for the
 redesigned plan: the totals of ``plan_full_session`` with the default parameters, the indicative geometry (10
-frames/s) and no optional variants (no filters-off repeat, no open-background variant; 7,278 poses, 43,000 frames,
-7.26 h). The A series has 47 main poses (nine ladder stations at five field positions plus the two legacy depths at the
-center), 16 tilt poses (the 800 and 1600 mm stations; every tilt at 400 mm is infeasible) and the re-mount check, and the
+frames/s) and no optional variants (no filters-off repeat, no open-background variant, no staircase; 7,194 poses, 42,520
+frames, 7.18 h). The B-Z series has 369 poses: the step ladder (6 rungs x 10 cycles x 2 visits at the three reduced
+stations, 360 poses, 3,600 frames) and the ramp (one pose at each of the nine stations, 450 frames). The A series has
+47 main poses (nine ladder stations at five field positions plus the two legacy depths at the center), 16 tilt poses (the 800 and 1600 mm stations; every tilt at 400 mm is infeasible) and the re-mount check, and the
 sentinels (11, on the mounted target) are part of the totals. plan_summary.txt compares the plan it summarizes with these
-numbers, so a change of the parameters shows up as a ratio away from 1. The filters-off repeat is never part of these
-totals (see ``capture_budget``)."""
+numbers, so a change of the parameters shows up as a ratio away from 1. The filters-off repeat and the optional B-Z
+staircase are never part of these totals (see ``capture_budget``)."""
+
+OPTIONAL_SUBSERIES = (SUBSERIES_FILTERS_OFF, SUBSERIES_STAIRCASE)
+"""Sub-series outside the main (Section 9) budget: the filters-off repeat and the optional B-Z staircase."""
 
 PLAN_CSV_NAME = "poses.csv"
 PLAN_SUMMARY_NAME = "plan_summary.txt"
@@ -758,72 +766,188 @@ def default_expected_quantum_mm(geometry: SensorGeometry,
     return lambda depth_mm: geometry.depth_quantum_mm(disparity_quantum_px, depth_mm)
 
 
+def z_step_rungs_mm(params: CharacterizationParameters, expected_quantum_mm: float) -> list[float]:
+    """The commanded rungs of the step ladder at one station, mm, ascending (Section 6.2, Step 2): each multiple in
+    ``params.z_step_ladder_quanta`` of the expected depth quantum there, raised to at least
+    ``params.robot_min_resolvable_move_mm`` (the smallest Z move the robot is trusted to execute). Two rungs that the
+    floor makes equal are one rung (the ladder repeats a rung only once)."""
+    raw = [max(float(q) * float(expected_quantum_mm), params.robot_min_resolvable_move_mm)
+           for q in params.z_step_ladder_quanta]
+    return sorted(set(raw))
+
+
+def ramp_visible_height_mm(geometry: SensorGeometry, plate: TwoPlaneTarget, station_z_mm: float) -> float:
+    """Height of the part of the plate the sensor sees at the station, mm: the smaller of the plate height and the field
+    height at that Z (the plate fills the image at 400 mm and is smaller than the image from about 550 mm on)."""
+    field_height = 2.0 * geometry.half_field_mm(station_z_mm)[1]
+    return min(2.0 * plate.half_height_mm, field_height)
+
+
+def ramp_tilt_deg(params: CharacterizationParameters, geometry: SensorGeometry, plate: TwoPlaneTarget,
+                  station_z_mm: float, expected_quantum_mm: float) -> float:
+    """Tilt about H, degrees, that makes the true depth across the visible height of the plate span
+    ``params.ramp_quanta`` expected quanta: sin(tilt) = RAMP_QUANTA dZ_q / visible height (Section 6.2, Step 4). The tilt
+    axis is parallel to the baseline (H, image columns), so every image row lies at one true depth. Raises ValueError
+    when the wanted span exceeds the visible height (no tilt can give it)."""
+    span_mm = params.ramp_quanta * expected_quantum_mm
+    visible_mm = ramp_visible_height_mm(geometry, plate, station_z_mm)
+    if span_mm >= visible_mm:
+        raise ValueError(f"the ramp span {span_mm:.1f} mm ({params.ramp_quanta:g} quanta of {expected_quantum_mm:.2f} mm) "
+                         f"is not less than the visible plate height {visible_mm:.1f} mm at Z = {station_z_mm:g} mm")
+    return math.degrees(math.asin(span_mm / visible_mm))
+
+
+def ramp_pose(params: CharacterizationParameters, geometry: SensorGeometry, plate: TwoPlaneTarget,
+              station_z_mm: float, expected_quantum_mm: float, tilt_deg: float) -> tuple[RigidTransform, dict[str, Any]]:
+    """The target pose of the ramp at a station and the notes that describe it: the plate centered, tilted about H by
+    ``tilt_deg`` (:func:`ramp_tilt_deg`). The tilt-feasibility rule (:func:`tilt_is_feasible`) applies: when the near edge
+    would come closer than Z_MIN, the plate center is moved farther by exactly the shortfall so that the near edge sits at
+    Z_MIN (``ramp_center_shift_mm``, 0 when no move was needed); the station label stays Z0. Shared by the planner and by
+    the demonstration plan of the simulator."""
+    shift = 0.0
+    if not tilt_is_feasible(params, plate, station_z_mm, TILT_AXIS_H, tilt_deg):
+        shift = params.z_min_mm - tilt_near_edge_mm(plate, station_z_mm, TILT_AXIS_H, tilt_deg)
+    center_z = station_z_mm + shift
+    notes = {"expected_quantum_mm": expected_quantum_mm, "ramp_span_mm": params.ramp_quanta * expected_quantum_mm,
+             "ramp_visible_height_mm": ramp_visible_height_mm(geometry, plate, station_z_mm),
+             "ramp_center_shift_mm": shift,
+             "near_edge_mm": tilt_near_edge_mm(plate, center_z, TILT_AXIS_H, tilt_deg),
+             "far_edge_mm": center_z + plate.half_height_mm * math.sin(math.radians(tilt_deg))}
+    return tilted_pose(0.0, 0.0, center_z, TILT_AXIS_H, tilt_deg), notes
+
+
+def staircase_step_mm(params: CharacterizationParameters, expected_quantum_mm: float) -> float:
+    """Step of the optional staircase, mm: one ``z_staircase_subdivision``-th of the expected quantum, never below
+    ``params.robot_min_resolvable_move_mm``."""
+    return max(expected_quantum_mm / params.z_staircase_subdivision, params.robot_min_resolvable_move_mm)
+
+
+def _quantum_function(geometry: SensorGeometry,
+                      expected_quantum_mm: Callable[[float], float] | float | None) -> Callable[[float], float]:
+    """The expected depth quantum as a function of the station depth: the given function, the given constant (mm) or,
+    by default, the Tier-A disparity quantum (:func:`default_expected_quantum_mm`)."""
+    if expected_quantum_mm is None:
+        return default_expected_quantum_mm(geometry)
+    if callable(expected_quantum_mm):
+        return expected_quantum_mm
+    constant = float(expected_quantum_mm)
+    return lambda depth_mm: constant
+
+
 def plan_zstep_series(params: CharacterizationParameters, geometry: SensorGeometry, rng: np.random.Generator,
                       expected_quantum_mm: Callable[[float], float] | float | None = None,
                       targets: TargetSet | None = None,
                       diagnostics: PlanDiagnostics | None = None,
-                      filters_off: bool = False) -> list[PlannedCapture]:
-    """Section 6.2 (Series B-Z, procedure letter Z), target T2 centered and fronto-parallel at each Z0
-    in the reduced stations (``params.z_reduced_stations_mm()``, Step 1).
+                      filters_off: bool = False, staircase: bool = False) -> list[PlannedCapture]:
+    """Section 6.2 (Series B-Z, procedure letter Z), target T2 fronto-parallel (ladder, staircase) or tilted about H (ramp).
 
-    Step 2, step ladder: for each delta in Z_STEP_LADDER_MM the target alternates between Z0 and
-    Z0 + delta for Z_STEP_REPEATS cycles (A, B, A, B, ...). Each visit is its own pose with
-    FRAMES_PER_ZSTEP_POSE frames, sub-series "ladder", visit "A" or "B" and step_mm = delta for both
-    visits; the commanded displacement is 0 for A and delta for B (``notes["displacement_mm"]``, and the
-    target pose carries it in its Z). The ground truth of the
-    step is the read-back robot pose carried into the camera frame (the analysis takes the difference of the registered
-    front-plane depth of the two visits).
-    Every visit of series Z is approached from below (``notes["approach"]``): the robot backs off by
-    ``params.z_step_approach_overshoot_mm`` toward smaller Z and then moves up onto the pose, so backlash does not
-    enter the A / B difference.
-    Step 3, fine staircase: from Z0 to Z0 + Z_STAIRCASE_QUANTA x dZ_q in steps of dZ_q /
-    Z_STAIRCASE_SUBDIVISION (both ends included), Z_STAIRCASE_FRAMES frames per step, sub-series
-    "staircase", step_mm = the displacement from Z0. dZ_q comes from ``expected_quantum_mm`` (a function
-    of Z, or one number in mm; default: the Tier-A disparity quantum, TIER_A_DISPARITY_QUANTUM_PX).
-    Step 4: the Z0 visits of the ladder serve as the no-step reference, so no extra poses are planned.
+    The expected depth quantum at a station is dZ_q(Z0) = q Z0^2 / k from ``expected_quantum_mm`` (a function of Z, or one
+    number in mm; default: the Tier-A disparity quantum, TIER_A_DISPARITY_QUANTUM_PX, until Analysis A has measured one).
 
-    Section 4, Step 4.2 (``filters_off=True``): returns the filters-off repeat of the whole series instead (the
-    ladder and the staircase; visit and step_mm are kept), with the sub-series "filters_off" on every pose and pose
-    indices from FILTERS_OFF_POSE_INDEX_BASE, as the A repeat of :func:`plan_noise_series`.
+    Step 2, step ladder, at the reduced stations (``params.z_reduced_stations_mm()``), centered: the rungs of a station are
+    the multiples Z_STEP_LADDER_QUANTA of dZ_q(Z0), each raised to at least ROBOT_MIN_RESOLVABLE_MOVE_MM
+    (:func:`z_step_rungs_mm`; at the indicative geometry 0.1 to 3.1 mm at 400 mm, 0.39 to 12.4 mm at 800 mm, 1.55 to 50 mm at
+    1600 mm, listed per station in plan_summary.txt). For each rung delta the target alternates between Z0 and Z0 + delta
+    for Z_STEP_REPEATS cycles (A, B, A, B, ...). Each visit is its own pose with FRAMES_PER_ZSTEP_POSE frames, sub-series
+    "ladder", visit "A" or "B" and step_mm = delta for both visits; the commanded displacement is 0 for A and delta for B
+    (``notes["displacement_mm"]``, and the target pose carries it in its Z). The ground truth of the step is the read-back
+    robot pose carried into the camera frame (the analysis takes the difference of the registered front-plane depth of
+    the two visits). Every visit of series Z is approached from below (``notes["approach"]``): the robot backs off by
+    ``params.z_step_approach_overshoot_mm`` toward smaller Z and then moves up onto the pose, so backlash does not enter
+    the A / B difference. Step 4: the Z0 visits of the ladder serve as the no-step reference, so no extra poses are planned.
+
+    Ramp, at EVERY station of the ladder (``params.z_stations_mm()``), sub-series "ramp": one pose of T2 tilted about H (the
+    tilt axis parallel to the baseline, so each image row lies at one true depth) by the angle that makes the true depth
+    across the plate's visible height span RAMP_QUANTA expected quanta (:func:`ramp_tilt_deg`), FRAMES_PER_RAMP_POSE frames.
+    The tilt is stored in ``tilt_deg`` and printed per station in plan_summary.txt. The tilt-feasibility rule of the A tilt
+    sub-series applies (:func:`tilt_is_feasible`: the plate's near edge, Z - h sin(tilt), stays at or beyond Z_MIN). The
+    ramp tilts are small, but the plate is 400 mm high, so at Z0 = Z_MIN the near edge would be a millimeter closer than
+    Z_MIN; there (and wherever the rule would fail) the plate center is moved farther by exactly the shortfall so that the
+    near edge sits at Z_MIN (``notes["ramp_center_shift_mm"]``, noted in plan_summary.txt); the station stays Z0. A station
+    whose ramp is geometrically impossible (span not less than the visible height) is skipped and listed with the reason.
+
+    Optional second pass, the staircase (``staircase=True``; default off; outside the Section 9 budget, as the filters-off
+    repeat), at the reduced stations: from Z0 to Z0 + Z_STAIRCASE_QUANTA x dZ_q in steps of max(dZ_q /
+    Z_STAIRCASE_SUBDIVISION, ROBOT_MIN_RESOLVABLE_MOVE_MM) (:func:`staircase_step_mm`; both ends included, the last step
+    the one nearest the span), Z_STAIRCASE_FRAMES frames per step, sub-series "staircase", step_mm = the displacement from Z0.
+
+    Section 4, Step 4.2 (``filters_off=True``): returns the filters-off repeat of the whole series instead (the ladder, the
+    ramp and, when asked for, the staircase; visit and step_mm are kept), with the sub-series "filters_off" on every pose and
+    pose indices from FILTERS_OFF_POSE_INDEX_BASE, as the A repeat of :func:`plan_noise_series`.
 
     No random draws occur in this series; ``rng`` is accepted so all planners share one signature."""
-    del rng, targets                       # no randomness and no target geometry needed here
+    del rng                                # no randomness needed here
+    plate = _targets(params, geometry, targets).get(TARGET_NOISE_PLATE)
+    margin = _fit_margin_px(params, jittered=False)
+    camera = camera_of(geometry)
     ladder_label = SUBSERIES_FILTERS_OFF if filters_off else SUBSERIES_LADDER
+    ramp_label = SUBSERIES_FILTERS_OFF if filters_off else SUBSERIES_RAMP
     staircase_label = SUBSERIES_FILTERS_OFF if filters_off else SUBSERIES_STAIRCASE
-    if expected_quantum_mm is None:
-        quantum_at = default_expected_quantum_mm(geometry)
-    elif callable(expected_quantum_mm):
-        quantum_at = expected_quantum_mm
-    else:
-        constant = float(expected_quantum_mm)
-        quantum_at = lambda depth_mm: constant      # noqa: E731 (a constant quantum at every depth)
+    quantum_at = _quantum_function(geometry, expected_quantum_mm)
+    approach = {"approach": APPROACH_FROM_BELOW, "approach_overshoot_mm": params.z_step_approach_overshoot_mm}
     counter = _PoseCounter(FILTERS_OFF_POSE_INDEX_BASE if filters_off else 0)
     plan: list[PlannedCapture] = []
+    # Step 2: the step ladder at the reduced stations.
     for z0 in params.z_reduced_stations_mm():
-        for delta in params.z_step_ladder_mm:
+        quantum = float(quantum_at(z0))
+        rungs = z_step_rungs_mm(params, quantum)
+        if diagnostics is not None:
+            diagnostics.note(f"B-Z ladder at Z0 = {z0:g} mm: expected depth quantum {quantum:.3f} mm "
+                             f"(Tier-A q = {TIER_A_DISPARITY_QUANTUM_PX:g} px unless a measured value was given), rungs "
+                             + ", ".join(f"{r:.3g}" for r in rungs) + " mm")
+            if z0 + rungs[-1] > params.z_max_mm:
+                diagnostics.note(f"B-Z ladder at Z0 = {z0:g} mm: the largest rung ({rungs[-1]:.3g} mm) moves the plate to "
+                                 f"{z0 + rungs[-1]:.0f} mm, beyond Z_MAX = {params.z_max_mm:g} mm")
+        for delta in rungs:
             for _ in range(params.z_step_repeats):
                 for visit, displacement in ((VISIT_A, 0.0), (VISIT_B, float(delta))):
                     plan.append(_new_capture(
                         counter, PROCEDURE_ZSTEP, TARGET_NOISE_PLATE, None, z0, FIELD_POSITION_CENTER,
                         params.frames_per_zstep_pose, ladder_label,
                         fronto_parallel_pose(0.0, 0.0, z0 + displacement), step_mm=float(delta), visit=visit,
-                        notes={"displacement_mm": displacement, "approach": APPROACH_FROM_BELOW,
-                               "approach_overshoot_mm": params.z_step_approach_overshoot_mm}))
+                        notes={"displacement_mm": displacement, "expected_quantum_mm": quantum, **approach}))
+    # Ramp: one tilted pose at every station of the ladder.
+    for z0 in params.z_stations_mm():
         quantum = float(quantum_at(z0))
-        step = quantum / params.z_staircase_subdivision
-        steps = int(round(params.z_staircase_quanta * params.z_staircase_subdivision))
-        if diagnostics is not None:
-            diagnostics.note(f"B-Z staircase at Z0 = {z0:g} mm: expected depth quantum {quantum:.3f} mm "
-                             f"(Tier-A q = {TIER_A_DISPARITY_QUANTUM_PX:g} px unless a measured value was given), "
-                             f"{steps + 1} steps of {step:.4f} mm")
-        for k in range(steps + 1):
-            displacement = k * step
-            plan.append(_new_capture(
-                counter, PROCEDURE_ZSTEP, TARGET_NOISE_PLATE, None, z0, FIELD_POSITION_CENTER,
-                params.z_staircase_frames, staircase_label, fronto_parallel_pose(0.0, 0.0, z0 + displacement),
-                step_mm=displacement, notes={"displacement_mm": displacement, "staircase_step": k,
-                                             "approach": APPROACH_FROM_BELOW,
-                                             "approach_overshoot_mm": params.z_step_approach_overshoot_mm}))
+        try:
+            tilt = ramp_tilt_deg(params, geometry, plate, z0, quantum)
+        except ValueError as error:
+            if diagnostics is not None:
+                diagnostics.skip(f"B-Z ramp at Z0 = {z0:g} mm: skipped; {error}")
+            continue
+        pose, notes = ramp_pose(params, geometry, plate, z0, quantum, tilt)
+        shift = notes["ramp_center_shift_mm"]
+        if shift > 0.0 and diagnostics is not None:
+            diagnostics.note(
+                f"B-Z ramp at Z0 = {z0:g} mm: the plate's near edge would be at "
+                f"{tilt_near_edge_mm(plate, z0, TILT_AXIS_H, tilt):.2f} mm, closer than Z_MIN = {params.z_min_mm:g} mm "
+                f"(tilt {tilt:.2f} deg, half plate height {plate.half_height_mm:g} mm); the plate center is moved "
+                f"{shift:.2f} mm farther so that the near edge sits at Z_MIN")
+        notes.update(approach)
+        plan.append(_new_capture(counter, PROCEDURE_ZSTEP, TARGET_NOISE_PLATE, None, z0, FIELD_POSITION_CENTER,
+                                 params.frames_per_ramp_pose, ramp_label, pose, tilt_axis=TILT_AXIS_H, tilt_deg=tilt,
+                                 notes=notes))
+        if fit_violation_px(camera, plate, pose, margin) > fit_violation_px(
+                camera, plate, fronto_parallel_pose(0.0, 0.0, z0), margin) + RAMP_FIT_WORSENING_TOLERANCE_PX:
+            _warn(diagnostics, f"B-Z: the T2 plate tilted {tilt:.2f} deg about H at Z = {z0:g} mm (ramp) fits the field "
+                               "of view worse than the untilted plate; check that it covers the analysis region")
+    # Optional second pass: the staircase.
+    if staircase:
+        for z0 in params.z_reduced_stations_mm():
+            quantum = float(quantum_at(z0))
+            step = staircase_step_mm(params, quantum)
+            steps = int(round(params.z_staircase_quanta * quantum / step))
+            if diagnostics is not None:
+                raised = " (raised to ROBOT_MIN_RESOLVABLE_MOVE_MM)" if step > quantum / params.z_staircase_subdivision else ""
+                diagnostics.note(f"B-Z staircase (optional) at Z0 = {z0:g} mm: expected depth quantum {quantum:.3f} mm, "
+                                 f"{steps + 1} steps of {step:.4f} mm{raised}, {quantum / step:.1f} steps per quantum")
+            for k in range(steps + 1):
+                displacement = k * step
+                plan.append(_new_capture(
+                    counter, PROCEDURE_ZSTEP, TARGET_NOISE_PLATE, None, z0, FIELD_POSITION_CENTER,
+                    params.z_staircase_frames, staircase_label, fronto_parallel_pose(0.0, 0.0, z0 + displacement),
+                    step_mm=displacement, notes={"displacement_mm": displacement, "staircase_step": k,
+                                                 "expected_quantum_mm": quantum, **approach}))
     return _renumber(plan)
 
 
@@ -1116,13 +1240,15 @@ def plan_full_session(params: CharacterizationParameters, geometry: SensorGeomet
                       registration: Registration | None = None, expected_quantum_mm: Callable[[float], float] | float | None = None,
                       filters_off: bool = False, open_background: bool = False, extended: bool = True,
                       targets: TargetSet | None = None, series: Iterable[str] | None = None,
-                      diagnostics: PlanDiagnostics | None = None) -> list[PlannedCapture]:
+                      diagnostics: PlanDiagnostics | None = None, staircase: bool = False) -> list[PlannedCapture]:
     """All series in the order of the procedure (R, A, B-HV, B-Z, C, D) with drift sentinels inserted once over
     the whole plan and ``order`` renumbered 0..N-1.
 
     ``series`` selects a subset by procedure letter (any of R, A, B, Z, C, D; default all). ``filters_off``
     appends the filters-off repeat (Section 4, Step 4.2: series A, B-HV and B-Z, each right after its filters-on
-    series; sub-series "filters_off", outside the main budget) to each of those series. ``registration`` is only checked here: a
+    series; sub-series "filters_off", outside the main budget) to each of those series. ``staircase`` adds the optional
+    second pass of series B-Z (the staircase of Section 6.2, outside the main budget; the filters-off repeat of B-Z then
+    includes it). ``registration`` is only checked here: a
     registration whose residual was not accepted triggers a warning (the commanded flange poses depend on it; they
     are computed by :func:`write_plan`). The other arguments are those of the series planners."""
     chosen = set(PLANNED_SERIES) if series is None else {s.upper() for s in series}
@@ -1146,10 +1272,11 @@ def plan_full_session(params: CharacterizationParameters, geometry: SensorGeomet
         if filters_off:
             parts += plan_edge_series(params, geometry, rng, target_set, diagnostics, filters_off=True)
     if PROCEDURE_ZSTEP in chosen:
-        parts += plan_zstep_series(params, geometry, rng, expected_quantum_mm, target_set, diagnostics)
+        parts += plan_zstep_series(params, geometry, rng, expected_quantum_mm, target_set, diagnostics,
+                                   staircase=staircase)
         if filters_off:
             parts += plan_zstep_series(params, geometry, rng, expected_quantum_mm, target_set, diagnostics,
-                                       filters_off=True)
+                                       filters_off=True, staircase=staircase)
     if PROCEDURE_AREA in chosen:
         parts += plan_area_series(params, geometry, rng, open_background, target_set, diagnostics)
     if PROCEDURE_DETECTION in chosen:
@@ -1175,15 +1302,22 @@ class BudgetRow:
 def capture_budget(plan: Sequence[PlannedCapture], frame_rate_hz: float, move_settle_s: float) -> list[BudgetRow]:
     """The Section 9 table: poses, frames and robot hours per series, in the order of the procedure.
     "The estimate assumes 10 frames/s and 3 s per move plus settle": hours = (poses x move_settle_s + frames /
-    frame_rate_hz) / 3600. Series without poses are omitted. The optional filters-off repeat (sub-series
-    "filters_off") is outside the main budget and is not counted here; see :func:`filters_off_budget`."""
-    return _budget_rows([c for c in plan if c.subseries != SUBSERIES_FILTERS_OFF], frame_rate_hz, move_settle_s)
+    frame_rate_hz) / 3600. Series without poses are omitted. The optional passes, the filters-off repeat (sub-series
+    "filters_off") and the B-Z staircase (sub-series "staircase"), are outside the main budget and are not counted here;
+    see :func:`filters_off_budget` and :func:`staircase_budget`."""
+    return _budget_rows([c for c in plan if c.subseries not in OPTIONAL_SUBSERIES], frame_rate_hz, move_settle_s)
 
 
 def filters_off_budget(plan: Sequence[PlannedCapture], frame_rate_hz: float, move_settle_s: float) -> list[BudgetRow]:
     """The same table for the filters-off repeat alone (Section 4, Step 4.2: series A, B-HV and B-Z), which is
     outside the main budget of the document's estimate. Empty when the plan has no filters-off poses."""
     return _budget_rows([c for c in plan if c.subseries == SUBSERIES_FILTERS_OFF], frame_rate_hz, move_settle_s)
+
+
+def staircase_budget(plan: Sequence[PlannedCapture], frame_rate_hz: float, move_settle_s: float) -> list[BudgetRow]:
+    """The same table for the optional B-Z staircase alone (Section 6.2, second pass), which is outside the main budget.
+    Empty when the plan has no staircase poses."""
+    return _budget_rows([c for c in plan if c.subseries == SUBSERIES_STAIRCASE], frame_rate_hz, move_settle_s)
 
 
 def _budget_rows(members_of_plan: Sequence[PlannedCapture], frame_rate_hz: float,
@@ -1346,6 +1480,34 @@ def _adjustment_lines(plan: Sequence[PlannedCapture]) -> list[str]:
     return lines
 
 
+def _zstep_lines(plan: Sequence[PlannedCapture], params: CharacterizationParameters) -> list[str]:
+    """The B-Z lines of plan_summary.txt, from the plan: per station the expected depth quantum, the step-ladder rungs in
+    millimeters and the ramp tilt with its depth span (Section 6.2). Empty when the plan has no ladder or ramp pose."""
+    ladder = [c for c in plan if c.procedure == PROCEDURE_ZSTEP and c.subseries == SUBSERIES_LADDER]
+    ramp = [c for c in plan if c.procedure == PROCEDURE_ZSTEP and c.subseries == SUBSERIES_RAMP]
+    lines: list[str] = []
+    if ladder:
+        lines += ["", f"B-Z step ladder rungs per station (mm; {', '.join(f'{q:g}' for q in params.z_step_ladder_quanta)} "
+                      f"times the expected depth quantum dZ_q = q Z^2 / k, each at least ROBOT_MIN_RESOLVABLE_MOVE_MM = "
+                      f"{params.robot_min_resolvable_move_mm:g} mm):"]
+        for z in sorted({c.station_z_mm for c in ladder}):
+            rungs = sorted({c.step_mm for c in ladder if c.station_z_mm == z and c.step_mm is not None})
+            quantum = next(c.notes["expected_quantum_mm"] for c in ladder if c.station_z_mm == z)
+            lines.append(f"  Z0 = {z:>5.0f} mm: dZ_q = {quantum:.3f} mm; rungs " + ", ".join(f"{r:.3g}" for r in rungs)
+                         + f" ({params.robot_repeatability_mm:g} mm repeatability is "
+                         + ", ".join(f"{PERCENT * params.robot_repeatability_mm / r:.0f}%" for r in rungs) + " of the rungs)")
+    if ramp:
+        lines += ["", f"B-Z ramp per station (T2 tilted about H, {params.frames_per_ramp_pose} frames; the true depth "
+                      f"across the visible plate height spans {params.ramp_quanta:g} expected quanta):"]
+        for c in sorted(ramp, key=lambda c: c.station_z_mm):
+            shift = c.notes.get("ramp_center_shift_mm", 0.0)
+            lines.append(f"  Z0 = {c.station_z_mm:>5.0f} mm: tilt {c.tilt_deg:.3f} deg, dZ_q = "
+                         f"{c.notes['expected_quantum_mm']:.3f} mm, span {c.notes['ramp_span_mm']:.2f} mm over "
+                         f"{c.notes['ramp_visible_height_mm']:.0f} mm visible height, near edge {c.notes['near_edge_mm']:.1f} mm"
+                         + (f" (plate center moved {shift:.2f} mm farther to keep the near edge at Z_MIN)" if shift > 0 else ""))
+    return lines
+
+
 def plan_summary_text(plan: Sequence[PlannedCapture], params: CharacterizationParameters | None = None,
                       geometry: SensorGeometry | None = None, diagnostics: PlanDiagnostics | None = None,
                       registration: Registration | None = None) -> str:
@@ -1391,11 +1553,16 @@ def plan_summary_text(plan: Sequence[PlannedCapture], params: CharacterizationPa
         if off_rows:
             lines += ["", "Outside the main budget (filters-off repeat, Section 4, Step 4.2; not in the totals above "
                           "or in the comparison with the document's estimate):", format_budget_table(off_rows)]
+        stair_rows = staircase_budget(plan, rate, params.move_and_settle_time_s)
+        if stair_rows:
+            lines += ["", "Outside the main budget (optional B-Z staircase, Section 6.2, second pass; not in the totals "
+                          "above or in the comparison with the document's estimate):", format_budget_table(stair_rows)]
     if any(c.procedure == PROCEDURE_ZSTEP for c in plan):
         lines += ["", f"Series Z approach: every visit {APPROACH_FROM_BELOW} (back off {params.z_step_approach_overshoot_mm:g} mm "
                       "toward smaller Z, then move up onto the pose), so that backlash does not enter the A / B difference.",
                   f"Series Z pose log: write x_mm, y_mm, z_mm with at least {MIN_POSE_LOG_DECIMALS} decimals; the "
                   "read-back pose is the step truth."]
+    lines += _zstep_lines(plan, params)
     adjustments = _adjustment_lines(plan)
     lines += ["", f"Field-offset adjustments (Section 5, Step 1: the target must fit the field; margin = "
                   f"BOUNDARY_BAND_HALF_WIDTH_PX = {params.boundary_band_half_width_px:g} px inside the image, plus half "
