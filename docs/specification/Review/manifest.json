@@ -1,6 +1,6 @@
 {
   "document": "VSX3000_characterization_specification.docx",
-  "built": "2026-10-05T16:33:00",
+  "built": "2026-10-05T16:48:14",
   "source_of_truth": "https://claude.ai/code/artifact/20fd839b-0e95-4210-9e8f-959da07ce6c2",
   "elements": [
     {
@@ -242,11 +242,14 @@
         "shape_station_count": 5,
         "reduced_station_count": 3,
         "zstep_rung_count": 6,
+        "sentinel_frames": 30,
         "gap_small_mm": 15,
         "gap_large_mm": 60
       },
       "refs": [
-        "Section 2"
+        "Section 11.2",
+        "Section 9",
+        "Step 4.8"
       ]
     },
     {

@@ -37,9 +37,9 @@
  },
  "C07": {
   "title": "Acquisition B, edges and Z steps",
-  "reviewed": null,
-  "tier": null,
-  "note": "not yet reviewed"
+  "reviewed": "2026-10-05",
+  "tier": "fable",
+  "note": "R1–R4 and P1 executed; Section 6 in plain-language style; code and procedure pending the planner agent"
  },
  "C08": {
   "title": "Acquisition C, area arrays",

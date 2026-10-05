@@ -68,7 +68,7 @@ VALUE_PATTERNS = {
     "noise_station_count": r"\b9 (?:Z )?stations\b|Z_STATION_RATIO",
     "shape_station_count": r"\b5 (?:shape )?stations\b|Z_SHAPE_STATION_STRIDE",
     "reduced_station_count": r"Z_REDUCED_STATION_STRIDE",
-    "zstep_rung_count": r"Z_STEP_LADDER_MM",
+    "zstep_rung_count": r"Z_STEP_LADDER_QUANTA|\b6 rungs\b",
     "registration_poses": r"REGISTRATION_POSES|\b30 poses\b",
     "sentinel_frames": r"\b30 frames\b",
     "total_poses": r"7,292",

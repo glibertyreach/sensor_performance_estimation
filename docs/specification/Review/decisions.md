@@ -352,3 +352,10 @@ Neil's comments: (pending)
   valid temporal cross-check elsewhere. Section 6.2 therefore keeps the staircase as an optional second pass, run
   only after the ramp has measured the quantum, outside the main budget; the Z_STAIRCASE_* parameters stay, marked
   optional.
+- Neil's question (2026-10-05, during C07 close-out): would anything be learned by moving a plate in small lateral
+  increments (H and V, perpendicular to its normal) while mapping the reported against the actual location of its
+  edge pixels? Reviewer answer in chat: the random jitter poses already contain those pairs, so an "edge position
+  transfer" analysis (reported edge crossing s_50 per pose against the read-back lateral offset: lateral gain,
+  1-px-periodic pixel-locking bias, dot-pitch periodicity, approach hysteresis) can be added to Section 11.1 at no
+  capture cost; a systematic fine sweep (0.1 px steps over 2 px, in H and in V, at the reference station) is an
+  optional second pass that resolves the shape of the periodic bias better. Proposal carried to C12 (Analysis B).
