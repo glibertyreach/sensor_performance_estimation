@@ -134,3 +134,9 @@ Awaiting the person's decisions on P2 and P3 before closing the chunk.
   parameters, C and D sampled at the 11 A stations in Z, θ-scaling tested where adjacent disks overlap.
   Propagation when adopted: Section 2 rows (DIAMETER_*), 3.2 T4/T5 rows and ladder paragraph, Sections 7, 8, 9
   (budget), 12, 13, the code (targets, plan, analyses C and D, simulator, tests) and the technician procedure.
+- C03-P3 (2026-10-05, second directive): for the disk and cutout experiments the robot distance may vary from
+  400 mm to 1600 mm (a factor 4, two octaves of subtended angle). Reviewer proposal put to the person: 4 disks and
+  4 holes at ratio 2√2 (0.70, 1.97, 5.58, 15.8 mm at f_x = 688 px), each spanning two octaves of pixel size with a
+  half-octave overlap at every junction for the θ-scaling test; 9 Z stations log-spaced at 2^(1/4) from 400 to
+  1600 mm; feature isolation set at the far station; noise at each station taken from the plate's own blank regions
+  (A stays at 500–1000 mm). Alternative: 3 disks at ratio 4 without overlap.
