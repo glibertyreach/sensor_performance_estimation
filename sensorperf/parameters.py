@@ -295,13 +295,22 @@ class CharacterizationParameters:
     """Search window radius equals D/2 in pixels plus this margin."""
     detection_trials_per_level: int = 60
     """Independent trials per (feature, station) pair in the D series."""
-    detection_zero_trials: int = 300
-    """Trials per (feature, station) pair at the detection_zero_station_count farthest stations, where the smallest
-    feature lies below the expected threshold and the 0 percent point is bounded (rule of three)."""
-    detection_zero_station_count: int = 3
-    """Number of farthest stations that carry detection_zero_trials trials (1131, 1345 and 1600 mm with the defaults)."""
-    detection_zero_probability_bound: float = 0.01
-    """Upper bound on detection probability that defines practically zero detection."""
+    detection_low_trials: int = 300
+    """Trials per (feature, station) pair at the detection_low_station_count farthest stations, where the smallest
+    feature lies near and below the expected threshold. 300 trials measure a detection probability of 5 percent
+    (detection_low_probability) to about +/- 2.5 percent at the confidence level (the extended trials of Section 8)."""
+    detection_low_station_count: int = 3
+    """Number of farthest stations that carry detection_low_trials trials (1131, 1345 and 1600 mm with the defaults)."""
+    detection_low_probability: float = 0.05
+    """The lowest detection probability the trials measure: D_5, the size at which the false-alarm-corrected detection
+    probability is 5 percent. 300 trials (detection_low_trials) resolve it to about +/- 2.5 percent; a lower level
+    (3 percent) would be marginal at that count. The 0 percent point is not measured (see
+    detection_zero_prediction_level)."""
+    detection_zero_prediction_level: float = 0.01
+    """The false-alarm-corrected probability level to which the fitted psychometric curve is extrapolated to give the
+    predicted D_0 (Section 13). The result is a PREDICTION from the fitted curve below the lowest measured point
+    (D_5), never a measurement: a smooth curve never reaches zero and no finite number of trials proves a
+    probability is zero."""
     detection_lapse_rate_max: float = 0.05
     """Upper bound of the lapse rate lambda in the psychometric fit (Section 13, Step 4)."""
     confidence_level: float = 0.95
@@ -465,10 +474,10 @@ class CharacterizationParameters:
         (:meth:`legacy_extra_stations_mm`)."""
         return tuple(sorted(self.z_stations_mm() + self.legacy_extra_stations_mm()))
 
-    def detection_zero_stations_mm(self) -> tuple[float, ...]:
-        """The DETECTION_ZERO_STATION_COUNT farthest stations (1131, 1345, 1600 mm), which carry
-        DETECTION_ZERO_TRIALS trials per feature."""
-        return self.z_stations_mm()[-self.detection_zero_station_count:]
+    def detection_low_stations_mm(self) -> tuple[float, ...]:
+        """The DETECTION_LOW_STATION_COUNT farthest stations (1131, 1345, 1600 mm), which carry
+        DETECTION_LOW_TRIALS trials per feature (the extended trials that measure the low point, D_5)."""
+        return self.z_stations_mm()[-self.detection_low_station_count:]
 
     def feature_diameters_mm(self, geometry: SensorGeometry) -> tuple[float, ...]:
         """The disk and cutout diameters D_k = FEATURE_MIN_PX_AT_Z_MAX x p(Z_MAX) x FEATURE_LADDER_RATIO^k,
