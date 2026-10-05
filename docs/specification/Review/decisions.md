@@ -420,3 +420,24 @@ to); Section 1 measurand row, Section 8 (plain style, R2 reuse stated as outside
 row label and the time-short note, Section 13 heading, intro, Steps 6–9 and 11, Section 15 limitation, and the
 flow-diagram label follow. Code (detection analysis, parameters, tests) and the technician procedure follow once
 the ramp agent lands (shared parameters module).
+
+## C10 — Section 9 Data logging, file layout, and capture budget (opened 2026-10-05)
+
+Reviewer findings (proposals; nothing executed until Neil closes the chunk):
+- C10-R1 (numbers): the budget table predates the C06, C07 and C09 changes (A at the legacy center only and the
+  tilt rule, sentinels on the mounted target, the ramp in place of the staircase, the low-point series). Proposal:
+  refill every row and the totals from the plan tool at close, after the ramp code lands, and keep the three
+  totals as gate invariants.
+- C10-R2 (consistency with the code): the manifest column list omits columns the code writes and the procedure
+  relies on: the sub-series label (main, tilt, remount, nominal, jitter, ladder, ramp, field, extended, sentinel),
+  tilt axis and angle, commanded step and visit (B-Z), the feature index, the achieved field fraction, and the
+  sentinel's mount-reference flag. Proposal: list the columns as the manifest module defines them, in its order,
+  and say that extra metadata columns may follow.
+- C10-R3 (file names): say that the pose index has three digits, four for the optional repeats planned outside the
+  budget, and that a target without a back plate writes G0.
+- C10-R4 (budget scope): say which captures are outside the budget: the filters-off repeat, the optional
+  staircase and lateral sweep, the open-background variant, the D reuse option, and that target swaps, warm-up,
+  mount checks and registration time are excluded as before.
+- C10-R5 (plain style): the folder-layout and manifest paragraphs are already plain; no change beyond R2–R4.
+
+Neil's comments: (pending)
