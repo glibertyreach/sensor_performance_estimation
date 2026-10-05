@@ -76,7 +76,7 @@ from sensorperf.io.manifest import (
     FIELD_FRACTION_ACHIEVED_KEY, FrameRecord, SUBSERIES_MAIN, SUBSERIES_TILT, TILT_AXIS_H, TILT_AXIS_V, group_by_pose, select,
 )
 from sensorperf.io.session import Session
-from sensorperf.parameters import PROCEDURE_NOISE, PROCEDURE_SENTINEL, TARGET_NOISE_PLATE
+from sensorperf.parameters import FIELD_POSITION_CENTER, PROCEDURE_NOISE, PROCEDURE_SENTINEL, TARGET_NOISE_PLATE
 
 # ---------------------------------------------------------------------------
 # Output names
@@ -280,6 +280,10 @@ class PoseDiagnostics:
     code_counts: np.ndarray
     lsb_mm: float
     legacy_boxes: list[dict[str, Any]] = field(default_factory=list)
+    fixed_pattern_mm: np.ndarray | None = None
+    """The fixed-pattern map of the pose (Step 4): the frame-mean depth minus the free plane fitted to it, mm, NaN outside
+    the region of interest. Kept (float32) only for the fronto-parallel center-field main poses, the ones Analysis B-Z
+    subtracts from its ramp poses (Section 11.2, Ramp); None for every other pose."""
 
 
 @dataclass
@@ -675,9 +679,12 @@ def analyze_pose(session: Session, stack: PoseStack, options: NoiseOptions) -> t
     block = max(1, int(round(camera.width / LEGACY_EFFECTIVE_WIDTH_PX)))
     boxes = legacy_box_metrics(depth, params.legacy_box_centers_px, params.legacy_box_half_px, block)
     row.note = "; ".join(notes)
+    is_center_main = (record.subseries == SUBSERIES_MAIN and record.field == FIELD_POSITION_CENTER
+                      and record.tilt_deg == 0.0)
     diagnostics = PoseDiagnostics(sigma_t_map=sigma_map, roi=roi, acf_h=acf_h, acf_v=acf_v, acf_fp_h=acf_fp_h,
                                   acf_fp_v=acf_fp_v, code_levels=levels, code_counts=counts, lsb_mm=lsb,
-                                  legacy_boxes=boxes)
+                                  legacy_boxes=boxes,
+                                  fixed_pattern_mm=residual.astype(np.float32) if is_center_main else None)
     stamps = [_parse_time(r.timestamp) for r in stack.records]
     stamps = [s for s in stamps if s is not None]
     if stamps:
