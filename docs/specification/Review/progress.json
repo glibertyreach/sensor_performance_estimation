@@ -49,9 +49,9 @@
  },
  "C09": {
   "title": "Acquisition D, detection trials",
-  "reviewed": null,
-  "tier": null,
-  "note": "not yet reviewed"
+  "reviewed": "2026-10-05",
+  "tier": "fable",
+  "note": "R1 (D_5 measured, D_0 predicted) and R2–R4 executed; code and procedure pending"
  },
  "C10": {
   "title": "Data logging, layout, budget",

@@ -410,4 +410,13 @@ Reviewer findings (proposals; nothing executed until Neil closes the chunk):
 - C09-R4 (low): Step 1 is fine; Step 4 should also forbid reusing a C pose's later frames (only its first frame
   is independent of the D poses), which Step 5 implies.
 
-Neil's comments: (pending)
+Neil's comments (2026-10-05): R1: measure at 3–5 %; extrapolate the curve to 0 % as a clearly flagged prediction,
+not a measurement. Closed.
+Executed (document rev 91): the lowest measured point is D_5 (DETECTION_LOW_PROBABILITY = 0.05, which 300 trials
+resolve to about ±2.5 %; 3 % would be marginal at that count); DETECTION_ZERO_TRIALS → DETECTION_LOW_TRIALS,
+DETECTION_ZERO_STATION_COUNT → DETECTION_LOW_STATION_COUNT, DETECTION_ZERO_PROBABILITY_BOUND replaced by
+DETECTION_LOW_PROBABILITY, new DETECTION_ZERO_PREDICTION_LEVEL = 0.01 (the level the fitted curve is extrapolated
+to); Section 1 measurand row, Section 8 (plain style, R2 reuse stated as outside the budget, R3, R4), Section 9
+row label and the time-short note, Section 13 heading, intro, Steps 6–9 and 11, Section 15 limitation, and the
+flow-diagram label follow. Code (detection analysis, parameters, tests) and the technician procedure follow once
+the ramp agent lands (shared parameters module).

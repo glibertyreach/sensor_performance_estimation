@@ -58,7 +58,7 @@ INVARIANTS = [
     {"name": "Features per plate agree everywhere", "key": "feature_count", "value": 3},
     {"name": "Small gap agrees everywhere", "key": "gap_small_mm", "value": 15},
     {"name": "Large gap agrees everywhere", "key": "gap_large_mm", "value": 60},
-    {"name": "Extended trials per level agree everywhere", "key": "detection_zero_trials", "value": 300},
+    {"name": "Extended low-point trials agree everywhere", "key": "detection_zero_trials", "value": 300},
     {"name": "Registration acceptance agrees everywhere", "key": "registration_residual_accept_mm", "value": "0.15"},
 ]
 """The shared numbers the gate proves consistent across sections. Values are the ones the document
@@ -80,7 +80,7 @@ VALUE_PATTERNS = {
     "feature_count": r"FEATURE_COUNT",
     "gap_small_mm": r"GAP_SMALL_MM|\b15 mm\b",
     "gap_large_mm": r"GAP_LARGE_MM|\b60 mm\b",
-    "detection_zero_trials": r"DETECTION_ZERO_TRIALS|\b300 trials\b",
+    "detection_zero_trials": r"DETECTION_LOW_TRIALS|\b300 trials\b",
     "registration_residual_accept_mm": r"REGISTRATION_RESIDUAL_ACCEPT_MM|0\.15 mm",
 }
 """Where a section is taken to assert an invariant: the parameter name or the number with its unit."""

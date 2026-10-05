@@ -1,6 +1,6 @@
 {
   "document": "VSX3000_characterization_specification.docx",
-  "built": "2026-10-05T16:55:37",
+  "built": "2026-10-05T17:01:46",
   "source_of_truth": "https://claude.ai/code/artifact/20fd839b-0e95-4210-9e8f-959da07ce6c2",
   "elements": [
     {
@@ -276,13 +276,12 @@
       "asserts": {
         "noise_station_count": 9,
         "feature_count": 3,
-        "gap_small_mm": 15,
-        "gap_large_mm": 60,
         "detection_zero_trials": 300
       },
       "refs": [
         "Section 13",
-        "Section 7"
+        "Section 7",
+        "Section 9"
       ]
     },
     {
@@ -293,8 +292,7 @@
       "asserts": {
         "total_poses": "7,292",
         "total_frames": "44,140",
-        "total_robot_hours": "7.3",
-        "detection_zero_trials": 300
+        "total_robot_hours": "7.3"
       },
       "refs": [
         "Section 2"
@@ -357,14 +355,13 @@
     {
       "id": "§13",
       "kind": "section",
-      "title": "13. Analysis D: minimum detectable size at 50%, 10%, and 0%",
+      "title": "13. Analysis D: minimum detectable size at 50%, 10%, and 5%, with a predicted 0% point",
       "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
       "asserts": {},
       "refs": [
         "Section 10",
         "Section 12",
-        "Section 14",
-        "Step 8.2"
+        "Section 14"
       ]
     },
     {
@@ -475,7 +472,7 @@
       "key": "gap_large_mm"
     },
     {
-      "name": "Extended trials per level agree everywhere",
+      "name": "Extended low-point trials agree everywhere",
       "key": "detection_zero_trials"
     },
     {
