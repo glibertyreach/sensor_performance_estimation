@@ -140,3 +140,9 @@ Awaiting the person's decisions on P2 and P3 before closing the chunk.
   half-octave overlap at every junction for the θ-scaling test; 9 Z stations log-spaced at 2^(1/4) from 400 to
   1600 mm; feature isolation set at the far station; noise at each station taken from the plate's own blank regions
   (A stays at 500–1000 mm). Alternative: 3 disks at ratio 4 without overlap.
+- C03-P3 (2026-10-05, third directive, person's domain knowledge): the 0.70 and 1.97 mm features would never be
+  detected. VSX3000 model: about 300,000 depth voxels and about 30,000 projected laser pencils, 10 voxels per
+  pencil; the path-correlation algorithm needs several pencil detections, at least 4, so a patch of at least 40
+  voxels, a minimum detectable diameter of at least 6 px (2·sqrt(40/π) = 7.1 px). The person calls this very
+  conservative and asks the reviewer to check available sources and consider still larger patch sizes. The person
+  also allows the 400–1600 mm distance variation for the rest of the tests if necessary.
