@@ -1,6 +1,6 @@
 {
   "document": "VSX3000_characterization_specification.docx",
-  "built": "2026-10-05T16:48:14",
+  "built": "2026-10-05T16:55:37",
   "source_of_truth": "https://claude.ai/code/artifact/20fd839b-0e95-4210-9e8f-959da07ce6c2",
   "elements": [
     {
@@ -247,6 +247,7 @@
         "gap_large_mm": 60
       },
       "refs": [
+        "Section 11.1",
         "Section 11.2",
         "Section 9",
         "Step 4.8"
@@ -258,12 +259,13 @@
       "title": "7. Acquisition C: disk and cutout area series",
       "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
       "asserts": {
-        "noise_station_count": 9,
+        "registration_poses": 30,
         "gap_small_mm": 15,
         "gap_large_mm": 60
       },
       "refs": [
-        "Section 5"
+        "Section 5",
+        "Step 4.8"
       ]
     },
     {
