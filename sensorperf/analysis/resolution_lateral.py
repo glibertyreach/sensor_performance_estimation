@@ -112,6 +112,9 @@ MTF_HALF_LEVEL = 0.5
 """MTF level of MTF50."""
 MIN_BIN_COUNT = 10
 """A bin enters the comparison of two ESFs only if both have at least this many read pixels in it."""
+MIN_SLANTED_BIN_COUNT = 3
+"""Fewest pixels per bin of the slanted-edge ESF in its comparison with the robot-stepped ESF. The slanted ESF comes from
+one pose's mean frame, so its bins hold few pixels (about the number of rows times the bin width over the band)."""
 MIN_BINS_FOR_COMPARISON = 5
 """Fewest common bins for an ESF comparison."""
 SLANT_TRIM_SIGMA = 3.0
@@ -151,6 +154,8 @@ class LateralOptions:
     """Zero-padding factor of the MTF transform."""
     min_bin_count: int = MIN_BIN_COUNT
     """Fewest read pixels per bin in an ESF comparison."""
+    min_slanted_bin_count: int = MIN_SLANTED_BIN_COUNT
+    """Fewest pixels per bin of the slanted-edge ESF in the agreement test."""
     bootstrap_seed: int = BOOTSTRAP_SEED
     """Seed of the bootstrap generator."""
     figure_width_in: float = 7.0
@@ -488,10 +493,10 @@ def _polarity(kind: str) -> str:
 
 
 def _compare_esfs(esf_a: np.ndarray, count_a: np.ndarray, esf_b: np.ndarray, count_b: np.ndarray,
-                  min_count: int) -> tuple[float, float]:
+                  min_count: int, min_count_b: int | None = None) -> tuple[float, float]:
     """(RMS difference, max |difference|) of two ESFs over the bins where both have at least min_count reads;
     NaN if fewer than MIN_BINS_FOR_COMPARISON bins are common."""
-    common = (count_a >= min_count) & (count_b >= min_count) & np.isfinite(esf_a) & np.isfinite(esf_b)
+    common = (count_a >= min_count) & (count_b >= (min_count if min_count_b is None else min_count_b)) & np.isfinite(esf_a) & np.isfinite(esf_b)
     if common.sum() < MIN_BINS_FOR_COMPARISON:
         return float("nan"), float("nan")
     difference = esf_a[common] - esf_b[common]
@@ -572,7 +577,8 @@ def _analyze_configuration(session: Session, records: list, options: LateralOpti
         slant = slanted[edge]
         result.slanted = slant
         if slant is not None and slant.ok:
-            rms, _ = _compare_esfs(esf, n_read, slant.esf, slant.count, options.min_bin_count)
+            rms, _ = _compare_esfs(esf, n_read, slant.esf, slant.count, options.min_bin_count,
+                                   options.min_slanted_bin_count)
             result.esf_rms_difference_h = rms
             result.slanted_s50_difference_px = slant.s50_px - result.s50_px
             slope = np.nanmax(np.abs(np.gradient(result.esf_monotone, bin_width)))
