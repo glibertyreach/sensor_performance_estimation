@@ -116,8 +116,18 @@ SECONDS_PER_HOUR = 3600.0
 """Seconds in an hour (budget table)."""
 SECONDS_PER_MINUTE = 60.0
 """Seconds in a minute (sentinel interval)."""
-REGISTRATION_SAMPLER_DIMENSIONS = 4
+TILT_AXIS_BOTH = "HV"
+"""``tilt_axis`` label of a registration pose tilted about both H and V (the two angles are in ``notes``)."""
+REGISTRATION_FIELD_DIMENSIONS = 2
+"""Dimensions of the registration pose design that are field fractions (H and V); the rest are tilts."""
+REGISTRATION_SAMPLER_DIMENSIONS = 2 * REGISTRATION_FIELD_DIMENSIONS
 """Dimensions of the registration pose design: field fraction H and V, tilt about H and V."""
+BUDGET_TABLE_WIDTH = 49
+"""Character width of the Section 9 budget table."""
+PERCENT = 100.0
+"""Percent per unit fraction (summary text)."""
+PLOT_GRID_ALPHA = 0.3
+"""Opacity of the grid lines of plan.png."""
 
 DOCUMENT_ESTIMATE_POSES = 6710
 DOCUMENT_ESTIMATE_FRAMES = 46910
@@ -427,10 +437,13 @@ def place_in_field(params: CharacterizationParameters, geometry: SensorGeometry,
     rotation = np.eye(3) if rotation is None else rotation
 
     def position(scale: float) -> tuple[float, float]:
-        return (direction[0] * scale * params.field_offset_fraction * half_h,
-                direction[1] * scale * params.field_offset_fraction * half_v)
+        """The (H, V) offset in mm for a fraction of the requested offset."""
+        # "+ 0.0" turns a negative zero (a zero offset times a negative sign) into a plain zero.
+        return (direction[0] * scale * params.field_offset_fraction * half_h + 0.0,
+                direction[1] * scale * params.field_offset_fraction * half_v + 0.0)
 
     def violation(scale: float) -> float:
+        """The fit violation in pixels of the pose at a fraction of the requested offset."""
         h, v = position(scale)
         return fit_violation_px(camera, target, RigidTransform(rotation, [h, v, station_z_mm]), margin_px)
 
@@ -496,8 +509,8 @@ def plan_registration(params: CharacterizationParameters, geometry: SensorGeomet
     unit = qmc.Halton(d=REGISTRATION_SAMPLER_DIMENSIONS, scramble=True, seed=generator).random(count)
     depths = np.linspace(params.z_min_mm, params.z_max_mm, count) if count > 1 else np.array([params.z_min_mm])
     generator.shuffle(depths)
-    fractions = 2.0 * unit[:, 0:2] - 1.0                                   # field direction in [-1, 1]
-    tilts = (2.0 * unit[:, 2:4] - 1.0) * params.registration_tilt_range_deg  # about H, about V (degrees)
+    fractions = 2.0 * unit[:, :REGISTRATION_FIELD_DIMENSIONS] - 1.0                                   # field direction in [-1, 1]
+    tilts = (2.0 * unit[:, REGISTRATION_FIELD_DIMENSIONS:] - 1.0) * params.registration_tilt_range_deg  # about H, about V (degrees)
     margin = _fit_margin_px(params, jittered=False)
     entries = []
     for i in range(count):
@@ -515,7 +528,7 @@ def plan_registration(params: CharacterizationParameters, geometry: SensorGeomet
         angle = float(np.degrees(np.linalg.norm(Rotation.from_matrix(rotation).as_rotvec())))
         plan.append(_new_capture(counter, PROCEDURE_REGISTRATION, TARGET_REGISTRATION_PLATE, None, depth,
                                  FIELD_POSITION_CENTER, params.frames_per_registration_pose, SUBSERIES_MAIN, pose,
-                                 seed=seed, tilt_axis="HV", tilt_deg=angle, notes=notes))
+                                 seed=seed, tilt_axis=TILT_AXIS_BOTH, tilt_deg=angle, notes=notes))
         _warn_not_fitting(diagnostics, "R", plate, depth, placement)
     return _renumber(plan)
 
@@ -907,6 +920,7 @@ def insert_sentinels(plan: list[PlannedCapture], params: CharacterizationParamet
     sentinel_counter = _PoseCounter()
 
     def sentinel() -> PlannedCapture:
+        """A new sentinel pose with the next free pose index."""
         return _new_capture(sentinel_counter, PROCEDURE_SENTINEL, sentinel_target_id, None, params.z_reference_mm,
                             FIELD_POSITION_CENTER, params.sentinel_frames, SUBSERIES_SENTINEL, pose)
 
@@ -1032,10 +1046,10 @@ def budget_total(rows: Sequence[BudgetRow]) -> BudgetRow:
 
 def format_budget_table(rows: Sequence[BudgetRow]) -> str:
     """The Section 9 table (Series, Poses, Frames, Robot time h) as text, with its total row."""
-    lines = [f"{'Series':<18}{'Poses':>8}{'Frames':>9}{'Robot time h':>14}", "-" * 49]
+    lines = [f"{'Series':<18}{'Poses':>8}{'Frames':>9}{'Robot time h':>14}", "-" * BUDGET_TABLE_WIDTH]
     for row in list(rows) + [budget_total(rows)]:
         if row.series == "Total":
-            lines.append("-" * 49)
+            lines.append("-" * BUDGET_TABLE_WIDTH)
         lines.append(f"{row.series:<18}{row.poses:>8,d}{row.frames:>9,d}{row.robot_hours:>14.2f}")
     return "\n".join(lines)
 
@@ -1089,6 +1103,7 @@ def read_plan_csv(path: str | Path) -> list[PlannedCapture]:
             raise ValueError(f"{path}: missing plan columns {missing}")
         for line, row in enumerate(reader, start=2):
             def number(name: str, required: bool = False) -> float | None:
+                """A float from a cell of this row; None when empty (an error when ``required``)."""
                 text = (row.get(name) or "").strip()
                 if not text:
                     if required:
@@ -1100,6 +1115,7 @@ def read_plan_csv(path: str | Path) -> list[PlannedCapture]:
                     raise ValueError(f"{path} line {line}: column {name} is not a number: {text!r}") from error
 
             def integer(name: str) -> int | None:
+                """An integer from a cell of this row; None when empty."""
                 value = number(name)
                 return None if value is None else int(value)
 
@@ -1159,7 +1175,7 @@ def _adjustment_lines(plan: Sequence[PlannedCapture]) -> list[str]:
     for (procedure, target_id, gap, z, code, subseries), r in seen.items():
         where = f"{procedure} {target_id}" + ("" if gap is None else f" G={gap:g}") + f" Z={z:g} field {code}" \
             + ("" if subseries in (SUBSERIES_MAIN, SUBSERIES_FIELD) else f" ({subseries})")
-        status = f"kept {100.0 * r['fraction_kept']:.0f}%"
+        status = f"kept {PERCENT * r['fraction_kept']:.0f}%"
         if not r["fits"]:
             status += f", still short by {r['violation_px']:.0f} px (as at the center)"
         lines.append(f"  {where}: requested ({r['requested_h_mm']:.1f}, {r['requested_v_mm']:.1f}) mm -> "
@@ -1244,7 +1260,7 @@ def write_plan_figure(path: str | Path, plan: Sequence[PlannedCapture], params: 
     front.invert_yaxis()
     for axes in (side, front):
         axes.set_aspect("equal", adjustable="datalim")
-        axes.grid(True, alpha=0.3)
+        axes.grid(True, alpha=PLOT_GRID_ALPHA)
     side.legend(loc="lower right", fontsize="small")
     figure.tight_layout()
     figure.savefig(path, dpi=PLOT_DPI)

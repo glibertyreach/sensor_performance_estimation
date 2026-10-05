@@ -175,7 +175,7 @@ def main() -> None:
     ax.add_patch(Rectangle((ax_x + ADAPTER_THICKNESS_MM + 2, DIAL_HEIGHT_MM - 10), DIAL_STAND_X_MM - ax_x -
                            ADAPTER_THICKNESS_MM, 20, facecolor=BLUE, alpha=0.5, edgecolor=BLACK, lw=1.0))
     ax.add_patch(Circle((DIAL_STAND_X_MM - 60, DIAL_HEIGHT_MM - 50), 36, facecolor="white", edgecolor=BLUE, lw=1.6))
-    ax.annotate("dial indicator on a fixed\nstand (B-Z series): reads the Z\nmove of the adapter, along the\ntarget normal",
+    ax.annotate("dial indicator on a\nfixed stand (series Z): reads\nthe Z move of the adapter,\nalong the target normal",
                 xy=(DIAL_STAND_X_MM - 40, DIAL_HEIGHT_MM - 55), xytext=(DIAL_STAND_X_MM + 50, -350.0),
                 fontsize=7.5, color=BLUE, ha="left", va="center", arrowprops=dict(arrowstyle="-", color=BLUE, lw=0.8))
 

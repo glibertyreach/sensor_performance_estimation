@@ -134,6 +134,8 @@ IDENTITY_COLUMNS = ("procedure", "target_id", "gap_mm", "station_z_mm", "field",
 OPTIONAL_TEXT_COLUMNS = ("timestamp",)
 OPTIONAL_FLOAT_COLUMNS = ("indicator_mm", "sensor_temp_c", "air_temp_c", "ambient_ir")
 """Optional pose log columns copied to the manifest."""
+FRAME_SEPARATOR = "_f"
+"""Separator of the pose part and the frame index in a Section 9 file name."""
 CAPTURE_PATTERN = "*.mc"
 """Capture files looked for below the captures directory."""
 MAX_NAMES_LISTED = 12
@@ -353,6 +355,11 @@ def read_pose_log(path: str | Path, plan_by_key: dict[tuple, PlannedCapture],
 # ---------------------------------------------------------------------------
 # Matching and manifest
 # ---------------------------------------------------------------------------
+def _pose_name(planned: PlannedCapture) -> str:
+    """The Section 9 file name of a pose without the frame index and extension (for messages)."""
+    return planned.file_name(0).rsplit(FRAME_SEPARATOR, 1)[0]
+
+
 def _listed(names: list[str]) -> str:
     """The names for a message: all of them up to MAX_NAMES_LISTED, then a count of the rest."""
     shown = ", ".join(names[:MAX_NAMES_LISTED])
@@ -431,33 +438,31 @@ def build_manifest_with_report(pose_log_csv: str | Path, captures_dir: str | Pat
     if logged_not_on_disk:
         messages.warnings.append(f"{len(logged_not_on_disk)} logged frame(s) have no capture file below {captures_root}: "
                                  f"{_listed(logged_not_on_disk)}")
-    unlogged = sorted(name for name in on_disk if name not in used_files and name not in {
-        _frame_name(e) for e in entries})
-    if unlogged:
-        messages.warnings.append(f"{len(unlogged)} capture file(s) have no row in the pose log, so they were left out; "
-                                 f"add them to the log or remove them: {_listed(unlogged)}")
-    unplanned_files = []
-    for name in unlogged:
+    logged_names = {_frame_name(e) for e in entries}
+    unlogged_planned, unlogged_unplanned = [], []
+    for name in sorted(n for n in on_disk if n not in used_files and n not in logged_names):
         try:
             parsed = parse_file_name(name)
+            key = (parsed["procedure"], parsed["target_id"], parsed["gap_mm"], parsed["station_z_mm"], parsed["field"],
+                   parsed["pose_index"])
+            (unlogged_planned if key in plan_by_key else unlogged_unplanned).append(name)
         except ValueError:
-            unplanned_files.append(name)
-            continue
-        key = (parsed["procedure"], parsed["target_id"], parsed["gap_mm"], parsed["station_z_mm"], parsed["field"],
-               parsed["pose_index"])
-        if key not in plan_by_key:
-            unplanned_files.append(name)
-    if unplanned_files:
-        messages.warnings.append(f"{len(unplanned_files)} capture file(s) are not in the plan either (name does not follow "
-                                 f"the Section 9 rule or names no planned pose): {_listed(unplanned_files)}")
-    missing_poses = [p.file_name(0)[:-len("_f00.mc")] for p in plan if p.pose_key() not in pose_frames]
+            unlogged_unplanned.append(name)
+    if unlogged_planned:
+        messages.warnings.append(f"{len(unlogged_planned)} capture file(s) have no row in the pose log, so they were left "
+                                 f"out; add them to the log or remove them: {_listed(unlogged_planned)}")
+    if unlogged_unplanned:
+        messages.warnings.append(f"{len(unlogged_unplanned)} capture file(s) are neither in the pose log nor in the plan "
+                                 "(the name does not follow the Section 9 rule or names no planned pose), so they were "
+                                 f"left out: {_listed(unlogged_unplanned)}")
+    missing_poses = [_pose_name(p) for p in plan if p.pose_key() not in pose_frames]
     if missing_poses:
         messages.warnings.append(f"{len(missing_poses)} planned pose(s) have no captured and logged frame: "
                                  f"{_listed(missing_poses)}")
     for key, count in pose_frames.items():
         planned = plan_by_key[key]
         if count != planned.frames:
-            messages.warnings.append(f"pose {planned.file_name(0)[:-len('_f00.mc')]}: {count} frame(s) captured, "
+            messages.warnings.append(f"pose {_pose_name(planned)}: {count} frame(s) captured, "
                                      f"{planned.frames} planned")
     _check_agreement(records, plan_by_key, messages)
     if strict:
@@ -501,7 +506,7 @@ def _check_agreement(records: list[FrameRecord], plan_by_key: dict[tuple, Planne
         planned = plan_by_key[key]
         distance, angle = record.target_pose_camera.difference_from(planned.target_to_camera)
         if distance > POSE_AGREEMENT_WARN_MM or angle > POSE_AGREEMENT_WARN_DEG:
-            far.append(f"{planned.file_name(0)[:-len('_f00.mc')]} ({distance:.2f} mm, {angle:.2f} deg)")
+            far.append(f"{_pose_name(planned)} ({distance:.2f} mm, {angle:.2f} deg)")
     if far:
         messages.warnings.append(
             f"{len(far)} pose(s) were read back farther than {POSE_AGREEMENT_WARN_MM:g} mm or {POSE_AGREEMENT_WARN_DEG:g} "

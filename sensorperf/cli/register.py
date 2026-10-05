@@ -67,6 +67,8 @@ POSE_COLUMNS = ("tx_mm", "ty_mm", "tz_mm", "trx_deg", "try_deg", "trz_deg")
 """Target pose columns (target -> camera): position in mm, rotation vector in degrees."""
 PLANE_COLUMNS = ("nx", "ny", "nz", "distance_mm")
 """Plane observation columns: unit normal toward the camera and the plane distance."""
+NORMAL_COMPONENTS = 3
+"""The first three plane columns are the normal's components."""
 NORMAL_NORM_TOLERANCE = 1.0e-3
 """A plane normal whose length differs from 1 by more than this is an input error (it is normalized otherwise)."""
 DEFAULT_OUT_NAME = "registration.json"
@@ -112,9 +114,9 @@ def read_observations(path: Path, method: str):
                 targets.append(target)
                 planes.append(plane_of_pose(target))
             else:
-                normal = np.array([float(row[c]) for c in PLANE_COLUMNS[:3]])
+                normal = np.array([float(row[c]) for c in PLANE_COLUMNS[:NORMAL_COMPONENTS]])
                 if abs(np.linalg.norm(normal) - 1.0) > NORMAL_NORM_TOLERANCE:
-                    raise ValueError(f"the plane normal ({', '.join(PLANE_COLUMNS[:3])}) must be a unit vector, got length "
+                    raise ValueError(f"the plane normal ({', '.join(PLANE_COLUMNS[:NORMAL_COMPONENTS])}) must be a unit vector, got length "
                                      f"{np.linalg.norm(normal):.4f}")
                 planes.append(PlaneObservation(normal / np.linalg.norm(normal), float(row["distance_mm"])))
         except (ValueError, KeyError, TypeError) as error:

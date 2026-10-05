@@ -247,9 +247,10 @@ def figures_in(text: str) -> list[tuple[str, str, str]]:
 
 
 def figure_index(text: str) -> str:
+    # The first cell is the bare figure number: the gate's figure-index check keys its rows on it.
     lines = ["| Figure | Caption | File |", "|---|---|---|"]
     for number, caption, path in figures_in(text):
-        lines.append(f"| Figure {number} | {caption} | `{path}` |")
+        lines.append(f"| {number} | {caption} | `{path}` |")
     return "\n".join(lines)
 
 

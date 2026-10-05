@@ -1,0 +1,538 @@
+{
+  "document": "performance_test_procedure.docx",
+  "built": "2026-10-05T03:17:11",
+  "invariant_values": {
+    "noise_station_count": 11,
+    "shape_station_count": 5,
+    "field_position_count": 5,
+    "diameter_rung_count": 17,
+    "zstep_rung_count": 8,
+    "total_poses": 10735,
+    "total_frames": 50550,
+    "total_robot_hours": 10.3,
+    "noise_station_frames": 100,
+    "sentinel_frames": 30
+  },
+  "elements": [
+    {
+      "id": "VSX3000 sensor performance testing: step-by-step procedure",
+      "kind": "section",
+      "source": "performance_test_procedure.template.md",
+      "title": "VSX3000 sensor performance testing: step-by-step procedure",
+      "asserts": {},
+      "refs": [
+        "Figure 1",
+        "Figure 2",
+        "Figure 3",
+        "Figure 4",
+        "Figure 5",
+        "Figure 6",
+        "Figure 7",
+        "Figure 8",
+        "\u00a71",
+        "\u00a710",
+        "\u00a713",
+        "\u00a714",
+        "\u00a72",
+        "\u00a73",
+        "\u00a74",
+        "\u00a75",
+        "\u00a78"
+      ]
+    },
+    {
+      "id": "\u00a71",
+      "kind": "section",
+      "source": "performance_test_procedure.template.md",
+      "title": "1. Equipment",
+      "asserts": {},
+      "refs": [
+        "Figure 2",
+        "Table 1"
+      ]
+    },
+    {
+      "id": "\u00a72",
+      "kind": "section",
+      "source": "performance_test_procedure.template.md",
+      "title": "2. Targets",
+      "asserts": {
+        "diameter_rung_count": 17
+      },
+      "refs": [
+        "Figure 3",
+        "Table 2",
+        "\u00a74"
+      ]
+    },
+    {
+      "id": "Chamfered (knife-edge) boundaries",
+      "kind": "section",
+      "source": "performance_test_procedure.template.md",
+      "title": "Chamfered (knife-edge) boundaries",
+      "asserts": {},
+      "refs": [
+        "Figure 4",
+        "\u00a710"
+      ]
+    },
+    {
+      "id": "The as-built record",
+      "kind": "section",
+      "source": "performance_test_procedure.template.md",
+      "title": "The as-built record",
+      "asserts": {},
+      "refs": [
+        "Table 3"
+      ]
+    },
+    {
+      "id": "\u00a73",
+      "kind": "section",
+      "source": "performance_test_procedure.template.md",
+      "title": "3. Before anything else",
+      "asserts": {},
+      "refs": [
+        "\u00a75",
+        "\u00a76"
+      ]
+    },
+    {
+      "id": "\u00a74",
+      "kind": "section",
+      "source": "performance_test_procedure.template.md",
+      "title": "4. Robot-to-sensor registration",
+      "asserts": {},
+      "refs": [
+        "Figure 2",
+        "\u00a711",
+        "\u00a715",
+        "\u00a75"
+      ]
+    },
+    {
+      "id": "\u00a75",
+      "kind": "section",
+      "source": "performance_test_procedure.template.md",
+      "title": "5. The plan",
+      "asserts": {
+        "noise_station_count": 11,
+        "shape_station_count": 5,
+        "field_position_count": 5
+      },
+      "refs": [
+        "Figure 1",
+        "Figure 5",
+        "Figure 6",
+        "Table 4",
+        "\u00a710",
+        "\u00a711",
+        "\u00a713",
+        "\u00a73",
+        "\u00a74",
+        "\u00a76",
+        "\u00a77",
+        "\u00a78",
+        "\u00a79"
+      ]
+    },
+    {
+      "id": "\u00a76",
+      "kind": "section",
+      "source": "performance_test_procedure.template.md",
+      "title": "6. Series A: the noise plate",
+      "asserts": {
+        "noise_station_count": 11,
+        "field_position_count": 5
+      },
+      "refs": [
+        "Figure 5",
+        "\u00a712",
+        "\u00a73",
+        "\u00a74"
+      ]
+    },
+    {
+      "id": "\u00a77",
+      "kind": "section",
+      "source": "performance_test_procedure.template.md",
+      "title": "7. Series B: the edge targets",
+      "asserts": {},
+      "refs": [
+        "\u00a74"
+      ]
+    },
+    {
+      "id": "\u00a78",
+      "kind": "section",
+      "source": "performance_test_procedure.template.md",
+      "title": "8. Series Z: depth steps",
+      "asserts": {
+        "zstep_rung_count": 8
+      },
+      "refs": [
+        "Figure 2",
+        "Figure 7"
+      ]
+    },
+    {
+      "id": "\u00a79",
+      "kind": "section",
+      "source": "performance_test_procedure.template.md",
+      "title": "9. Series C: disk and cutout areas",
+      "asserts": {},
+      "refs": [
+        "\u00a710",
+        "\u00a74",
+        "\u00a75"
+      ]
+    },
+    {
+      "id": "\u00a710",
+      "kind": "section",
+      "source": "performance_test_procedure.template.md",
+      "title": "10. Series D: detection trials",
+      "asserts": {},
+      "refs": []
+    },
+    {
+      "id": "\u00a711",
+      "kind": "section",
+      "source": "performance_test_procedure.template.md",
+      "title": "11. Recording the poses: the pose log and the manifest",
+      "asserts": {},
+      "refs": [
+        "Table 5",
+        "Table 6"
+      ]
+    },
+    {
+      "id": "\u00a712",
+      "kind": "section",
+      "source": "performance_test_procedure.template.md",
+      "title": "12. Checking the captures",
+      "asserts": {},
+      "refs": [
+        "\u00a710"
+      ]
+    },
+    {
+      "id": "\u00a713",
+      "kind": "section",
+      "source": "performance_test_procedure.template.md",
+      "title": "13. Data layout, deliverables, and the capture budget",
+      "asserts": {
+        "total_poses": 10735,
+        "total_frames": 50550,
+        "total_robot_hours": 10.3
+      },
+      "refs": [
+        "Figure 8",
+        "Table 7",
+        "\u00a75"
+      ]
+    },
+    {
+      "id": "\u00a714",
+      "kind": "section",
+      "source": "performance_test_procedure.template.md",
+      "title": "14. Running the analyses",
+      "asserts": {},
+      "refs": [
+        "Table 4"
+      ]
+    },
+    {
+      "id": "\u00a715",
+      "kind": "section",
+      "source": "performance_test_procedure.template.md",
+      "title": "15. Things that spoil a session",
+      "asserts": {},
+      "refs": [
+        "Table 8",
+        "\u00a710",
+        "\u00a73",
+        "\u00a74"
+      ]
+    },
+    {
+      "id": "\u00a7A",
+      "kind": "section",
+      "source": "performance_test_procedure.template.md",
+      "title": "Appendix A. Parameters",
+      "asserts": {},
+      "refs": [
+        "Table 9",
+        "\u00a73"
+      ]
+    },
+    {
+      "id": "\u00a7B",
+      "kind": "section",
+      "source": "performance_test_procedure.template.md",
+      "title": "Appendix B. Software reference",
+      "asserts": {},
+      "refs": [
+        "Table 10",
+        "\u00a710",
+        "\u00a711",
+        "\u00a712",
+        "\u00a714",
+        "\u00a74",
+        "\u00a75"
+      ]
+    },
+    {
+      "id": "\u00a7C",
+      "kind": "section",
+      "source": "performance_test_procedure.template.md",
+      "title": "Appendix C. Installing and running the software, step by step",
+      "asserts": {},
+      "refs": [
+        "\u00a711",
+        "\u00a712",
+        "\u00a714",
+        "\u00a74",
+        "\u00a75"
+      ]
+    },
+    {
+      "id": "\u00a7D",
+      "kind": "section",
+      "source": "performance_test_procedure.template.md",
+      "title": "Appendix D. Figure index",
+      "asserts": {
+        "noise_station_count": 11,
+        "shape_station_count": 5,
+        "field_position_count": 5,
+        "zstep_rung_count": 8
+      },
+      "refs": []
+    },
+    {
+      "id": "\u00a7E",
+      "kind": "section",
+      "source": "performance_test_procedure.template.md",
+      "title": "Appendix E. Open questions",
+      "asserts": {},
+      "refs": [
+        "\u00a71",
+        "\u00a713",
+        "\u00a72",
+        "\u00a73",
+        "\u00a74",
+        "\u00a75",
+        "\u00a78"
+      ]
+    },
+    {
+      "id": "Figure 1",
+      "kind": "figure",
+      "source": "figures/make_fig_procedure_flow.py",
+      "caption": "Procedure order and data dependencies. Shaded boxes are captures and open boxes are analyses. Registration poses feed every analysis, the noise level from A sets the thresholds of B, C and D, the edge spread function from B predicts the area bias measured in C, and E reuses the B and C frames. The quick-look count on C data sets the D levels (dashed).",
+      "asserts": {},
+      "refs": [],
+      "facts": "figures/fig_procedure_flow.facts.json"
+    },
+    {
+      "id": "Figure 2",
+      "kind": "figure",
+      "source": "figures/make_fig_setup.py",
+      "caption": "The experimental setup, side view. The sensor stands on its own rigid stand, separate from the robot. The robot carries the target on the dowel-pinned adapter anywhere between Z_MIN and Z_MAX. The dial indicator on its fixed stand reads the adapter's Z move in series Z. The enclosure holds the ambient IR constant.",
+      "asserts": {},
+      "refs": [],
+      "facts": "figures/fig_setup.facts.json"
+    },
+    {
+      "id": "Figure 3",
+      "kind": "figure",
+      "source": "figures/make_fig_targets.py",
+      "caption": "Front views of T2, T3a, T3b, T4-S, T4-L, T5-S and T5-L to one scale, drawn from the code's own target definitions with the indicative sensor geometry. The real layout depends on the final focal length (unconfirmed). Gray is the back plate, dashed circles are blank sites, vermillion dots are post-only control sites.",
+      "asserts": {
+        "diameter_rung_count": 17
+      },
+      "refs": [],
+      "facts": "figures/fig_targets.facts.json"
+    },
+    {
+      "id": "Figure 4",
+      "kind": "figure",
+      "source": "figures/make_fig_chamfer.py",
+      "caption": "Chamfered cutout and disk on its post, cross-section, not to scale. The three viewpoints (left camera, projector, right camera) pass the knife edge in open space and never meet the beveled wall. The bevel angle is measured from the plate normal.",
+      "asserts": {},
+      "refs": [],
+      "facts": "figures/fig_chamfer.facts.json"
+    },
+    {
+      "id": "Figure 5",
+      "kind": "figure",
+      "source": "figures/make_fig_stations.py",
+      "caption": "Left: the 11 noise stations of A, the 5 shape stations of B, C and D, and the 3 reduced stations of the slow tests, along Z. Right: the 5 field positions (codes 0 to 4) in the image, and the square span of the random lateral offsets (phase jitter) at one corner, true size and magnified.",
+      "asserts": {
+        "field_position_count": 5,
+        "noise_station_count": 11,
+        "shape_station_count": 5
+      },
+      "refs": [],
+      "facts": "figures/fig_stations.facts.json"
+    },
+    {
+      "id": "Figure 6",
+      "kind": "figure",
+      "source": "figures/make_fig_plan.py",
+      "caption": "The default full plan: target centers in the sensor frame, side view (H against Z) and front view (H against V), colored by series, with the frustum. Each cloud around a station is a set of random lateral offsets.",
+      "asserts": {
+        "total_poses": 10735
+      },
+      "refs": [],
+      "facts": "figures/fig_plan.facts.json"
+    },
+    {
+      "id": "Figure 7",
+      "kind": "figure",
+      "source": "figures/make_fig_zstep.py",
+      "caption": "The series Z visits at one Z0. Left: the step ladder, the 8 step sizes in turn, each with its A, B, A, B alternation. Right: the fine staircase. A circle marks the dial-indicator reading logged at every visit.",
+      "asserts": {
+        "zstep_rung_count": 8
+      },
+      "refs": [],
+      "facts": "figures/fig_zstep.facts.json"
+    },
+    {
+      "id": "Figure 8",
+      "kind": "figure",
+      "source": "figures/make_fig_data_flow.py",
+      "caption": "The session folder feeds the six analyses, which write into `analysis/`. The fits of A and the boundary terms of E converge on `forward_model_parameters.json`.",
+      "asserts": {},
+      "refs": [],
+      "facts": "figures/fig_data_flow.facts.json"
+    },
+    {
+      "id": "Table 1",
+      "kind": "table",
+      "source": "performance_test_procedure.template.md",
+      "caption": "Equipment, requirements, and the reason for each.",
+      "asserts": {},
+      "refs": []
+    },
+    {
+      "id": "Table 2",
+      "kind": "table",
+      "source": "performance_test_procedure.template.md",
+      "caption": "The targets (specification Section 3.2).",
+      "asserts": {},
+      "refs": []
+    },
+    {
+      "id": "Table 3",
+      "kind": "table",
+      "source": "performance_test_procedure.template.md",
+      "caption": "Columns of `targets_asbuilt.csv`.",
+      "asserts": {},
+      "refs": []
+    },
+    {
+      "id": "Table 4",
+      "kind": "table",
+      "source": "performance_test_procedure.template.md",
+      "caption": "Procedure letters of the plan and of the file names.",
+      "asserts": {},
+      "refs": []
+    },
+    {
+      "id": "Table 5",
+      "kind": "table",
+      "source": "performance_test_procedure.template.md",
+      "caption": "Rotation types of the pose log.",
+      "asserts": {},
+      "refs": []
+    },
+    {
+      "id": "Table 6",
+      "kind": "table",
+      "source": "performance_test_procedure.template.md",
+      "caption": "Manifest columns. Rotations are rotation vectors in degrees.",
+      "asserts": {},
+      "refs": []
+    },
+    {
+      "id": "Table 7",
+      "kind": "table",
+      "source": "performance_test_procedure.template.md",
+      "caption": "Capture budget of the default plan: poses, frames, and robot time per series.",
+      "asserts": {},
+      "refs": []
+    },
+    {
+      "id": "Table 8",
+      "kind": "table",
+      "source": "performance_test_procedure.template.md",
+      "caption": "Sources of error, their size, and what to do about them.",
+      "asserts": {},
+      "refs": []
+    },
+    {
+      "id": "Table 9",
+      "kind": "table",
+      "source": "performance_test_procedure.template.md",
+      "caption": "The parameters of the procedure, with the values of the default plan.",
+      "asserts": {},
+      "refs": []
+    },
+    {
+      "id": "Table 10",
+      "kind": "table",
+      "source": "performance_test_procedure.template.md",
+      "caption": "The files of the package.",
+      "asserts": {},
+      "refs": []
+    }
+  ],
+  "invariants": [
+    {
+      "name": "Noise station count agrees everywhere",
+      "key": "noise_station_count",
+      "phrase": "noise station"
+    },
+    {
+      "name": "Shape station count agrees everywhere",
+      "key": "shape_station_count",
+      "phrase": "shape station"
+    },
+    {
+      "name": "Field position count agrees everywhere",
+      "key": "field_position_count",
+      "phrase": "field position"
+    },
+    {
+      "name": "Diameter rung count agrees everywhere",
+      "key": "diameter_rung_count",
+      "phrase": "diameter"
+    },
+    {
+      "name": "Z-step rung count agrees everywhere",
+      "key": "zstep_rung_count",
+      "phrase": "step size"
+    },
+    {
+      "name": "Total planned poses agree everywhere",
+      "key": "total_poses"
+    },
+    {
+      "name": "Total planned frames agree everywhere",
+      "key": "total_frames"
+    },
+    {
+      "name": "Total robot hours agree everywhere",
+      "key": "total_robot_hours"
+    },
+    {
+      "name": "Frames per noise station agree everywhere",
+      "key": "noise_station_frames"
+    },
+    {
+      "name": "Sentinel frames agree everywhere",
+      "key": "sentinel_frames"
+    }
+  ]
+}

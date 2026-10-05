@@ -44,6 +44,8 @@ from __future__ import annotations
 
 import json
 import math
+import struct
+import zlib
 from collections import OrderedDict, defaultdict
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -79,8 +81,14 @@ MIN_PLANE_PIXELS_DEFAULT = 50
 """Fewest pixels a plane fit is attempted with (see CheckParameters.min_plane_pixels)."""
 STRUCTURE_SIZE = 3
 """Side of the square structuring element of the mask erosion."""
-DEPTH_EPSILON_MM = 1.0e-9
-"""Numerical guard: smallest depth treated as a read in the temporal mean."""
+UNREADABLE_ERRORS = (OSError, ValueError, KeyError, EOFError, zlib.error, struct.error)
+"""What reading a damaged or empty capture file can raise (the file system, the header, the decompressor, the
+Qt data stream); such a pose is flagged instead of stopping the check."""
+FRAME_SEPARATOR = "_f"
+"""Separator of the pose part and the frame index in a Section 9 file name."""
+STATION_MATCH_TOLERANCE_MM = 0.5
+"""A pose belongs to a station when its station depth differs from the requested one by less than this (the file
+name writes the station in whole millimeters)."""
 
 FLAG_UNREADABLE = "capture files could not be read"
 FLAG_NO_TARGET = "target id is not in targets.json"
@@ -203,7 +211,7 @@ class CheckReport:
 
     def to_dict(self) -> dict[str, Any]:
         """The JSON report: parameters, one entry per pose, notes, count flagged and the verdict (NaN becomes null)."""
-        return _json_safe({
+        return json_safe({
             "parameters": asdict(self.parameters),
             "poses": [{"pose": p.name, "target_id": p.target_id, "gap_mm": p.gap_mm, "frames": p.frames,
                        "valid_fraction": p.valid_fraction, "touches_border": p.touches_border,
@@ -224,18 +232,18 @@ def _number(value: float, spec: str) -> str:
     return "-" if not np.isfinite(value) else format(value, spec)
 
 
-def _json_safe(value: Any) -> Any:
+def json_safe(value: Any) -> Any:
     """Convert numpy values to JSON types; NaN and infinity become null."""
     if isinstance(value, np.ndarray):
-        return _json_safe(value.tolist())
+        return json_safe(value.tolist())
     if isinstance(value, (float, np.floating)):
         return float(value) if np.isfinite(value) else None
     if isinstance(value, (np.integer, np.bool_)):
         return value.item()
     if isinstance(value, dict):
-        return {str(key): _json_safe(item) for key, item in value.items()}
+        return {str(key): json_safe(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
-        return [_json_safe(item) for item in value]
+        return [json_safe(item) for item in value]
     return value
 
 
@@ -302,8 +310,9 @@ def _plane_flags(comparison: PlaneComparison, params: CheckParameters, rms_flag:
 
 def pose_name(record: FrameRecord) -> str:
     """The Section 9 file name of the pose without the frame index and extension."""
-    return format_file_name(record.procedure, record.target_id, record.gap_mm, record.station_z_mm, record.field,
-                            record.pose_index, 0)[:-len("_f00.mc")]
+    first_frame = format_file_name(record.procedure, record.target_id, record.gap_mm, record.station_z_mm,
+                                   record.field, record.pose_index, 0)
+    return first_frame.rsplit(FRAME_SEPARATOR, 1)[0]
 
 
 def check_pose(session: Session, records: Sequence[FrameRecord], params: CheckParameters) -> PoseCheck:
@@ -336,7 +345,7 @@ def check_pose(session: Session, records: Sequence[FrameRecord], params: CheckPa
             seen = expected != SURFACE_NONE
             if seen.any():
                 valid_fractions.append(float(finite[seen].mean()))
-    except (OSError, ValueError, KeyError) as error:
+    except UNREADABLE_ERRORS as error:
         check.flags.append(f"{FLAG_UNREADABLE}: {error}")
         return check
     check.frames = len(records)
@@ -482,7 +491,7 @@ def pilot_detection_counts(session: Session, params: CharacterizationParameters,
     for record in session.records:
         if record.procedure != PROCEDURE_AREA or record.subseries not in tuple(subseries):
             continue
-        if abs(record.station_z_mm - station_z_mm) > 0.5:
+        if abs(record.station_z_mm - station_z_mm) > STATION_MATCH_TOLERANCE_MM:
             continue
         poses = groups.setdefault((record.target_id, record.gap_mm), {})
         current = poses.get(record.pose_key())
@@ -510,7 +519,7 @@ def _count_group(session: Session, params: CharacterizationParameters, geometry:
     for record in records:
         try:
             depth, _, header = load_frame_depth(record.path)
-        except (OSError, ValueError, KeyError) as error:
+        except UNREADABLE_ERRORS as error:
             result.notes.append(f"{record.path.name}: {error}")
             continue
         camera = PinholeCamera.from_matcloud_header(header, width_px=depth.shape[1], height_px=depth.shape[0])

@@ -73,8 +73,8 @@ PILOT_ENTRY_SEPARATOR = "="
 PILOT_KEY_SEPARATOR = "@"
 """Syntax of a pilot entry: TARGET@GAP=VALUE."""
 INDICATIVE_NOTE = (
-    "NOTE: no --sensor-config was given, so the INDICATIVE sensor geometry is used (640 x 480 px, f about 688 px, "
-    "50 mm baseline, 10 frames/s). These are not datasheet values: the field-of-view fit, the jitter in millimeters, "
+    "no --sensor-config was given, so the INDICATIVE sensor geometry is used (640 x 480 px, f about 688 px, "
+    "10 frames/s). These are not datasheet values: the field-of-view fit, the jitter in millimeters, "
     "the expected depth quantum and the Section 9 budget will change when the real values are known (Step 4.5).")
 """The loud note printed and written to the summary when the geometry is indicative."""
 
@@ -159,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
             geometry = SensorConfig.load(args.sensor_config).geometry
         else:
             geometry = SensorGeometry.indicative()
-            print(INDICATIVE_NOTE, file=sys.stderr)
+            print(f"NOTE: {INDICATIVE_NOTE}", file=sys.stderr)
             diagnostics.warn(INDICATIVE_NOTE)
         registration = Registration.load(args.registration) if args.registration else None
         pilot_d50 = expand_pilot(parse_pilot_values(args.pilot_d50_mm, "--pilot-d50-mm"), params)

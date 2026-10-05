@@ -41,8 +41,8 @@ from dataclasses import asdict
 from pathlib import Path
 
 from sensorperf.acquisition.check import (
-    EXIT_FLAGGED, EXIT_INPUT_ERROR, EXIT_OK, REPORT_JSON_INDENT, CheckParameters, _json_safe, check_session,
-    format_pilot_table, pilot_detection_counts,
+    EXIT_FLAGGED, EXIT_INPUT_ERROR, EXIT_OK, REPORT_JSON_INDENT, UNREADABLE_ERRORS, CheckParameters, check_session,
+    format_pilot_table, json_safe, pilot_detection_counts,
 )
 from sensorperf.io.manifest import SUBSERIES_JITTER
 from sensorperf.io.session import Session
@@ -96,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
         print(format_pilot_table(results))
         if args.out is not None:
             args.out.parent.mkdir(parents=True, exist_ok=True)
-            args.out.write_text(json.dumps(_json_safe({f"{t}@{g}": asdict(r) for (t, g), r in results.items()}),
+            args.out.write_text(json.dumps(json_safe({f"{t}@{g}": asdict(r) for (t, g), r in results.items()}),
                                            indent=REPORT_JSON_INDENT), encoding="utf-8")
         return EXIT_OK if results else EXIT_INPUT_ERROR
     params = CheckParameters(
@@ -106,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
         min_plane_pixels=args.min_plane_pixels)
     try:
         report = check_session(session, params)
-    except (OSError, ValueError, KeyError) as error:
+    except UNREADABLE_ERRORS as error:
         print(f"ERROR: the check failed: {error}", file=sys.stderr)
         return EXIT_INPUT_ERROR
     print(report.format_table())
