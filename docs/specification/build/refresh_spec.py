@@ -187,13 +187,23 @@ def decode(export_json: Path) -> Path:
             elif isinstance(item, list):
                 stack.extend(item)
             elif isinstance(item, str) and len(item) > 50000:
-                payload = item
+                # The connector may wrap its result as a JSON document serialized INSIDE a text
+                # field; unwrap such strings instead of taking them as the payload, and accept a
+                # string as the payload only when it is pure base64 (the lenient decoder would
+                # otherwise silently drop the wrapper's characters and corrupt the file).
+                try:
+                    stack.append(json.loads(item))
+                    continue
+                except json.JSONDecodeError:
+                    pass
+                if re.fullmatch(r"[A-Za-z0-9+/=\s]+", item):
+                    payload = item
     if payload is None:
         match = re.search(r"[A-Za-z0-9+/=]{50000,}", raw)
         payload = match.group(0) if match else None
     if payload is None:
         raise SystemExit("no base64 payload found in the export result")
-    DOCX_PATH.write_bytes(base64.b64decode(payload))
+    DOCX_PATH.write_bytes(base64.b64decode(payload, validate=False))
     ARCHIVE_DIR.mkdir(exist_ok=True)
     typeset_formulas(DOCX_PATH)
     stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
