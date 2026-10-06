@@ -563,21 +563,42 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
   Step 12, the field comparison
   (`details["field_comparison"]`) has one entry per field pose with its `field_fraction_achieved` (manifest column; the summary row
   carries the mean per configuration), and the open-background comparison holds the reference station only.
-- D: per configuration (station) tau per feature from the blank sites, gamma per station, the outcomes, independence and
-  the geometric limit; pooled per (kind, gap, field, rule) over the (feature, station) pairs: the psychometric fit on
-  ln D_px with gamma fixed from the pooled blank sites (pairs whose D_px coincide are merged), D_50 / D_10 from the best
-  curve and the MEASURED low point D_5 (`empirical_d5`: the largest level such that it and every smaller level have a
-  corrected one-sided Clopper-Pearson bound at or below `detection_low_probability`, as the bracket [`d5`, `d5_next`]), and
+- D: per configuration (station) tau per feature (window size), gamma per station, the outcomes, independence and
+  the geometric limit. Step 3, the threshold: a blank site holds the window of the feature it serves and of every smaller
+  one (`blank_holds_window`), so `collect_trials` keeps, per rule, the window of each size on every blank site that holds
+  it (`ConfigTrials.s_blank_pool`, poses x sizes x blank sites; `s_blank` stays the own-site window that Analysis E reads),
+  and tau at a station is the (1 - `detection_false_alarm_target`) quantile of those windows pooled over the station's blank
+  sites, one tau per station and window size (`calibrate_station_thresholds`; the plain per-level `calibrate_tau` stays
+  for E). Where a size has fewer than `detection_min_blank_windows` (300, three per false alarm at the target) windows, the
+  window statistic is divided by sigma_tot(Z) of its station (`previous["A"]`, log-log interpolated) and the nearest other
+  stations of the same configuration (kind, gap, field) are added, nearest first, until the count is reached; tau is the
+  quantile of the pooled normalized statistic times the station's own sigma_tot(Z). Without A a short station keeps its
+  own windows and is flagged (`tau_note`, and a note in the details). The summary carries per station `blank_windows` (the
+  fewest over the sizes), `blank_windows_stations` (the stations used, its own included), `tau_pooled` and `tau_note`
+  beside `tau_mm` and gamma with its Clopper-Pearson interval (gamma is the fraction of the station's own blank-site
+  windows that tau then declares detected); the bootstrap re-derives every station's tau from the resampled pooled windows.
+  Pooled per (kind, gap, field, rule) over the (feature, station) pairs: the psychometric fit on
+  ln D_px with gamma fixed from the pooled blank sites (pairs whose D_px coincide are merged), D_50, D_10 and D_5 (fitted)
+  all from the best of the three shapes by deviance, each with its range over the shapes (`d50_model_min/max`,
+  `d10_model_min/max`, `d5_model_min/max`), the MEASURED low point beside it (`empirical_d5`: the largest level such that
+  it and every smaller level have a
+  corrected one-sided Clopper-Pearson bound at or below `detection_low_probability`, as the bracket [`d5_empirical`,
+  `d5_empirical_next`]), and
   the PREDICTED D_0 (`predict_d0`: the best fitted curve inverted at `detection_zero_prediction_level`, an extrapolation
   below the lowest measured point; `d0_predicted`, its range over the three shapes, always `d0_is_prediction` = True and a
   `d0_predicted_note`; NaN with the note saying why where there is no fit or it did not converge; the floor model `d0_model`
   with its profile-likelihood interval is a second prediction), in D_px converted to mm at each station
-  (D_mm = D_px Z / f_x), a stratified bootstrap
+  (D_mm = D_px Z / f_x). The prior expectation, `expected_d0_px` (the laser-pencil model of Section 3.2, 7 px), is reported
+  against the data as `d50_over_expected` and `d0_predicted_over_expected` (pooled and per-station rows; one sentence in the
+  details states the prior). A stratified bootstrap
   over poses (strata = stations), the overlap test between neighboring features on the corrected detection curves, and a
   logistic regression of the counts on ln D_px and ln sigma_tot(Z) (sigma_tot per station from `previous["A"]`, log-log
   interpolated) with the likelihood-ratio test of the noise term. Outputs `D_detect_summary.csv` (per configuration),
-  `D_pooled_summary.csv`, `D_overlap_test.csv`, the details JSON, pooled psychometric figures and `D_minimum_vs_z`; the
-  figures draw the predicted D_0 with a hollow marker and a dashed extrapolation and label it "predicted". The
+  `D_pooled_summary.csv`, `D_overlap_test.csv` (one row per pair of neighboring features, with kind, gap, field and rule),
+  the details JSON, pooled psychometric figures and `D_minimum_vs_z`; the
+  figures draw the predicted D_0 with a hollow marker and a dashed extrapolation and label it "predicted". Only `d50_px`
+  and `d10_px` enter `forward_model_parameters.json`; no term of C does (`AreaResult.forward_model_terms()` is empty, the
+  edge bias stays in C's outputs and in `AreaResult.edge_bias_terms()`, which E's cross-check reads). The
   pilot level selection and the continuous-angle variant are gone; the pilot keeps only the post check
   (`acquisition.check.pilot_post_check`).
 - B-HV (`analysis/resolution_lateral.py`, Section 11.1). The pooled robot-stepped ESF, the slanted-edge ESF, the rise distance,

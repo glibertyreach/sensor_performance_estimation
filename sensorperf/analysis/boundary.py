@@ -681,9 +681,9 @@ def _cross_checks(rows: list[dict[str, Any]], previous: Mapping[str, Any] | None
         out["b_offset_sign_consistent"] = bool(math.isfinite(offset) and pooled and
                                                ((np.nanmean([r["pi_near"] for r in pooled]) > 0) == (offset < 0)))
     c_result = None if previous is None else previous.get("C")
-    if c_result is not None and hasattr(c_result, "forward_model_terms"):
+    if c_result is not None and hasattr(c_result, "edge_bias_terms"):      # C's bias is no forward-model term
         try:
-            c_terms = c_result.forward_model_terms()
+            c_terms = c_result.edge_bias_terms()
         except Exception:
             c_terms = {}
         out["analysis_c_edge_bias"] = {k: v for k, v in c_terms.items() if k.startswith("edge_bias")

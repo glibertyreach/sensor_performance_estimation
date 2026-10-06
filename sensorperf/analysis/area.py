@@ -270,10 +270,17 @@ class AreaResult:
     options: AreaOptions
     notes: list[str] = field(default_factory=list)
     z_reference_mm: float = field(default_factory=lambda: CharacterizationParameters().z_reference_mm)
-    """The reference station (Z_REFERENCE_MM) used by forward_model_terms."""
+    """The reference station (Z_REFERENCE_MM) used by edge_bias_terms."""
 
     def forward_model_terms(self) -> dict[str, Any]:
-        """Terms for forward_model_parameters.json: ``edge_bias_px`` (the growth of the front material at the
+        """Terms for forward_model_parameters.json: none. No term of Analysis C enters the file (Section 12, Step 13):
+        the edge bias b is a cross-check of the boundary widths of E, which stay the forward model's boundary terms.
+        C's own outputs keep the bias (``edge_bias_terms``, C_area_summary.csv and C_area_details.json)."""
+        return {}
+
+    def edge_bias_terms(self) -> dict[str, Any]:
+        """The edge-bias terms of this analysis, for its own outputs and for the cross-check in Analysis E (they are not
+        forward-model terms): ``edge_bias_px`` (the growth of the front material at the
         edge in pixels at the mid station, from the large features: b of the disks and -b of the cutouts,
         averaged over the kinds present, so a positive value means foreground fattening), the signed
         ``edge_bias_disk_px`` and ``edge_bias_cutout_px`` and the fitted b(Z) coefficients per kind

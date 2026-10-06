@@ -43,14 +43,26 @@ How the steps are implemented
        of the window: the greatest value u such that the pixels with Delta >= u contain a connected region of at
        least k pixels; k = 2 is the best adjacent pair, max over pairs of min(Delta_i, Delta_j)). The window is
        detected at threshold tau exactly when S > tau (verified against the labeling in the tests).
-    3  Threshold. tau is set PER WINDOW SIZE (per feature) from the blank sites of that size over all trials of the
-       configuration (one station): tau is the (1 - DETECTION_FALSE_ALARM_TARGET) quantile of the blank windows' S
-       ("higher" interpolation, so the false-alarm fraction does not exceed the target). That makes the false-alarm
-       fraction of the RULE (window level, after the connected-pixel criterion), not of single pixels, equal the
-       target. The measured false-alarm rate gamma is the fraction of all blank-site trials of the station that the
-       rule then declares detected (with fewer than 1 / target trials per level the quantile is the maximum and gamma
-       is 0 of n; the Clopper-Pearson interval is reported either way): gamma per station. The reported tau_mm is the
-       median over features (the per-feature values are in the details).
+    3  Threshold. tau is set per window size (per feature) AT EACH STATION from the blank windows pooled over the
+       station's blank sites. A blank site is sized to the search window of the feature it serves, so it holds the
+       window of that feature and of every smaller one (:func:`blank_holds_window`); the windows of a feature's size on
+       all the blank sites that hold it, over all trials of the station, are the blank windows of that size (at a main
+       station 3 sites x the trials per site for the smallest feature, fewer for the larger ones, whose windows fit
+       fewer sites; ConfigTrials.s_blank_pool). tau is the (1 - DETECTION_FALSE_ALARM_TARGET) quantile of them ("higher"
+       interpolation, so the false-alarm fraction does not exceed the target), which makes the false-alarm fraction of the
+       RULE (window level, after the connected-pixel criterion), not of single pixels, equal the target. Where a
+       station has fewer than DETECTION_MIN_BLANK_WINDOWS such windows (three per false alarm at the target; the 99
+       percent quantile of 180 windows rests on the largest two), :func:`calibrate_station_thresholds` divides the
+       window statistic by sigma_tot(Z) (Analysis A, ``previous["A"]``) and pools the nearest other stations of the
+       same configuration (kind, gap, field), nearest first, until the count is reached; tau is the quantile of the
+       pooled normalized statistic times the station's own sigma_tot(Z). Without Analysis A there is no common scale:
+       the station keeps its own windows and says so (``tau_note``, and a note in the details). The summary records
+       per station ``blank_windows`` (the fewest windows over its window sizes), ``blank_windows_stations`` (the
+       stations whose windows were used, its own included), ``tau_pooled`` and ``tau_note``; the per-feature values
+       are in the details. The measured false-alarm rate gamma is the fraction of the station's own blank-site windows
+       (the blank site that serves each feature, with that feature's window) that the rule then declares detected,
+       reported with its Clopper-Pearson interval beside tau, so that the control achieved is visible; the reported
+       tau_mm is the median over features.
     1  Independence: lag-1 autocorrelation of each feature's detected/missed sequence in acquisition order
        against +/- INDEPENDENCE_SIGMA_MULTIPLE / sqrt(n), and the phi coefficient between the outcomes of adjacent
        features in the same frame against the same band. With many features some exceed 2 / sqrt(n) by chance, so
@@ -65,8 +77,9 @@ How the steps are implemented
        merged. D_50 and D_10 come from the best curve by deviance, in D_px, and are converted to mm at each station,
        D_mm = D_px Z / f_x. A threshold is reported only when the data bracket it (the corrected proportions reach
        it and start below it); otherwise it is NaN and the status column says why.
-    5  Model range of D_10 over the logistic, normal and Weibull fits; model-free isotonic crossings (0.1, 0.5) of
-       the corrected proportions.
+    5  Model range of D_50, D_10 and D_5 (d50_model_min / _max, d10_model_min / _max, d5_model_min / _max) over the
+       logistic, normal and Weibull fits, each minimum itself coming from the best of the three by deviance; model-free
+       isotonic crossings (0.1, 0.5) of the corrected proportions.
     5b D_5, fitted: the best fitted curve (by deviance, as D_10) inverted at DETECTION_LOW_PROBABILITY, reported when the
        corrected proportions bracket it (d5_status), with the range over the three shapes (d5_model_min / _max) and the
        bootstrap interval of Step 9 (d5_lower / d5_upper).
@@ -88,13 +101,16 @@ How the steps are implemented
        probe cutout at the plate center (area.geometric_limit_diameter_mm), cameras only and with the projector, per
        station (mm, and px at that station).
     9  Bootstrap over poses (trials), stratified by station: each resample draws poses with replacement within each
-       station, recomputes the per-feature tau from the resampled blank statistics, the pooled gamma and the pooled
-       counts, and re-fits ONE curve family (the best family of the original fit; refitting all three in every
+       station, recomputes the per-feature tau from the resampled blank windows (pooled over the blank sites and,
+       where a station has too few, over its neighbors, as in Step 3), the pooled gamma and the pooled counts, and re-fits ONE curve family (the best family of the original fit; refitting all three in every
        resample would triple the run time) to give D_50, D_10, D_5 and the predicted D_0 in D_px (d5_lower / d5_upper and
        d0_predicted_lower / d0_predicted_upper; the interval of the prediction carries the same flag as the value). The
        model D_0 interval is the profile-likelihood interval of Step 7, not a bootstrap. The number of resamples is BOOTSTRAP_RESAMPLES, reduced
        to DetectionOptions.reduced_bootstrap_resamples when the stations of the group have fewer than
        DetectionOptions.full_bootstrap_min_poses poses each on average (stated in the details).
+    9b Prior expectation: the fitted D_50 and the predicted D_0 divided by ``expected_d0_px`` (the laser-pencil model of
+       Section 3.2), columns ``d50_over_expected`` and ``d0_predicted_over_expected`` of the pooled and the summary
+       rows; the details carry a sentence that states the prior (``prior_expectation``).
     10 Every minimum in mm, px and mrad (D_px and theta are constant over stations for a pooled minimum, D_mm scales
        with Z); the minimum diameter in mm against Z in a figure.
     11 D_detect_summary.csv (per configuration), D_pooled_summary.csv (per group), D_overlap_test.csv,
@@ -285,7 +301,19 @@ class ConfigTrials:
     """SOURCE_D or SOURCE_C (reused) per pose."""
     s_feature: dict[str, np.ndarray]
     s_blank: dict[str, np.ndarray]
-    """(poses, levels) arrays per rule."""
+    """(poses, levels) arrays per rule: the window of each feature's own size on the blank site that serves it."""
+    s_blank_pool: dict[str, np.ndarray] | None = None
+    """(poses, levels, blank sites) arrays per rule: the statistic of the window of level i (its size) placed on blank
+    site j, NaN where blank site j is too small to hold that window (only blank sites at least as large as the one that
+    serves the level do) or the window left the image. The threshold of Step 3 pools these windows over the blank sites
+    of the station. None (a configuration built without it) means the own-site windows ``s_blank`` only."""
+
+    def blank_pool(self, rule: str) -> np.ndarray:
+        """The (poses, levels, blank sites) array of blank windows of ``rule`` that set the thresholds (see
+        ``s_blank_pool``); without it, the own-site windows as a single blank site."""
+        if self.s_blank_pool is not None:
+            return self.s_blank_pool[rule]
+        return self.s_blank[rule][:, :, None]
 
     @property
     def target_ids(self) -> list[str]:
@@ -399,11 +427,28 @@ def _level_specs(target_features: Sequence[Feature], target_id: str, kind: str) 
     return specs
 
 
+def blank_holds_window(level: LevelSpec, blank_owner: LevelSpec) -> bool:
+    """Whether the blank site that serves ``blank_owner`` is large enough to hold the window of ``level`` at any
+    station. A blank site is sized to the search window of the feature it serves at Z_MAX (targets.blank_site_diameters_mm),
+    and the window of a smaller feature is smaller still, so a blank site holds the windows of its own feature and of
+    every smaller one on the same plate. This is what lets the blank sites of a station be pooled for one threshold."""
+    return (level.target_id == blank_owner.target_id and level.blank_diameter_mm is not None
+            and blank_owner.blank_diameter_mm is not None and blank_owner.blank_id is not None
+            and blank_owner.blank_diameter_mm >= level.blank_diameter_mm)
+
+
 def frame_statistics(session: Session, record: FrameRecord, levels: Sequence[LevelSpec],
-                     kind: str) -> dict[tuple[str, str], float]:
-    """Steps 2 for one frame: ``{(site_id, rule): S}`` for every feature's own window and its blank site's window (cut to
-    the feature's size) that lies inside the image. Reference planes are fitted to the frame itself away from the edges (the registered planes where too
-    few pixels). The no-read-inclusive statistic is computed for cutouts only."""
+                     kind: str) -> dict[tuple, float]:
+    """Steps 2 and 3 for one frame: the detection statistic S of every window that lies inside the image, keyed
+
+        ``(site_id, rule)``                       a feature's own window,
+        ``(blank_id, rule)``                      the window of the feature a blank site serves, on that blank site,
+        ``(blank_id, window_site_id, rule)``      the window of the feature ``window_site_id`` placed on blank site
+                                                  ``blank_id``, for every blank site that can hold it (the pool of
+                                                  Step 3: :func:`blank_holds_window`).
+
+    Reference planes are fitted to the frame itself away from the edges (the registered planes where too few pixels).
+    The no-read-inclusive statistic is computed for cutouts only."""
     params = session.params
     stack = load_stack([record])
     geometry = pose_geometry(session, record, stack.camera)
@@ -414,24 +459,32 @@ def frame_statistics(session: Session, record: FrameRecord, levels: Sequence[Lev
     target = geometry.target
     margin = params.detection_window_margin_px
     minimum = params.detection_min_connected_px
-    output: dict[tuple[str, str], float] = {}
-    for level in levels:
-        if level.target_id != record.target_id:
-            continue
-        for site_id in (level.site_id, level.blank_id):
-            if site_id is None:
-                continue
-            # The window of a feature has radius D_px/2 + margin of its OWN diameter. A blank site is as large as the
-            # window of the feature it serves at Z_MAX, so it is cut to that feature's size (the same rule as
-            # targets.window_diameter_mm): same D_px, same window, and it never extends beyond the blank site.
-            feature = replace(target.feature(site_id), diameter_mm=level.diameter_mm)
-            if not _window_inside_image(geometry, feature, margin):
-                continue
-            window = geometry.feature_window(feature, margin)
-            output[(site_id, RULE_PRIMARY)] = window_statistic(delta, window, minimum)
-            if kind == FEATURE_CUTOUT:
-                output[(site_id, RULE_INCLUSIVE)] = window_statistic(delta, window, minimum,
-                                                                     no_read_candidates=plate_pixels)
+    output: dict[tuple, float] = {}
+
+    def add_window(site_id: str, key_tail: tuple, level: LevelSpec) -> None:
+        # The window of a feature has radius D_px/2 + margin of its OWN diameter. A blank site is as large as the
+        # window of the feature it serves at Z_MAX, so it is cut to a feature's size: same D_px, same window, and it
+        # never extends beyond the blank site.
+        feature = replace(target.feature(site_id), diameter_mm=level.diameter_mm)
+        if not _window_inside_image(geometry, feature, margin):
+            return
+        window = geometry.feature_window(feature, margin)
+        output[(site_id, *key_tail, RULE_PRIMARY)] = window_statistic(delta, window, minimum)
+        if kind == FEATURE_CUTOUT:
+            output[(site_id, *key_tail, RULE_INCLUSIVE)] = window_statistic(delta, window, minimum,
+                                                                            no_read_candidates=plate_pixels)
+
+    on_plate = [level for level in levels if level.target_id == record.target_id]
+    for level in on_plate:
+        add_window(level.site_id, (), level)
+        for owner in on_plate:
+            if blank_holds_window(level, owner):
+                add_window(owner.blank_id, (level.site_id,), level)
+    for level in on_plate:                       # a blank site's own window is the pooled one of its own feature
+        if level.blank_id is not None:
+            for rule in (RULE_PRIMARY, RULE_INCLUSIVE):
+                if (level.blank_id, level.site_id, rule) in output:
+                    output[(level.blank_id, rule)] = output[(level.blank_id, level.site_id, rule)]
     return output
 
 
@@ -486,6 +539,7 @@ def collect_trials(session: Session, records_with_source: Sequence[tuple[FrameRe
         rules = RULES if kind == FEATURE_CUTOUT else (RULE_PRIMARY,)
         s_feature = {rule: np.full((len(members), len(levels)), np.nan) for rule in rules}
         s_blank = {rule: np.full((len(members), len(levels)), np.nan) for rule in rules}
+        s_blank_pool = {rule: np.full((len(members), len(levels), len(levels)), np.nan) for rule in rules}
         for row, (record, _) in enumerate(members):
             stats = frame_statistics(session, record, levels, kind)
             for column, level in enumerate(levels):
@@ -493,32 +547,138 @@ def collect_trials(session: Session, records_with_source: Sequence[tuple[FrameRe
                     if (level.site_id, rule) in stats and level.blank_id and (level.blank_id, rule) in stats:
                         s_feature[rule][row, column] = stats[(level.site_id, rule)]
                         s_blank[rule][row, column] = stats[(level.blank_id, rule)]
+                    for site, owner in enumerate(levels):        # the window of this level on every blank site
+                        if owner.blank_id and (owner.blank_id, level.site_id, rule) in stats:
+                            s_blank_pool[rule][row, column, site] = stats[(owner.blank_id, level.site_id, rule)]
             done += 1
             if progress is not None:
                 progress(done, total)
         configs.append(ConfigTrials(kind=kind, gap_mm=gap, station_z_mm=station, field=field_code, levels=levels,
                                     pose_keys=[r.pose_key() for r, _ in members], sources=[s for _, s in members],
-                                    s_feature=s_feature, s_blank=s_blank))
+                                    s_feature=s_feature, s_blank=s_blank, s_blank_pool=s_blank_pool))
     return configs
 
 
 # ---------------------------------------------------------------------------
 # Step 3: thresholds and outcomes from the statistics
 # ---------------------------------------------------------------------------
-def calibrate_tau(s_blank: np.ndarray, false_alarm_target: float) -> np.ndarray:
-    """Per-level threshold tau (mm): the (1 - false_alarm_target) quantile ("higher") of the blank statistics of that
-    level over the poses. Levels without blank trials get the tau of the nearest level that has one (NaN if none)."""
-    taus = np.full(s_blank.shape[1], np.nan)
-    for column in range(s_blank.shape[1]):
-        values = s_blank[:, column]
-        values = values[~np.isnan(values)]
-        if values.size:
-            taus[column] = np.quantile(values, 1.0 - false_alarm_target, method=HIGHER)
+def _blank_quantile(values: np.ndarray, false_alarm_target: float) -> float:
+    """The (1 - false_alarm_target) quantile ("higher") of the blank window statistics ``values`` (no NaN)."""
+    return float(np.quantile(values, 1.0 - false_alarm_target, method=HIGHER))
+
+
+def _fill_missing_taus(taus: np.ndarray) -> np.ndarray:
+    """Levels without any blank window take the tau of the nearest level that has one (all NaN stays NaN)."""
+    taus = np.array(taus, dtype=float)
     valid = np.nonzero(~np.isnan(taus))[0]
     for column in np.nonzero(np.isnan(taus))[0]:
         if valid.size:
             taus[column] = taus[valid[np.argmin(np.abs(valid - column))]]
     return taus
+
+
+def calibrate_tau(s_blank: np.ndarray, false_alarm_target: float) -> np.ndarray:
+    """Per-level threshold tau (mm): the (1 - false_alarm_target) quantile ("higher") of the blank statistics of that
+    level over the poses. Levels without blank trials get the tau of the nearest level that has one (NaN if none).
+
+    This is the plain calibration on the windows given: no pooling over blank sites or stations. Analysis D sets its
+    thresholds with :func:`calibrate_station_thresholds` (Step 3), which pools; Analysis E uses this one."""
+    taus = np.full(s_blank.shape[1], np.nan)
+    for column in range(s_blank.shape[1]):
+        values = s_blank[:, column]
+        values = values[~np.isnan(values)]
+        if values.size:
+            taus[column] = _blank_quantile(values, false_alarm_target)
+    return _fill_missing_taus(taus)
+
+
+@dataclass(frozen=True)
+class StationWindows:
+    """The blank windows of one station of a group, per window size (level), as Step 3 pools them."""
+
+    station_z_mm: float
+    sigma_tot_mm: float | None
+    """sigma_tot(Z) of this station from Analysis A, or None when A did not run (a station then cannot be pooled
+    with its neighbors, because their windows cannot be put on a common scale)."""
+    windows: list[np.ndarray]
+    """Per level: the blank window statistics S (mm) pooled over the station's blank sites that hold that window size,
+    over the poses in use, without NaN."""
+
+
+@dataclass(frozen=True)
+class PooledThreshold:
+    """The threshold of one window size at one station and how it was reached (Step 3)."""
+
+    tau_mm: float
+    """tau: the (1 - target) quantile of the blank windows; NaN where there is no blank window at all."""
+    windows: int
+    """Number of blank windows the quantile rests on (the station's own and the neighbors')."""
+    stations_mm: tuple[float, ...]
+    """The stations whose windows were used, the station itself included, in increasing Z."""
+    pooled: bool
+    """True when neighboring stations were pooled (the statistic divided by sigma_tot(Z))."""
+    short: bool
+    """True when fewer than the wanted number of blank windows could be gathered (no sigma_tot(Z) to pool with, or
+    every neighbor used and still too few): the quantile then rests on fewer windows than DETECTION_MIN_BLANK_WINDOWS."""
+
+
+def station_windows(config: ConfigTrials, rule: str, sigma_tot_mm: float | None,
+                    poses: np.ndarray | None = None) -> StationWindows:
+    """The blank windows of a configuration (one station) for the threshold: per level, the statistics of its blank
+    windows pooled over the blank sites of the station that hold that window size (:func:`blank_holds_window`), over all
+    poses or over the pose indices ``poses`` (a bootstrap resample)."""
+    pool = config.blank_pool(rule)
+    block = pool if poses is None else pool[poses]
+    windows = []
+    for column in range(block.shape[1]):
+        values = block[:, column, :].ravel()
+        windows.append(values[~np.isnan(values)])
+    return StationWindows(config.station_z_mm, sigma_tot_mm, windows)
+
+
+def calibrate_station_thresholds(stations: Sequence[StationWindows], own: int, false_alarm_target: float,
+                                 minimum_windows: int) -> list[PooledThreshold]:
+    """Step 3: the threshold tau of every window size at the station ``stations[own]``.
+
+    tau is the (1 - false_alarm_target) quantile ("higher") of the blank windows of that size, pooled over the blank
+    sites of the station. Where the station has at least ``minimum_windows`` of them (DETECTION_MIN_BLANK_WINDOWS) that
+    is all. Where it has fewer, the 99 percent quantile rests on the largest few values and is poorly determined, so
+    the window statistic is divided by sigma_tot(Z) of its station and the nearest other stations of the group (the
+    same configuration: kind, gap, field) are added, nearest first, until the count is reached; tau is then the
+    quantile of the pooled normalized statistic times the station's own sigma_tot(Z). Without sigma_tot(Z) (no
+    Analysis A) there is no common scale, so the station keeps its own windows and the result is flagged ``short``."""
+    own_station = stations[own]
+    neighbors = sorted((s for index, s in enumerate(stations) if index != own),
+                       key=lambda s: (abs(s.station_z_mm - own_station.station_z_mm), s.station_z_mm))
+    own_sigma = own_station.sigma_tot_mm
+    can_normalize = own_sigma is not None and own_sigma > 0.0
+    results: list[PooledThreshold] = []
+    for level, own_windows in enumerate(own_station.windows):
+        count = own_windows.size
+        if count >= minimum_windows or not can_normalize:
+            tau = _blank_quantile(own_windows, false_alarm_target) if count else math.nan
+            results.append(PooledThreshold(tau, count, (own_station.station_z_mm,), False, count < minimum_windows))
+            continue
+        pooled = [own_windows / own_sigma]
+        used = [own_station.station_z_mm]
+        for neighbor in neighbors:
+            if count >= minimum_windows:
+                break
+            sigma = neighbor.sigma_tot_mm
+            if sigma is None or sigma <= 0.0 or level >= len(neighbor.windows) or not neighbor.windows[level].size:
+                continue
+            pooled.append(neighbor.windows[level] / sigma)
+            used.append(neighbor.station_z_mm)
+            count += neighbor.windows[level].size
+        everything = np.concatenate(pooled)
+        tau = _blank_quantile(everything, false_alarm_target) * own_sigma if everything.size else math.nan
+        results.append(PooledThreshold(tau, count, tuple(sorted(used)), len(used) > 1, count < minimum_windows))
+    return results
+
+
+def thresholds_to_taus(thresholds: Sequence[PooledThreshold]) -> np.ndarray:
+    """The per-level tau array of a station's thresholds (a level with no blank window takes its nearest level's)."""
+    return _fill_missing_taus(np.array([t.tau_mm for t in thresholds]))
 
 
 def outcomes(s_feature: np.ndarray, s_blank: np.ndarray, taus: np.ndarray) -> tuple[np.ndarray, np.ndarray,
@@ -562,6 +722,14 @@ def _fit_parameters(params, curve: str | None = None,
         return PsychometricFitParameters(lapse_rate_max=params.detection_lapse_rate_max)
     return PsychometricFitParameters(lapse_rate_max=params.detection_lapse_rate_max, curve=curve,
                                      warm_start=warm_start)
+
+
+def model_range(fits: Mapping[str, PsychometricFit], p_star: float) -> tuple[float, float]:
+    """The smallest and largest size (D_px) at which the fitted shapes (logistic, normal, Weibull in ln D) reach the
+    corrected probability ``p_star``: the model uncertainty of that minimum (Section 13, Model dependence). Shapes that do
+    not reach it are left out; NaN, NaN when none does."""
+    sizes = [v for v in (f.threshold(p_star) for f in fits.values()) if math.isfinite(v)]
+    return (float(min(sizes)), float(max(sizes))) if sizes else (math.nan, math.nan)
 
 
 def bracketed(corrected: np.ndarray, p_star: float) -> bool:
@@ -745,6 +913,8 @@ class DetectionResult:
     notes: list[str] = field(default_factory=list)
     z_reference_mm: float = field(default_factory=lambda: CharacterizationParameters().z_reference_mm)
     gap_small_mm: float = field(default_factory=lambda: CharacterizationParameters().gap_small_mm)
+    expected_d0_px: float = field(default_factory=lambda: CharacterizationParameters().expected_d0_px)
+    """The expected minimum detectable diameter (the prior the ``*_over_expected`` columns refer to)."""
 
     def forward_model_terms(self) -> dict[str, Any]:
         """Terms for forward_model_parameters.json: ``d50_px`` and ``d10_px`` of the cutouts under the primary rule,
@@ -763,24 +933,38 @@ class DetectionResult:
 # ---------------------------------------------------------------------------
 def _minimum_columns() -> list[str]:
     """Names of the threshold columns that are reported in mm, px and mrad."""
-    return ["d50", "d50_lower", "d50_upper", "d10", "d10_lower", "d10_upper", "d10_model_min", "d10_model_max",
+    return ["d50", "d50_lower", "d50_upper", "d50_model_min", "d50_model_max",
+            "d10", "d10_lower", "d10_upper", "d10_model_min", "d10_model_max",
             "d50_isotonic", "d10_isotonic", "d5", "d5_lower", "d5_upper", "d5_model_min", "d5_model_max",
             "d5_empirical", "d5_empirical_next", "d0_predicted", "d0_predicted_lower", "d0_predicted_upper",
-            "d0_predicted_model_min", "d0_predicted_model_max", "d0_model", "d0_model_lower", "d0_model_upper", "d0_geometric",
-            "d0_geometric_cameras"]
+            "d0_predicted_model_min", "d0_predicted_model_max", "d0_model", "d0_model_lower", "d0_model_upper",
+            "d0_geometric", "d0_geometric_cameras"]
 
 
 POOLED_MINIMUMS = tuple(name for name in _minimum_columns() if not name.startswith("d0_geometric"))
 """The minimums that come from the pooled fit (the geometric limits are per station and computed per configuration)."""
 
 
+EXPECTED_RATIO_COLUMNS = ("d50_over_expected", "d0_predicted_over_expected")
+"""Where the data land against the prior expectation (Section 13): the fitted D_50 and the predicted D_0 (in D_px) divided
+by the expected minimum detectable diameter, the laser-pencil model of Section 3.2 (``expected_d0_px``, about 7 px)."""
+PRIOR_EXPECTATION_NOTE = (
+    "Prior expectation: the laser-pencil model of Section 3.2 puts the minimum detectable diameter at about "
+    "{expected:g} px (expected_d0_px); d50_over_expected and d0_predicted_over_expected are the fitted D_50 and the "
+    "predicted D_0 divided by it, so a ratio near 1 means the data land on the prior and a ratio above or below 1 "
+    "says by how much they land above or below it.")
+"""The sentence of the details file that states the prior the ratios refer to; formatted with ``expected_d0_px``."""
+
+
 def _summary_columns() -> list[str]:
     columns = ["target_id", "kind", "gap_mm", "station_z_mm", "field", "rule", "trials_per_level",
                "trials_per_level_max", "trials_new", "trials_reused", "gamma", "gamma_lower", "gamma_upper",
-               "gamma_blank_trials", "tau_mm", "best_curve", "d50_status", "d10_status", "d5_status",
-               "d0_model_status", "d0_is_prediction", "d0_predicted_note"]
+               "gamma_blank_trials", "tau_mm", "blank_windows", "blank_windows_stations", "tau_pooled",
+               "tau_note", "best_curve", "d50_status", "d10_status", "d5_status", "d0_model_status",
+               "d0_is_prediction", "d0_predicted_note"]
     for name in _minimum_columns():
         columns += [f"{name}_mm", f"{name}_px", f"{name}_mrad"]
+    columns += list(EXPECTED_RATIO_COLUMNS)
     columns += ["independence_ok", "bootstrap_resamples", "bootstrap_failures", "fit_note"]
     return columns
 
@@ -799,6 +983,7 @@ POOLED_COLUMNS = (
      "gamma_blank_trials", "best_curve", "alpha_ln_px", "beta", "lapse_rate", "deviance", "d50_status", "d10_status",
      "d5_status", "d0_model_status", "d0_is_prediction", "d0_predicted_note")
     + tuple(f"{name}_px" for name in POOLED_MINIMUMS)
+    + EXPECTED_RATIO_COLUMNS
     + ("bootstrap_resamples", "bootstrap_failures", "regression_status", "regression_observations",
        "regression_b0", "regression_b_ln_dpx", "regression_se_ln_dpx", "regression_b_ln_sigma",
        "regression_se_ln_sigma", "regression_p_noise", "regression_separated", "fit_note"))
@@ -819,6 +1004,10 @@ class _ConfigRule:
     rule: str
     taus: np.ndarray
     """Per-feature threshold tau (mm) of this station."""
+    thresholds: list[PooledThreshold]
+    """How each tau was reached (windows used, stations pooled), per feature."""
+    sigma_tot_mm: float | None
+    """sigma_tot(Z) of this station from Analysis A (the scale of the pooled threshold), None without A."""
     successes: np.ndarray
     trials: np.ndarray
     """Detections and valid trials per feature at this station."""
@@ -857,8 +1046,30 @@ def run_detection(session: Session, out_dir: Path, previous: Mapping[str, Any] |
     if not sigma_table:
         notes.append("Analysis A did not run (or has no main stations): the noise covariate sigma_tot(Z) is not "
                      "available, so the logistic regression on ln sigma_tot is skipped")
-    analyzed = [_analyze_config_rule(session, config, rule, stereo, options)
+    # Step 3 pools the blank windows over the stations of a configuration (same kind, gap and field), so the stations'
+    # windows are gathered per group and rule before any station's threshold is set.
+    station_groups: dict[tuple, list[ConfigTrials]] = {}
+    for config in configs:
+        station_groups.setdefault((config.kind, config.gap_mm, config.field), []).append(config)
+    window_cache: dict[tuple, list[StationWindows]] = {}
+
+    def thresholds_of(config: ConfigTrials, rule: str) -> list[PooledThreshold]:
+        group_key = (config.kind, config.gap_mm, config.field)
+        group = sorted(station_groups[group_key], key=lambda c: c.station_z_mm)
+        if (group_key, rule) not in window_cache:
+            window_cache[(group_key, rule)] = [
+                station_windows(c, rule, sigma_tot_at(sigma_table, c.station_z_mm)) for c in group]
+        return calibrate_station_thresholds(window_cache[(group_key, rule)], group.index(config),
+                                            params.detection_false_alarm_target, params.detection_min_blank_windows)
+
+    analyzed = [_analyze_config_rule(session, config, rule, stereo, options, thresholds_of(config, rule),
+                                     sigma_tot_at(sigma_table, config.station_z_mm))
                 for config in configs for rule in config.rules()]
+    if any(t.short for member in analyzed for t in member.thresholds):
+        notes.append(f"some thresholds rest on fewer than {params.detection_min_blank_windows} blank windows "
+                     "(DETECTION_MIN_BLANK_WINDOWS): without sigma_tot(Z) from Analysis A a station cannot be pooled "
+                     "with its neighbors, or every neighbor was used and the count is still short (blank_windows and "
+                     "tau_note of D_detect_summary.csv give the count and the reason per station)")
     if not analyzed:
         notes.append("no array configuration with a back plate was found among the D frames")
     rows: list[dict[str, Any]] = []
@@ -883,7 +1094,8 @@ def run_detection(session: Session, out_dir: Path, previous: Mapping[str, Any] |
         details.append(member.detail)
     return DetectionResult(rows=rows, details=details, pooled_rows=pooled_rows, pooled_details=pooled_details,
                            overlap_rows=overlap_rows, configs=configs, notes=notes,
-                           z_reference_mm=params.z_reference_mm, gap_small_mm=params.gap_small_mm)
+                           z_reference_mm=params.z_reference_mm, gap_small_mm=params.gap_small_mm,
+                           expected_d0_px=params.expected_d0_px)
 
 
 def _units(session: Session, value_mm: float, station_z_mm: float) -> tuple[float, float, float]:
@@ -905,15 +1117,34 @@ def _bootstrap_count(poses: int, stations: int, options: DetectionOptions, param
     return options.reduced_bootstrap_resamples
 
 
+def _threshold_note(thresholds: Sequence[PooledThreshold], levels: Sequence[LevelSpec], minimum_windows: int) -> str:
+    """Summary text of how a station's thresholds were reached: empty when every window size had enough blank windows
+    of its own; else which feature sizes (mm) were pooled with neighboring stations and which stayed short of
+    ``minimum_windows``."""
+    def sizes(flags: Sequence[bool]) -> str:
+        return ", ".join(f"{level.diameter_mm:.3g} mm" for level, flag in zip(levels, flags) if flag)
+
+    parts = []
+    if any(t.pooled for t in thresholds):
+        parts.append("blank windows of neighboring stations pooled after dividing by sigma_tot(Z), windows of the "
+                     "features of " + sizes([t.pooled for t in thresholds]))
+    if any(t.short for t in thresholds):
+        parts.append(f"fewer than {minimum_windows} blank windows for the features of "
+                     + sizes([t.short for t in thresholds]) + " (no sigma_tot(Z) to pool with, or neighbors used up)")
+    return "; ".join(parts)
+
+
 def _analyze_config_rule(session: Session, config: ConfigTrials, rule: str, stereo: StereoGeometry,
-                         options: DetectionOptions) -> _ConfigRule:
-    """Steps 1, 3 and 8 for one configuration (one station) and rule: tau per feature, the outcomes, gamma of the
-    station from its blank sites, the independence check, the feature table and the geometric limit. The thresholds
-    of the summary row are filled in afterward from the pooled group (:func:`_fill_config_minimums`)."""
+                         options: DetectionOptions, thresholds: list[PooledThreshold],
+                         sigma_tot_mm: float | None) -> _ConfigRule:
+    """Steps 1, 3 and 8 for one configuration (one station) and rule: the thresholds ``thresholds`` per feature (set from
+    the pooled blank windows by :func:`calibrate_station_thresholds`), the outcomes, gamma of the station from its blank
+    sites, the independence check, the feature table and the geometric limit. The thresholds of the summary row are filled
+    in afterward from the pooled group (:func:`_fill_config_minimums`)."""
     params = session.params
     levels_mm = config.level_diameters_mm()
     s_feature, s_blank = config.s_feature[rule], config.s_blank[rule]
-    taus = calibrate_tau(s_blank, params.detection_false_alarm_target)                    # Step 3
+    taus = thresholds_to_taus(thresholds)                                                 # Step 3
     feature_detected, blank_detected, feature_valid, blank_valid = outcomes(s_feature, s_blank, taus)
     successes, trials, gamma, blank_hits, blank_trials = counts_from_outcomes(
         feature_detected, blank_detected, feature_valid, blank_valid)
@@ -931,6 +1162,10 @@ def _analyze_config_rule(session: Session, config: ConfigTrials, rule: str, ster
         "trials_reused": sum(1 for s in config.sources if s == SOURCE_C),
         "gamma": gamma, "gamma_lower": gamma_lower, "gamma_upper": gamma_upper, "gamma_blank_trials": blank_trials,
         "tau_mm": float(np.nanmedian(taus[np.isfinite(taus)])) if np.isfinite(taus).any() else math.nan,
+        "blank_windows": min(t.windows for t in thresholds) if thresholds else 0,
+        "blank_windows_stations": ",".join(f"{z:g}" for z in sorted({z for t in thresholds for z in t.stations_mm})),
+        "tau_pooled": any(t.pooled for t in thresholds),
+        "tau_note": _threshold_note(thresholds, config.levels, params.detection_min_blank_windows),
         "independence_ok": bool(independence["ok"]),
     }
     detail: dict[str, Any] = {
@@ -950,8 +1185,13 @@ def _analyze_config_rule(session: Session, config: ConfigTrials, rule: str, ster
             "d_mm": level.diameter_mm, "d_px": session.geometry.diameter_in_pixels(level.diameter_mm,
                                                                                    config.station_z_mm),
             "trials": n, "detections": s, "proportion": float(raw[column]), "ci_lower": lower, "ci_upper": upper,
-            "corrected": float(corrected[column]), "tau_mm": float(taus[column])})
+            "corrected": float(corrected[column]), "tau_mm": float(taus[column]),
+            "blank_windows": thresholds[column].windows,
+            "blank_windows_stations": [float(z) for z in thresholds[column].stations_mm],
+            "tau_pooled": thresholds[column].pooled})
     detail["levels"] = level_table
+    detail["sigma_tot_mm"] = sigma_tot_mm
+    detail["min_blank_windows"] = params.detection_min_blank_windows
 
     # Step 8: geometric limit for cutouts (per station, in mm).
     d0_geo = d0_geo_cameras = math.nan
@@ -961,7 +1201,8 @@ def _analyze_config_rule(session: Session, config: ConfigTrials, rule: str, ster
         d0_geo = geometric_limit_diameter_mm(plate, config.station_z_mm, stereo, True, top, options.area_options)
         d0_geo_cameras = geometric_limit_diameter_mm(plate, config.station_z_mm, stereo, False, top,
                                                      options.area_options)
-    return _ConfigRule(config=config, rule=rule, taus=taus, successes=successes, trials=trials, gamma=gamma,
+    return _ConfigRule(config=config, rule=rule, taus=taus, thresholds=thresholds, sigma_tot_mm=sigma_tot_mm,
+                       successes=successes, trials=trials, gamma=gamma,
                        blank_hits=blank_hits, blank_trials=blank_trials, row=row, detail=detail,
                        geometric_mm=(d0_geo, d0_geo_cameras))
 
@@ -1085,14 +1326,13 @@ def _analyze_group(session: Session, members: list[_ConfigRule], options: Detect
                    d5_status=threshold_status(corrected, params.detection_low_probability))
         if row["d50_status"] == "ok":
             row["d50_px"] = best.threshold(P_STAR_D50)
+            row["d50_model_min_px"], row["d50_model_max_px"] = model_range(fits, P_STAR_D50)
         if row["d10_status"] == "ok":
             row["d10_px"] = best.threshold(P_STAR_D10)
-            tails = [f.threshold(P_STAR_D10) for f in fits.values()]
-            row["d10_model_min_px"], row["d10_model_max_px"] = float(min(tails)), float(max(tails))
+            row["d10_model_min_px"], row["d10_model_max_px"] = model_range(fits, P_STAR_D10)
         if row["d5_status"] == "ok":                      # Step 5b: D_5 from the fitted curves
             row["d5_px"] = best.threshold(params.detection_low_probability)
-            lows = [f.threshold(params.detection_low_probability) for f in fits.values()]
-            row["d5_model_min_px"], row["d5_model_max_px"] = float(min(lows)), float(max(lows))
+            row["d5_model_min_px"], row["d5_model_max_px"] = model_range(fits, params.detection_low_probability)
         row["d50_isotonic_px"] = isotonic_threshold(level_px, corrected, P_STAR_D50, merged_trials)
         row["d10_isotonic_px"] = isotonic_threshold(level_px, corrected, P_STAR_D10, merged_trials)
         detail["fits"] = {name: {"alpha_ln_px": f.alpha, "beta": f.beta, "lapse_rate": f.lapse_rate,
@@ -1171,6 +1411,16 @@ def _analyze_group(session: Session, members: list[_ConfigRule], options: Detect
                                 options.overlap_options, sigma_table):
         overlaps.append({"kind": kind, "gap_mm": gap, "field": field_code, "rule": rule, **result.as_row()})
     detail["overlap_tests"] = overlaps
+
+    # Where the data land against the prior expectation (the laser-pencil model of Section 3.2).
+    expected = params.expected_d0_px
+    for ratio_column, minimum_column in (("d50_over_expected", "d50_px"), ("d0_predicted_over_expected",
+                                                                         "d0_predicted_px")):
+        row[ratio_column] = row[minimum_column] / expected if math.isfinite(row[minimum_column]) else math.nan
+    detail["prior_expectation"] = {
+        "expected_d0_px": expected, "note": PRIOR_EXPECTATION_NOTE.format(expected=expected),
+        "d50_over_expected": row["d50_over_expected"],
+        "d0_predicted_over_expected": row["d0_predicted_over_expected"]}
     return row, detail, overlaps
 
 
@@ -1248,6 +1498,8 @@ def _fill_config_minimums(session: Session, member: _ConfigRule, pooled_row: dic
     for name, value in values_mm.items():
         mm, px, mrad = _units(session, value, station)
         row[f"{name}_mm"], row[f"{name}_px"], row[f"{name}_mrad"] = mm, px, mrad
+    for column in EXPECTED_RATIO_COLUMNS:                 # dimensionless: the same at every station
+        row[column] = pooled_row[column]
     detail["minimums"] = {name: {"mm": row[f"{name}_mm"], "px": row[f"{name}_px"], "mrad": row[f"{name}_mrad"]}
                           for name in values_mm}
     detail["pooled_group"] = {"kind": pooled_row["kind"], "gap_mm": pooled_row["gap_mm"],
@@ -1263,14 +1515,16 @@ def _curve_points(levels_px: np.ndarray, fit: PsychometricFit) -> dict[str, Any]
 def _make_bootstrap_statistic(members: list[_ConfigRule], level_px: np.ndarray, lookup: dict[tuple[int, int], int],
                               params, best: PsychometricFit, wanted: Mapping[int, bool]):
     """The bootstrap statistic of Step 9: given the drawn (station, pose) groups, recompute per station the per-feature
-    tau from the drawn blank statistics and the detections, pool them into the levels of the curve, take gamma from
-    the pooled blank sites, refit the (best) curve family and return (D_50, D_10, D_5, predicted D_0, gamma, median
+    tau from the drawn blank windows (pooled over the blank sites and, where a station has too few, over its
+    neighboring stations, exactly as Step 3 does for the data) and the detections, pool them into the levels of the
+    curve, take gamma from the pooled blank sites, refit the (best) curve family and return (D_50, D_10, D_5, predicted D_0, gamma, median
     tau) (BOOTSTRAP_STAT_NAMES), the D values in D_px. A resample whose proportions do not bracket a threshold that
     the original data bracket gives NaN (counted as a failure by the bootstrap), as does a refit that did not
     converge for the predicted D_0. A quantity the original data do not give (``wanted`` is False for its slot) is not
     resampled (its slot is NOT_RESAMPLED and its interval is reported as NaN by the caller). The refit starts from the original optimum ``best`` (one optimizer
     run per resample)."""
     target = params.detection_false_alarm_target
+    minimum_windows = params.detection_min_blank_windows
     rule = members[0].rule
     warm_start = (best.alpha, best.beta, best.lapse_rate)
 
@@ -1278,17 +1532,22 @@ def _make_bootstrap_statistic(members: list[_ConfigRule], level_px: np.ndarray, 
         per_member: list[list[int]] = [[] for _ in members]
         for member_index, pose_index in drawn:
             per_member[member_index].append(pose_index)
+        # Step 3 on the resample: the blank windows drawn at every station, pooled over the blank sites, and each
+        # station's tau re-derived from them (with the neighbors' drawn windows where it has to pool).
+        indices_of = [np.asarray(indices, dtype=int) for indices in per_member]
+        drawn_windows = [station_windows(member.config, rule, member.sigma_tot_mm, index)
+                         for member, index in zip(members, indices_of)]
         successes = np.zeros(level_px.size)
         trials = np.zeros(level_px.size)
         hits = blanks = 0
         finite_taus: list[float] = []
-        for member_index, indices in enumerate(per_member):
-            if not indices:
+        for member_index, index in enumerate(indices_of):
+            if not index.size:
                 continue
             config = members[member_index].config
-            index = np.asarray(indices, dtype=int)
             sf, sb = config.s_feature[rule][index], config.s_blank[rule][index]
-            taus = calibrate_tau(sb, target)
+            taus = thresholds_to_taus(calibrate_station_thresholds(drawn_windows, member_index, target,
+                                                                   minimum_windows))
             fd, bd, fv, bv = outcomes(sf, sb, taus)
             level_successes, level_trials, _, h, b = counts_from_outcomes(fd, bd, fv, bv)
             hits += h
@@ -1320,7 +1579,8 @@ def write_outputs(result: DetectionResult, out_dir: Path) -> list[Path]:
     written = [write_csv_rows(out_dir / SUMMARY_FILE_NAME, result.rows, SUMMARY_COLUMNS),
                write_csv_rows(out_dir / POOLED_FILE_NAME, result.pooled_rows, POOLED_COLUMNS),
                write_csv_rows(out_dir / OVERLAP_FILE_NAME, result.overlap_rows, OVERLAP_COLUMNS)]
-    document = {"notes": result.notes, "configurations": result.details, "pooled": result.pooled_details}
+    document = {"notes": result.notes, "prior_expectation": PRIOR_EXPECTATION_NOTE.format(expected=result.expected_d0_px),
+                "configurations": result.details, "pooled": result.pooled_details}
     written.append(write_json(out_dir / DETAILS_FILE_NAME, document))
     written += _figures_psychometric(result, out_dir)
     written += _figure_minimum_vs_z(result, out_dir)

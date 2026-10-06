@@ -30,13 +30,15 @@ import math
 import subprocess
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 from sensorperf.analysis import area, boundary, detection, resolution_lateral
 from sensorperf.analysis.detection import (
-    RULE_INCLUSIVE, RULE_PRIMARY, calibrate_tau, detected_at, outcomes, window_statistic,
+    RULE_INCLUSIVE, RULE_PRIMARY, PooledThreshold, StationWindows, calibrate_station_thresholds, calibrate_tau,
+    detected_at, outcomes, window_statistic,
 )
 from sensorperf.geometry.camera import PinholeCamera
 from sensorperf.geometry.targets import (
@@ -113,6 +115,23 @@ def detection_result(cde_session, tmp_path_factory):
     options = detection.DetectionOptions(bootstrap_resamples=DETECTION_BOOTSTRAP_RESAMPLES)
     result = detection.run_detection(cde_session, tmp_path_factory.mktemp("d_out"), {}, options)
     out = tmp_path_factory.mktemp("d_files")
+    detection.write_outputs(result, out)
+    result.out_dir = out
+    return result
+
+
+@pytest.fixture(scope="module")
+def detection_with_a_result(cde_session, tmp_path_factory):
+    """Analysis D on the cutout trials of the custom session with sigma_tot(Z) from a stand-in for Analysis A, so that the
+    stations with few blank windows pool their neighbors (Section 13, Threshold). No reused C trials, so that the
+    counts are those of the plan: DETECTION_TRIALS_PER_LEVEL per main station, DETECTION_LOW_TRIALS at the farthest."""
+    cutout_trials = [r for r in cde_session.records if r.procedure == "D" and r.target_id == "T5"]
+    session = Session(root=cde_session.root, params=cde_session.params, sensor=cde_session.sensor,
+                      registration=cde_session.registration, targets=cde_session.targets, records=cutout_trials)
+    options = detection.DetectionOptions(bootstrap_resamples=DETECTION_BOOTSTRAP_RESAMPLES, include_reused=False)
+    result = detection.run_detection(session, tmp_path_factory.mktemp("d_a_out"),
+                                     {"A": FakeNoiseResult(cde_fixture.STATIONS_MM)}, options)
+    out = tmp_path_factory.mktemp("d_a_files")
     detection.write_outputs(result, out)
     result.out_dir = out
     return result
@@ -220,9 +239,12 @@ def test_c_step10_edge_bias_signs(area_result):
     assert fits[FEATURE_DISK]["b_px_mean"] > 0.0
     assert fits[FEATURE_CUTOUT]["b_px_mean"] < 0.0
     assert "largest" in fits[FEATURE_DISK]["selection"]
-    terms = area_result.forward_model_terms()
+    # C keeps the bias in its own outputs (Section 12, Step 10) ...
+    terms = area_result.edge_bias_terms()
     assert terms["edge_bias_disk_px"] > 0.0 > terms["edge_bias_cutout_px"]
     assert terms["edge_bias_px"] > 0.0                       # positive = the front material grows
+    # ... but no term of C enters forward_model_parameters.json (Section 12, Step 13).
+    assert area_result.forward_model_terms() == {}
 
 
 def test_c_step5_contour_area_matches_pixel_count_for_largest_features(area_result):
@@ -584,6 +606,217 @@ def test_d_step3_false_alarm_rate_matches_target(detection_result, cde_session):
                                                                    cde_session.params.confidence_level)[1])
 
 
+# ---------------------------------------------------------------------------
+# Step 3: the threshold pooled over blank sites and, where short, over neighboring stations
+# ---------------------------------------------------------------------------
+THRESHOLD_STATIONS_MM = (566.0, 800.0, 1131.0)
+"""Stations of the synthetic threshold tests: the middle one is the station under test; 566 mm is its nearer neighbor
+(234 mm away) and 1131 mm the farther (331 mm)."""
+OWN_STATION_INDEX = 1
+
+
+def _blank_windows(rng, counts, sigmas):
+    """Synthetic blank windows of one window size at the stations of THRESHOLD_STATIONS_MM: ``counts`` windows each,
+    normal with a spread proportional to the station's sigma_tot (the window statistic is in mm)."""
+    return [StationWindows(z, sigma, rng.normal(0.0, sigma, count))
+            for z, sigma, count in zip(THRESHOLD_STATIONS_MM, sigmas, counts)]
+
+
+def _single_level(stations: list[StationWindows]) -> list[StationWindows]:
+    """Stations of one window size in the per-level layout of StationWindows (one array per level)."""
+    return [StationWindows(s.station_z_mm, s.sigma_tot_mm, [s.windows]) for s in stations]
+
+
+def test_d_step3_a_station_with_too_few_blank_windows_pools_its_nearest_neighbor_until_the_minimum_is_reached():
+    """Section 13, Threshold: 180 blank windows (3 sites x 60 trials) are fewer than DETECTION_MIN_BLANK_WINDOWS (300), so
+    the nearest neighboring station is pooled, after dividing by sigma_tot(Z), and the pooling stops as soon as the count
+    reaches the minimum: here after the one neighbor (360 windows), not the second. The count and the stations pooled are
+    recorded, and tau is the quantile of the normalized pool times the station's own sigma_tot."""
+    target, minimum = PARAMS.detection_false_alarm_target, PARAMS.detection_min_blank_windows
+    own_count = 180
+    assert own_count < minimum
+    assert minimum == round(3.0 / target)                      # three windows per false alarm at the target
+    rng = np.random.default_rng(11)
+    sigmas = (0.5, 1.0, 2.0)
+    stations = _single_level(_blank_windows(rng, (own_count,) * 3, sigmas))
+    result = calibrate_station_thresholds(stations, OWN_STATION_INDEX, target, minimum)[0]
+    assert result.pooled and not result.short
+    assert result.windows == 2 * own_count and result.stations_mm == (566.0, 800.0)      # the nearer neighbor only
+    normalized = np.concatenate([stations[0].windows[0] / sigmas[0], stations[1].windows[0] / sigmas[1]])
+    assert result.tau_mm == pytest.approx(np.quantile(normalized, 1.0 - target, method="higher") * sigmas[1])
+
+
+def test_d_step3_pooling_continues_to_the_second_neighbor_when_the_first_is_not_enough():
+    """With 100 windows at each of three stations, the station and its nearest neighbor give 200 (< 300), so the next
+    nearest is added as well (300): all three stations, in increasing Z, are recorded."""
+    target, minimum = PARAMS.detection_false_alarm_target, PARAMS.detection_min_blank_windows
+    per_station = minimum // 3
+    stations = _single_level(_blank_windows(np.random.default_rng(12), (per_station,) * 3, (1.0, 1.0, 1.0)))
+    result = calibrate_station_thresholds(stations, OWN_STATION_INDEX, target, minimum)[0]
+    assert result.windows == 3 * per_station == minimum
+    assert result.stations_mm == THRESHOLD_STATIONS_MM and result.pooled and not result.short
+
+
+def test_d_step3_a_station_with_enough_blank_windows_does_not_pool():
+    """900 blank windows (3 sites x 300 trials, an extended station) reach the minimum on their own: tau is the plain
+    quantile of the station's windows, nothing is divided by sigma_tot, and only the station itself is recorded."""
+    target, minimum = PARAMS.detection_false_alarm_target, PARAMS.detection_min_blank_windows
+    own_count = 3 * PARAMS.detection_low_trials
+    stations = _single_level(_blank_windows(np.random.default_rng(13), (180, own_count, 180), (1.0, 2.0, 4.0)))
+    result = calibrate_station_thresholds(stations, OWN_STATION_INDEX, target, minimum)[0]
+    assert not result.pooled and not result.short
+    assert result.windows == own_count and result.stations_mm == (800.0,)
+    assert result.tau_mm == np.quantile(stations[1].windows[0], 1.0 - target, method="higher")
+
+
+def test_d_step3_normalized_pooling_equals_direct_calibration_when_sigma_tot_is_equal():
+    """With the same sigma_tot at the pooled stations, dividing by it and multiplying back changes nothing: tau equals the
+    direct quantile (calibrate_tau) of the windows of the stations pooled."""
+    target, minimum = PARAMS.detection_false_alarm_target, PARAMS.detection_min_blank_windows
+    sigma = 1.7
+    stations = _single_level(_blank_windows(np.random.default_rng(14), (180, 180, 180), (sigma,) * 3))
+    result = calibrate_station_thresholds(stations, OWN_STATION_INDEX, target, minimum)[0]
+    assert result.pooled and result.stations_mm == (566.0, 800.0)
+    direct = calibrate_tau(np.concatenate([stations[0].windows[0], stations[1].windows[0]])[:, None], target)[0]
+    assert result.tau_mm == pytest.approx(direct, rel=1e-12)
+
+
+def test_d_step3_without_sigma_tot_a_short_station_keeps_its_own_windows_and_says_so():
+    """No sigma_tot(Z) (Analysis A did not run) means no common scale to pool on: the station keeps its own windows, tau is
+    their plain quantile, and the result is flagged short of the minimum. A neighbor without sigma_tot is skipped."""
+    target, minimum = PARAMS.detection_false_alarm_target, PARAMS.detection_min_blank_windows
+    rng = np.random.default_rng(15)
+    no_sigma = _single_level(_blank_windows(rng, (180, 180, 180), (1.0, 1.0, 1.0)))
+    no_sigma = [StationWindows(s.station_z_mm, None, s.windows) for s in no_sigma]
+    result = calibrate_station_thresholds(no_sigma, OWN_STATION_INDEX, target, minimum)[0]
+    assert not result.pooled and result.short and result.windows == 180 and result.stations_mm == (800.0,)
+    assert result.tau_mm == np.quantile(no_sigma[1].windows[0], 1.0 - target, method="higher")
+    # The nearer neighbor has no sigma_tot: the next one is used instead.
+    partly = [no_sigma[0], StationWindows(800.0, 1.0, no_sigma[1].windows),
+              StationWindows(1131.0, 1.0, no_sigma[2].windows)]
+    result = calibrate_station_thresholds(partly, OWN_STATION_INDEX, target, minimum)[0]
+    assert result.stations_mm == (800.0, 1131.0) and result.windows == 360 and not result.short
+    # Every neighbor used and the count still short: the station is pooled as far as it can be and flagged short.
+    few = _single_level(_blank_windows(rng, (60, 60, 60), (1.0, 1.0, 1.0)))
+    result = calibrate_station_thresholds(few, OWN_STATION_INDEX, target, minimum)[0]
+    assert result.pooled and result.short and result.windows == 180 and result.stations_mm == THRESHOLD_STATIONS_MM
+
+
+def test_d_step3_each_window_size_has_its_own_threshold_and_count():
+    """tau is per window size: two sizes with different blank-window counts at the same station are pooled independently,
+    the one with enough windows not at all."""
+    target, minimum = PARAMS.detection_false_alarm_target, PARAMS.detection_min_blank_windows
+    rng = np.random.default_rng(16)
+    stations = []
+    for z, sigma in zip(THRESHOLD_STATIONS_MM, (1.0, 1.0, 1.0)):
+        stations.append(StationWindows(z, sigma, [rng.normal(size=3 * 100), rng.normal(size=100)]))
+    small, large = calibrate_station_thresholds(stations, OWN_STATION_INDEX, target, minimum)
+    assert not small.pooled and small.windows == 300                 # three blank sites hold the smallest window
+    assert large.pooled and large.windows == 300                     # one blank site holds the largest: three stations
+    assert large.stations_mm == THRESHOLD_STATIONS_MM
+
+
+def test_d_step3_blank_sites_are_pooled_per_window_size_in_the_collected_trials(detection_result):
+    """A blank site holds the window of the feature it serves and of every smaller one, so the smallest feature's window
+    is taken on all three blank sites, the middle one's on two, the largest's on one; the own-site column of the pool is
+    the statistic Analysis E reads (s_blank)."""
+    for config in detection_result.configs:
+        for rule in config.rules():
+            pool = config.blank_pool(rule)
+            assert pool.shape[1:] == (len(config.levels), len(config.levels))
+            sites_per_size = [int((~np.isnan(pool[:, level, :])).any(axis=0).sum()) for level in range(pool.shape[1])]
+            assert sites_per_size == [3, 2, 1]
+            own = np.stack([pool[:, level, level] for level in range(pool.shape[1])], axis=1)
+            np.testing.assert_array_equal(own, config.s_blank[rule])
+
+
+def test_d_step3_the_summary_records_windows_stations_and_pooling_per_station(detection_with_a_result):
+    """With sigma_tot(Z) the main stations (60 trials per blank site: 180 windows for the smallest feature, 60 for the
+    largest) pool their neighbors, and the summary says how many blank windows were used and which stations; the farthest
+    station (300 trials per site) reaches the minimum on its own and is not pooled. gamma and its Clopper-Pearson interval
+    stand beside tau."""
+    minimum = PARAMS.detection_min_blank_windows
+    mid = _d_row(detection_with_a_result, FEATURE_CUTOUT, STATION_MID_MM, RULE_PRIMARY)
+    assert mid["tau_pooled"] and mid["blank_windows"] >= minimum and mid["tau_note"]
+    stations = [float(z) for z in mid["blank_windows_stations"].split(",")]
+    assert STATION_MID_MM in stations and len(stations) > 1
+    far = _d_row(detection_with_a_result, FEATURE_CUTOUT, STATION_FAR_MM, RULE_PRIMARY)
+    assert not far["tau_pooled"] and far["tau_note"] == ""
+    assert far["blank_windows"] == PARAMS.detection_low_trials             # the largest feature: one blank site
+    assert far["blank_windows_stations"] == f"{STATION_FAR_MM:g}"
+    for row in (mid, far):
+        assert row["gamma_lower"] <= row["gamma"] <= row["gamma_upper"] and math.isfinite(row["tau_mm"])
+    detail = next(d for d in detection_with_a_result.details if d["station_z_mm"] == STATION_MID_MM
+                  and d["rule"] == RULE_PRIMARY)
+    assert detail["min_blank_windows"] == minimum
+    assert all(level["blank_windows"] >= minimum and level["tau_pooled"] for level in detail["levels"])
+    columns = _read_csv(detection_with_a_result.out_dir / detection.SUMMARY_FILE_NAME)[0]
+    assert {"blank_windows", "blank_windows_stations", "tau_pooled", "gamma", "gamma_lower", "gamma_upper",
+            "tau_mm"} <= set(columns)
+
+
+def test_d_step3_without_analysis_a_the_short_stations_are_flagged(detection_result):
+    """The shared session is run without Analysis A: the main stations cannot be pooled, keep their own windows, say so in
+    ``tau_note`` and the notes; the farthest station does not need pooling."""
+    mid = _d_row(detection_result, FEATURE_CUTOUT, STATION_MID_MM, RULE_PRIMARY)
+    assert not mid["tau_pooled"] and "fewer than" in mid["tau_note"] and mid["blank_windows"] < PARAMS.detection_min_blank_windows
+    far = _d_row(detection_result, FEATURE_CUTOUT, STATION_FAR_MM, RULE_PRIMARY)
+    assert far["tau_note"] == "" and far["blank_windows"] >= PARAMS.detection_min_blank_windows
+    assert any("DETECTION_MIN_BLANK_WINDOWS" in note for note in detection_result.notes)
+
+
+def test_d_step9_the_bootstrap_rederives_tau_from_the_resampled_pooled_windows():
+    """Step 9: a bootstrap resample that draws every pose once reproduces the data's thresholds and gamma, pooled over
+    the same stations; the statistic's median tau is the median of the pooled thresholds, which differ from the plain
+    per-station ones, so the resample really pools."""
+    params = dataclasses.replace(PARAMS, detection_min_blank_windows=100)
+    target, minimum = params.detection_false_alarm_target, params.detection_min_blank_windows
+    rng = np.random.default_rng(17)
+    poses, stations_mm, sigmas = 40, THRESHOLD_STATIONS_MM, (0.5, 1.0, 2.0)
+    diameters = (4.0, 9.0)
+    levels = [detection.LevelSpec("T", i, f"f{i}", f"b{i}", d, d + 3.0) for i, d in enumerate(diameters)]
+    members = []
+    for z, sigma in zip(stations_mm, sigmas):
+        pool = np.full((poses, 2, 2), np.nan)
+        pool[:, 0, :] = rng.normal(0.0, sigma, (poses, 2))             # the small window: both blank sites
+        pool[:, 1, 1] = rng.normal(0.0, sigma, poses)                  # the large window: its own blank site only
+        s_blank = np.stack([pool[:, 0, 0], pool[:, 1, 1]], axis=1)
+        s_feature = rng.normal(2.0 * sigma, sigma, (poses, 2))
+        config = detection.ConfigTrials(
+            kind=FEATURE_CUTOUT, gap_mm=15.0, station_z_mm=z, field=0, levels=levels,
+            pose_keys=[(k,) for k in range(poses)], sources=[detection.SOURCE_D] * poses,
+            s_feature={RULE_PRIMARY: s_feature}, s_blank={RULE_PRIMARY: s_blank}, s_blank_pool={RULE_PRIMARY: pool})
+        members.append(SimpleNamespace(config=config, rule=RULE_PRIMARY, sigma_tot_mm=sigma))
+    windows = [detection.station_windows(m.config, RULE_PRIMARY, m.sigma_tot_mm) for m in members]
+    thresholds = [calibrate_station_thresholds(windows, i, target, minimum) for i in range(len(members))]
+    assert any(t.pooled for station in thresholds for t in station)
+    plain = [calibrate_tau(m.config.s_blank[RULE_PRIMARY], target) for m in members]
+    pooled_taus = [detection.thresholds_to_taus(station) for station in thresholds]
+    assert not np.allclose(np.concatenate(plain), np.concatenate(pooled_taus))
+    # One level per (station, feature) pair, with the counts that the pooled thresholds give.
+    level_px = np.geomspace(2.0, 40.0, 2 * len(members))
+    lookup = {(m, c): 2 * m + c for m in range(len(members)) for c in range(2)}
+    successes = np.zeros(level_px.size)
+    trials = np.zeros(level_px.size)
+    hits = blank_trials = 0
+    for m, member in enumerate(members):
+        sf, sb = member.config.s_feature[RULE_PRIMARY], member.config.s_blank[RULE_PRIMARY]
+        fd, bd, fv, bv = outcomes(sf, sb, pooled_taus[m])
+        s, n, _, h, b = detection.counts_from_outcomes(fd, bd, fv, bv)
+        for c in range(2):
+            successes[lookup[(m, c)]], trials[lookup[(m, c)]] = s[c], n[c]
+        hits, blank_trials = hits + h, blank_trials + b
+    best = detection.fit_psychometric(level_px, np.maximum(successes, 1.0), trials, hits / blank_trials,
+                                      detection._fit_parameters(params))
+    statistic = detection._make_bootstrap_statistic(members, level_px, lookup, params, best,
+                                                    wanted={slot: False for slot in range(4)})
+    drawn = [(m, k) for m in range(len(members)) for k in range(poses)]
+    values = statistic(drawn)
+    gamma_slot, tau_slot = detection.BOOTSTRAP_STAT_NAMES.index("gamma"), detection.BOOTSTRAP_STAT_NAMES.index("tau_mm")
+    assert values[gamma_slot] == pytest.approx(hits / blank_trials)
+    assert values[tau_slot] == pytest.approx(float(np.median(np.concatenate(pooled_taus))))
+
+
 def test_d_step4_pooled_d50_is_a_few_pixels_and_converts_to_mm_per_station(detection_result, cde_session):
     """Step 4 (pooled): D_50 of the cutouts (primary rule) is fitted on ln D_px over the 15 (feature, station) pairs, is a
     few pixels (0.5 to 8 px) and its bootstrap interval brackets it; every station reports the same D_px and the mm
@@ -864,6 +1097,85 @@ def test_d_step11_csv_and_figures(detection_result):
     assert set(terms) == {"d50_px", "d10_px"} and terms["d10_px"] < terms["d50_px"]
 
 
+def test_d_step5_d50_d10_and_d5_carry_a_model_range_over_the_three_shapes(detection_result, cde_session):
+    """Section 13, Model dependence: D_50, D_10 and D_5 all come from the best of the three shapes by deviance, and each
+    has the range across the shapes as its model uncertainty (``*_model_min`` / ``*_model_max``), in px (pooled rows) and
+    in mm, px and mrad per station (summary rows). The best shape's value lies inside its range."""
+    fx = cde_session.geometry.sensor_fx_px
+    pooled = [r for r in detection_result.pooled_rows if r["d50_status"] == "ok" and r["d10_status"] == "ok"]
+    assert pooled
+    checked_d5 = 0
+    for row in pooled:
+        names = ["d50", "d10"] + (["d5"] if row["d5_status"] == "ok" else [])
+        checked_d5 += row["d5_status"] == "ok"
+        for name in names:
+            low, high, value = row[f"{name}_model_min_px"], row[f"{name}_model_max_px"], row[f"{name}_px"]
+            assert math.isfinite(low) and math.isfinite(high)
+            assert low <= value * (1.0 + 1e-9) and value <= high * (1.0 + 1e-9), (row["kind"], name)
+    assert checked_d5
+    row = pooled[0]
+    station_rows = [r for r in detection_result.rows if (r["kind"], r["gap_mm"], r["field"], r["rule"])
+                    == (row["kind"], row["gap_mm"], row["field"], row["rule"])]
+    for station_row in station_rows:
+        for name in ("d50", "d10"):
+            assert station_row[f"{name}_model_min_mm"] == pytest.approx(
+                row[f"{name}_model_min_px"] * station_row["station_z_mm"] / fx)
+            assert station_row[f"{name}_model_max_px"] == pytest.approx(row[f"{name}_model_max_px"])
+    header = _read_csv(detection_result.out_dir / detection.POOLED_FILE_NAME)[0]
+    assert {f"{name}_model_{end}_px" for name in ("d50", "d10", "d5") for end in ("min", "max")} <= set(header)
+
+
+def test_d_prior_expectation_columns_give_d50_and_the_predicted_d0_over_the_expected_minimum(detection_result):
+    """Section 13, intro: the fitted D_50 and the predicted D_0 are reported against the expected minimum
+    (``expected_d0_px``, the laser-pencil model of Section 3.2) as ``d50_over_expected`` and
+    ``d0_predicted_over_expected``, per pooled configuration and (the same value) per station; NaN where the minimum is
+    not estimated. The details say what the prior is."""
+    expected = PARAMS.expected_d0_px
+    assert expected == pytest.approx(7.0)
+    seen = 0
+    for row in detection_result.pooled_rows:
+        for ratio, minimum in (("d50_over_expected", "d50_px"), ("d0_predicted_over_expected", "d0_predicted_px")):
+            if math.isfinite(row[minimum]):
+                assert row[ratio] == pytest.approx(row[minimum] / expected)
+                seen += 1
+            else:
+                assert math.isnan(row[ratio])
+    assert seen
+    for row in detection_result.rows:
+        pooled = next(p for p in detection_result.pooled_rows if (p["kind"], p["gap_mm"], p["field"], p["rule"])
+                      == (row["kind"], row["gap_mm"], row["field"], row["rule"]))
+        for ratio in detection.EXPECTED_RATIO_COLUMNS:
+            assert row[ratio] == pytest.approx(pooled[ratio], nan_ok=True)
+    document = json.loads((detection_result.out_dir / detection.DETAILS_FILE_NAME).read_text())
+    assert "laser-pencil" in document["prior_expectation"] and f"{expected:g} px" in document["prior_expectation"]
+    assert all(p["prior_expectation"]["expected_d0_px"] == expected for p in document["pooled"])
+    for name in ("pooled", "summary"):
+        file_name = detection.POOLED_FILE_NAME if name == "pooled" else detection.SUMMARY_FILE_NAME
+        assert set(detection.EXPECTED_RATIO_COLUMNS) <= set(_read_csv(detection_result.out_dir / file_name)[0])
+
+
+def test_d_step10_overlap_file_carries_kind_gap_field_rule_and_the_pair(detection_result):
+    """Section 13, Units: D_overlap_test.csv has one row per pair of neighboring features, with the kind, the gap, the field
+    position and the rule beside the pair."""
+    rows = _read_csv(detection_result.out_dir / detection.OVERLAP_FILE_NAME)
+    assert len(rows) == len(detection_result.overlap_rows) > 0
+    assert {"kind", "gap_mm", "field", "rule", "feature_small", "feature_large"} <= set(rows[0])
+    assert {r["kind"] for r in rows} == {FEATURE_DISK, FEATURE_CUTOUT}
+    assert {r["rule"] for r in rows} == {RULE_PRIMARY, RULE_INCLUSIVE}
+    assert all(r["gap_mm"] and r["field"] != "" and r["feature_small"] and r["feature_large"] for r in rows)
+
+
+def test_forward_model_file_has_the_d_terms_and_no_term_of_c(area_result, detection_result):
+    """Section 12, Step 13: no term of C enters forward_model_parameters.json (the edge bias stays in C's own outputs and
+    in E's cross-check), while D's ``d50_px`` and ``d10_px`` do (Section 13, Outputs)."""
+    from sensorperf.analysis import forward_model
+    document = forward_model.assemble({"C": area_result, "D": detection_result})
+    assert not any(key.startswith("edge_bias") for key in document["terms"])
+    assert {"d50_px", "d10_px"} <= set(document["terms"])
+    assert document["provenance"]["d50_px"] == "analysis D"
+    assert "analysis C" not in document["provenance"].values()
+
+
 def test_d_step12_overlap_test_between_neighboring_features(detection_result):
     """Redesign note Section 5 (D): the overlap test compares the corrected detection curves of neighboring features over
     the D_px they share: two pairs per group, each with points of both curves in the range, a mean difference, a bootstrap
@@ -1058,6 +1370,7 @@ def test_cli_analyze_c_d_e_on_the_standard_quick_session(tmp_path):
     assert analyze.returncode == 0, analyze.stdout + analyze.stderr
     document = json.loads((session / "analysis" / FORWARD_MODEL_FILE_NAME).read_text())
     assert "w_fab_px" in document["terms"] and "pi_near" in document["terms"]
+    assert not any(key.startswith("edge_bias") for key in document["terms"])     # no term of C (Section 12, Step 13)
     for name in ("C_area_summary.csv", "D_detect_summary.csv", "E_boundary_bias.csv"):
         assert (session / "analysis" / name).exists(), name
     rows = _read_csv(session / "analysis" / "D_detect_summary.csv")
