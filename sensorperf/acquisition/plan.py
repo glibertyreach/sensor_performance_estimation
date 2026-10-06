@@ -83,7 +83,7 @@ from sensorperf.geometry.targets import (
 )
 from sensorperf.geometry.transforms import RigidTransform
 from sensorperf.io.manifest import (
-    DRIFT_RUN_POSE_INDEX_BASE, FIELD_FRACTION_ACHIEVED_KEY, FILTERS_OFF_POSE_INDEX_BASE, LATERAL_SWEEP_POSE_INDEX_BASE, SENTINEL_MOUNT_REFERENCE_KEY,
+    DRIFT_RUN_POSE_INDEX_BASE, FIELD_FRACTION_ACHIEVED_KEY, FILTERS_OFF_POSE_INDEX_BASE, FIXED_STAND_KEY, LATERAL_SWEEP_POSE_INDEX_BASE, SENTINEL_MOUNT_REFERENCE_KEY,
     STAIRCASE_POSE_INDEX_BASE, SUBSERIES_DRIFT_RUN, SUBSERIES_EXTENDED, SUBSERIES_FIELD, SUBSERIES_FILTERS_OFF, SUBSERIES_JITTER, SUBSERIES_LATERAL_SWEEP, SUBSERIES_LADDER, SUBSERIES_MAIN,
     SUBSERIES_NOMINAL, SUBSERIES_OPEN, SUBSERIES_RAMP, SUBSERIES_REMOUNT, SUBSERIES_SENTINEL, SUBSERIES_STAIRCASE, SUBSERIES_TILT,
     TARGET_POSE_COLUMNS, TILT_AXIS_H, TILT_AXIS_V, VISIT_A, VISIT_B, format_file_name, format_flag, pose_to_six,
@@ -150,9 +150,10 @@ sentinels (11, on the mounted target) are part of the totals. plan_summary.txt c
 numbers, so a change of the parameters shows up as a ratio away from 1. The filters-off repeat and the optional B-Z
 staircase are never part of these totals (see ``capture_budget``)."""
 
-OPTIONAL_SUBSERIES = (SUBSERIES_FILTERS_OFF, SUBSERIES_STAIRCASE, SUBSERIES_LATERAL_SWEEP)
-"""Sub-series outside the main (Section 9) budget: the filters-off repeat, the optional B-Z staircase and the optional
-B-HV lateral sweep."""
+OPTIONAL_SUBSERIES = (SUBSERIES_FILTERS_OFF, SUBSERIES_STAIRCASE, SUBSERIES_LATERAL_SWEEP, SUBSERIES_DRIFT_RUN)
+"""Sub-series outside the main (Section 9) budget: the filters-off repeat, the optional B-Z staircase, the optional
+B-HV lateral sweep and the optional separate drift run (captures of procedure letter S, so that they must be kept out of the
+sentinel row of the budget)."""
 
 PLAN_CSV_NAME = "poses.csv"
 PLAN_SUMMARY_NAME = "plan_summary.txt"
@@ -260,7 +261,8 @@ class PlannedCapture:
         """The plan quantities the manifest carries as extra columns (string metadata of the FrameRecord): the achieved
         fraction of the requested field offset, for a pose placed at a field position, and the mount-reference flag of a
         drift sentinel (``sentinel_mount_reference``: true for the first sentinel after its target was mounted, false for
-        a later one). Any other pose has neither, so the cell stays empty."""
+        a later one), and the fixed-stand flag (``fixed_stand``: true for a capture of the optional drift run, whose plate
+        stands still on a fixed stand, see ``io.manifest``). Any other pose has none of them, so the cell stays empty."""
         metadata: dict[str, str] = {}
         fraction = self.notes.get(FIELD_FRACTION_ACHIEVED_KEY)
         if fraction is not None:
@@ -268,6 +270,8 @@ class PlannedCapture:
         reference = self.notes.get(SENTINEL_REFERENCE_KEY)
         if self.procedure == PROCEDURE_SENTINEL and reference is not None:
             metadata[SENTINEL_MOUNT_REFERENCE_KEY] = format_flag(bool(reference))
+        if self.notes.get(FIXED_STAND_KEY):
+            metadata[FIXED_STAND_KEY] = format_flag(True)
         return metadata
 
 
@@ -1273,9 +1277,10 @@ def _mounted_target_id(plan: Sequence[PlannedCapture], position: int) -> str | N
 def count_sentinel_remounts(plan: Sequence[PlannedCapture]) -> int:
     """Number of sentinels whose target differs from the target mounted at that point of the plan (see
     :func:`_mounted_target_id`), i.e. sentinels that would need a re-mount. Zero for every plan made by
-    :func:`insert_sentinels`: a sentinel is captured on the mounted target."""
+    :func:`insert_sentinels`: a sentinel is captured on the mounted target. The captures of the optional drift run are no
+    sentinels of a mount (their plate stands on its own stand) and are not counted."""
     return sum(1 for position, capture in enumerate(plan)
-               if capture.procedure == PROCEDURE_SENTINEL
+               if capture.procedure == PROCEDURE_SENTINEL and capture.subseries != SUBSERIES_DRIFT_RUN
                and _mounted_target_id(plan, position) not in (None, capture.target_id))
 
 
@@ -1285,11 +1290,17 @@ def plan_drift_run(params: CharacterizationParameters) -> list[PlannedCapture]:
     DRIFT_RUN_CAPTURE_INTERVAL_MIN minutes for DRIFT_RUN_DURATION_MIN minutes (the first capture at time zero, so
     duration / interval + 1 captures). Procedure S (the sentinels folder), sub-series ``drift_run``; the pose index counts
     the captures from DRIFT_RUN_POSE_INDEX_BASE, so no capture shares a pose key with an in-session sentinel. The order
-    runs 0..N-1 on its own: the run is taken on another day, in a plan file of its own."""
+    runs 0..N-1 on its own; :func:`plan_full_session` (``drift_run=True``) appends the captures after the session's poses.
+
+    The robot is idle and the plate stands on a fixed stand, so the poses have no read-back robot pose: each carries
+    ``notes["fixed_stand"] = True`` (``io.manifest.FIXED_STAND_KEY``) and the NOMINAL target pose (T2 centered and
+    fronto-parallel at Z_REFERENCE_MM). ``make_manifest`` copies the robot pose and the target pose of the manifest from
+    this nominal pose and needs only the capture time and the sensor temperature from the pose log."""
     captures = int(math.floor(params.drift_run_duration_min / params.drift_run_capture_interval_min + 1e-9)) + 1
     pose = fronto_parallel_pose(0.0, 0.0, params.z_reference_mm)
     counter = _PoseCounter(DRIFT_RUN_POSE_INDEX_BASE)
-    note = {SENTINEL_NOTE_KEY: f"drift run on the fixed stand: T2 at Z = {params.z_reference_mm:g} mm, robot idle"}
+    note = {SENTINEL_NOTE_KEY: f"drift run on the fixed stand: T2 at Z = {params.z_reference_mm:g} mm, robot idle",
+            FIXED_STAND_KEY: True}
     return _renumber([_new_capture(counter, PROCEDURE_SENTINEL, TARGET_NOISE_PLATE, None, params.z_reference_mm,
                                    FIELD_POSITION_CENTER, params.sentinel_frames, SUBSERIES_DRIFT_RUN, pose,
                                    notes=dict(note))
@@ -1376,7 +1387,7 @@ def insert_sentinels(plan: list[PlannedCapture], params: CharacterizationParamet
     if previous is not None:
         result.append(sentinel(previous))                        # after the last pose of the last series
     _renumber(result)
-    if diagnostics is not None:
+    if diagnostics is not None and result:
         sentinels = [c for c in result if c.procedure == PROCEDURE_SENTINEL]
         per_target = ", ".join(f"{t}: {n}" for t, n in sorted(Counter(c.target_id for c in sentinels).items()))
         remounts = count_sentinel_remounts(result)
@@ -1406,7 +1417,8 @@ def plan_full_session(params: CharacterizationParameters, geometry: SensorGeomet
                       filters_off: bool = False, open_background: bool = False, extended: bool = True,
                       targets: TargetSet | None = None, series: Iterable[str] | None = None,
                       diagnostics: PlanDiagnostics | None = None, staircase: bool = False,
-                      reuse_c_first_frames: bool = False, lateral_sweep: bool = False) -> list[PlannedCapture]:
+                      reuse_c_first_frames: bool = False, lateral_sweep: bool = False,
+                      drift_run: bool = False) -> list[PlannedCapture]:
     """All series in the order of the procedure (R, A, B-HV, B-Z, C, D) with drift sentinels inserted once over
     the whole plan and ``order`` renumbered 0..N-1.
 
@@ -1415,7 +1427,10 @@ def plan_full_session(params: CharacterizationParameters, geometry: SensorGeomet
     series; sub-series "filters_off", outside the main budget) to each of those series. ``staircase`` adds the optional
     second pass of series B-Z (the staircase of Section 6.2, outside the main budget; the filters-off repeat of B-Z then
     includes it). ``lateral_sweep`` adds the optional second pass of series B-HV (the lateral sweep of Section 6.1 at the
-    reference station, outside the main budget). ``reuse_c_first_frames`` lets the D main series count the first frame
+    reference station, outside the main budget). ``drift_run`` appends the captures of the optional separate drift run
+    (:func:`plan_drift_run`, Section 4, Step 3) after everything else, whatever ``series`` selects: they are outside the main
+    budget, get no drift sentinels (nothing is mounted by the robot), and have the fixed-stand flag in their notes.
+    ``reuse_c_first_frames`` lets the D main series count the first frame
     of each matching C pose as a D trial and plan only the remaining D poses (:func:`plan_detection_series`; the
     budget is still computed without the reuse). ``registration`` is only checked here: a
     registration whose residual was not accepted triggers a warning (the commanded flange poses depend on it; they
@@ -1453,8 +1468,17 @@ def plan_full_session(params: CharacterizationParameters, geometry: SensorGeomet
     if PROCEDURE_DETECTION in chosen:
         parts += plan_detection_series(params, geometry, rng, extended, target_set, diagnostics,
                                        reuse_c_first_frames=reuse_c_first_frames, c_plan=area_plan)
-    return insert_sentinels(parts, params, geometry, _seconds_per_frame(geometry), params.move_and_settle_time_s,
+    plan = insert_sentinels(parts, params, geometry, _seconds_per_frame(geometry), params.move_and_settle_time_s,
                             diagnostics=diagnostics, targets=target_set)
+    if drift_run:
+        # Appended after the sentinels are placed: the run is its own measurement, not part of the session's clock.
+        run = plan_drift_run(params)
+        plan = _renumber(plan + run)
+        if diagnostics is not None:
+            diagnostics.note(f"optional drift run (--drift-run): {len(run)} captures of {params.sentinel_frames} frames "
+                             f"appended outside the main budget; the robot is idle and T2 stands on a fixed stand at "
+                             f"Z = {params.z_reference_mm:g} mm (nominal pose, fixed_stand=true)")
+    return plan
 
 
 # ---------------------------------------------------------------------------
@@ -1675,6 +1699,27 @@ def _pose_index_range_lines(plan: Sequence[PlannedCapture]) -> list[str]:
     return lines
 
 
+def _drift_run_lines(plan: Sequence[PlannedCapture], params: CharacterizationParameters) -> list[str]:
+    """The block of plan_summary.txt for the optional separate drift run (empty when the plan has none): the number of
+    captures and frames, the pose-index range, the first and last file names and the statement that the robot is idle and
+    the plate stands on a fixed stand at the reference station. The run is outside the main budget and costs no robot time."""
+    run = [c for c in plan if c.subseries == SUBSERIES_DRIFT_RUN]
+    if not run:
+        return []
+    frames = sum(c.frames for c in run)
+    first, last = run[0], run[-1]
+    return ["", "Optional separate drift run (--drift-run, Section 4, Step 3; outside the main budget, not in the totals "
+                "above or in the comparison with the document's estimate):",
+            f"  {len(run)} captures of {first.frames} frames = {frames} frames, one capture every "
+            f"{params.drift_run_capture_interval_min:g} min for {params.drift_run_duration_min:g} min (the first at time zero)",
+            f"  pose indices P{min(c.pose_index for c in run):04d} to P{max(c.pose_index for c in run):04d}, files "
+            f"{first.file_name(0)} ... {last.file_name(last.frames - 1)} (procedure S, in the sentinels folder)",
+            f"  The robot is idle and the plate ({first.target_id}) is on a fixed stand at the reference station, Z = "
+            f"{first.station_z_mm:g} mm, centered and fronto-parallel. The rows of poses.csv carry the nominal pose with "
+            f"notes {FIXED_STAND_KEY}=true: make_manifest copies the robot pose columns from it, so the pose log needs "
+            "only the capture time (timestamp) and the sensor temperature (sensor_temp_c) for these captures."]
+
+
 def _adjustment_lines(plan: Sequence[PlannedCapture]) -> list[str]:
     """One line per distinct field placement that was pulled inward or could not fit (module docstring)."""
     seen: dict[tuple, dict] = {}
@@ -1792,6 +1837,7 @@ def plan_summary_text(plan: Sequence[PlannedCapture], params: CharacterizationPa
                       f"{reuse.configurations} configurations); {d_planned:,} D poses are planned instead of "
                       f"{d_planned + reuse.poses:,}. Only the first frame of a C pose may be used (Section 8, Independence "
                       "rule)."]
+    lines += _drift_run_lines(plan, params)
     sweep = [c for c in plan if c.subseries == SUBSERIES_LATERAL_SWEEP]
     if sweep:
         lines += ["", f"B-HV lateral sweep approach (Section 6.1, Step 6): {len(sweep)} poses, "

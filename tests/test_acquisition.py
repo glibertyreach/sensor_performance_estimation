@@ -13,6 +13,7 @@ needed.
 from __future__ import annotations
 
 import csv
+import datetime
 import dataclasses
 import json
 import math
@@ -28,7 +29,7 @@ from sensorperf.acquisition.check import (
     FLAG_FRONT_OFFSET, FLAG_FRONT_TILT, FLAG_LOW_VALID, check_session, pilot_post_check,
 )
 from sensorperf.acquisition.plan import (
-    DOCUMENT_ESTIMATE_FRAMES, DOCUMENT_ESTIMATE_HOURS, DOCUMENT_ESTIMATE_POSES, PLAN_CSV_NAME, PLAN_FIGURE_NAME, PLAN_SUMMARY_NAME, PlanDiagnostics,
+    DOCUMENT_ESTIMATE_FRAMES, DOCUMENT_ESTIMATE_HOURS, DOCUMENT_ESTIMATE_POSES, PLAN_CSV_NAME, PLAN_FIGURE_NAME, PLAN_SUMMARY_NAME, PlanDiagnostics, plan_summary_text,
     PlannedCapture, SERIES_ORDER, TIER_A_DISPARITY_QUANTUM_PX, budget_total, capture_budget, capture_duration_s,
     camera_of, fit_violation_px, format_budget_table, insert_sentinels, jitter_offset_mm, place_in_field,
     plan_detection_series, plan_drift_run, plan_edge_series, plan_full_session, plan_noise_series, plan_registration,
@@ -44,7 +45,7 @@ from sensorperf.geometry.registration import Registration, plane_of_pose
 from sensorperf.geometry.targets import fronto_parallel_pose, make_standard_target_set
 from sensorperf.geometry.transforms import RigidTransform
 from sensorperf.io.manifest import (
-    DRIFT_RUN_POSE_INDEX_BASE, FIELD_FRACTION_ACHIEVED_KEY, FILTERS_OFF_POSE_INDEX_BASE, FOUR_DIGIT_POSE_INDEX_MIN, FrameRecord,
+    DRIFT_RUN_POSE_INDEX_BASE, FIELD_FRACTION_ACHIEVED_KEY, FILTERS_OFF_POSE_INDEX_BASE, FIXED_STAND_KEY, FOUR_DIGIT_POSE_INDEX_MIN, FrameRecord,
     LATERAL_SWEEP_POSE_INDEX_BASE, OPTIONAL_POSE_INDEX_RANGE_SIZE, SENTINEL_MOUNT_REFERENCE_KEY, STAIRCASE_POSE_INDEX_BASE,
     SUBSERIES_DRIFT_RUN, SUBSERIES_FIELD, SUBSERIES_JITTER, VISIT_A, VISIT_B, format_file_name, parse_file_name, parse_flag, write_manifest_csv,
 )
@@ -1455,8 +1456,221 @@ def test_plan_drift_run_and_its_manifest(tmp_path: Path):
     assert len(records) == 10 and {r.subseries for r in records} == {SUBSERIES_DRIFT_RUN}
     assert [r.sensor_temp_c for r in records[::2]] == [DRIFT_RUN_TEST_TEMPERATURE_C + 0.5 * k for k in range(5)]
     assert records[2].timestamp.startswith("2026-10-05T08:02")
-    assert all(r.path.parent.name == "sentinels" and not r.metadata for r in records)    # no mount-reference flag
+    assert all(r.path.parent.name == "sentinels" for r in records)
+    assert all(r.metadata == {FIXED_STAND_KEY: "true"} for r in records)    # fixed stand, no mount-reference flag
     write_manifest_csv(root / "manifest.csv", records)
     loaded = load_manifest(root / "manifest.csv")
     assert [(r.subseries, r.pose_index, r.sensor_temp_c) for r in loaded] == \
            [(r.subseries, r.pose_index, r.sensor_temp_c) for r in records]
+
+
+# ---------------------------------------------------------------------------
+# The drift run on the command line, and the manifest of a plate on a fixed stand
+# ---------------------------------------------------------------------------
+DRIFT_RUN_CAPTURES = 241
+"""Captures of the default drift run: 480 min every 2 min, the first at time zero."""
+DRIFT_RUN_START_TIME = datetime.datetime(2026, 10, 5, 8, 0, 0)
+"""Capture time of the first frame of the fixed-stand test logs."""
+FIXED_STAND_SECONDS_PER_CAPTURE = 120
+"""Seconds between the captures of the fixed-stand test logs (the drift-run interval)."""
+JUNK_READ_BACK_MM = 1.0e6
+"""A read-back position that a fixed-stand row must ignore (the plate is not on the robot)."""
+
+
+def test_drift_run_flag_adds_exactly_the_planned_captures_outside_the_budget(full_plan, tmp_path: Path):
+    """Section 4, Step 3: ``plan_full_session(drift_run=True)`` appends exactly the captures of ``plan_drift_run`` after the
+    session's poses, outside the main budget: the Section 9 totals stay 7,194 poses, 42,520 frames and 7.18 h, no sentinel
+    is placed around the run, and plan_summary.txt lists the run (count, frames, pose-index range, file names) and says that
+    the robot is idle and the plate stands on a fixed stand at the reference station."""
+    base, _ = full_plan
+    diagnostics = PlanDiagnostics()
+    plan = plan_full_session(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), drift_run=True, diagnostics=diagnostics)
+    run = [c for c in plan if c.subseries == SUBSERIES_DRIFT_RUN]
+    assert len(run) == DRIFT_RUN_CAPTURES and len(plan) == len(base) + DRIFT_RUN_CAPTURES
+    assert [c.pose_key() for c in plan[:len(base)]] == [c.pose_key() for c in base]     # the session is unchanged
+    assert [c.pose_key() for c in plan[len(base):]] == [c.pose_key() for c in plan_drift_run(PARAMS)]
+    assert [c.order for c in plan] == list(range(len(plan)))
+    assert len({c.pose_key() for c in plan}) == len(plan)
+    assert all(c.notes[FIXED_STAND_KEY] is True for c in run) and not any(FIXED_STAND_KEY in c.notes for c in base)
+    # The totals of the budget do not change, and they are the document's estimate.
+    args = (GEOMETRY.frame_rate_hz, PARAMS.move_and_settle_time_s)
+    assert capture_budget(plan, *args) == capture_budget(base, *args)
+    total = budget_total(capture_budget(plan, *args))
+    assert (total.poses, total.frames) == (7194, 42520) and total.robot_hours == pytest.approx(7.18, abs=HOURS_TOLERANCE)
+    assert (total.poses, total.frames) == (DOCUMENT_ESTIMATE_POSES, DOCUMENT_ESTIMATE_FRAMES)
+    # No sentinel was added by the run: the sentinels of the plan are those of the session.
+    assert count_sentinel_remounts(plan) == 0
+    assert sum(1 for c in plan if c.procedure == PROCEDURE_SENTINEL and c.subseries != SUBSERIES_DRIFT_RUN) \
+        == sum(1 for c in base if c.procedure == PROCEDURE_SENTINEL)
+    assert any("optional drift run" in note for note in diagnostics.notes)
+    # The summary.
+    text = plan_summary_text(plan, PARAMS, GEOMETRY)
+    assert "Optional separate drift run" in text and "Optional separate drift run" not in plan_summary_text(base, PARAMS, GEOMETRY)
+    frames = sum(c.frames for c in run)
+    assert f"{DRIFT_RUN_CAPTURES} captures of {PARAMS.sentinel_frames} frames = {frames} frames" in text
+    assert f"P{DRIFT_RUN_POSE_INDEX_BASE:04d} to P{DRIFT_RUN_POSE_INDEX_BASE + DRIFT_RUN_CAPTURES - 1:04d}" in text
+    assert run[0].file_name(0) in text and run[-1].file_name(run[-1].frames - 1) in text
+    assert "robot is idle" in text and "fixed stand at the reference station" in text and "fixed_stand=true" in text
+    # The command line: a plan of the run alone (--series without letters) and the run added to a series.
+    assert plan_cli.main(["--out", str(tmp_path / "alone"), "--series", "--drift-run"]) == 0
+    alone = read_plan_csv(tmp_path / "alone" / PLAN_CSV_NAME)
+    assert [c.pose_key() for c in alone] == [c.pose_key() for c in plan_drift_run(PARAMS)]
+    nominal = fronto_parallel_pose(0.0, 0.0, PARAMS.z_reference_mm)
+    assert all(c.notes[FIXED_STAND_KEY] is True and c.field == 0 and c.subseries == SUBSERIES_DRIFT_RUN for c in alone)
+    assert all(np.allclose(c.target_to_camera.translation, nominal.translation)
+               and np.allclose(c.target_to_camera.rotation, nominal.rotation) for c in alone)
+    assert plan_cli.main(["--out", str(tmp_path / "plain"), "--series", "Z"]) == 0
+    assert plan_cli.main(["--out", str(tmp_path / "with_run"), "--series", "Z", "--drift-run"]) == 0
+    plain = read_plan_csv(tmp_path / "plain" / PLAN_CSV_NAME)
+    with_run = read_plan_csv(tmp_path / "with_run" / PLAN_CSV_NAME)
+    assert len(with_run) == len(plain) + DRIFT_RUN_CAPTURES
+    assert sum(1 for c in with_run if c.subseries == SUBSERIES_DRIFT_RUN) == DRIFT_RUN_CAPTURES
+    assert not any(c.subseries == SUBSERIES_DRIFT_RUN for c in plain)
+    # Nothing to plan is an input error (exit code 2), not an empty plan.
+    assert plan_cli.main(["--out", str(tmp_path / "empty"), "--series"]) == 2
+
+
+def fixed_stand_setup(tmp_path: Path, extra_main_poses: int = 0):
+    """A short drift-run plan (5 captures of 2 frames; optionally with ordinary noise poses before it), its poses.csv, empty
+    capture files and a registration. Returns (plan, params, registration, root, plan_csv_path)."""
+    params = dataclasses.replace(SMALL_PARAMS, drift_run_duration_min=DRIFT_RUN_TEST_DURATION_MIN,
+                                 drift_run_capture_interval_min=DRIFT_RUN_TEST_INTERVAL_MIN, sentinel_frames=2)
+    main = plan_noise_series(params, GEOMETRY, np.random.default_rng(MASTER_SEED))[:extra_main_poses]
+    plan = main + plan_drift_run(params)
+    for position, capture in enumerate(plan):
+        capture.order = position
+    root = tmp_path / "session"
+    write_empty_captures(root, plan)
+    write_plan(tmp_path / "plan", plan, None, params, GEOMETRY)
+    return plan, params, random_registration(), root, tmp_path / "plan" / PLAN_CSV_NAME
+
+
+def write_fixed_stand_log(path: Path, plan: list[PlannedCapture], registration: Registration,
+                          columns: tuple[str, ...] = ("timestamp", "sensor_temp_c"), blank_cell: str | None = None,
+                          junk_position: bool = False) -> None:
+    """A pose log with one row per frame. Ordinary poses carry the read-back pose (the commanded flange pose as
+    quaternion_wxyz); the captures of the drift run have the robot pose cells EMPTY (or, with ``junk_position``, nonsense that
+    must be ignored). ``columns`` are the optional columns written (a name left out is an absent column); ``blank_cell``
+    names a column whose cell is left empty on every drift-run row."""
+    position_columns = ["x_mm", "y_mm", "z_mm", "rotation_type", "r1", "r2", "r3", "r4"]
+    header = ["file"] + (position_columns if any(not c.notes.get(FIXED_STAND_KEY) for c in plan) or junk_position else []) \
+        + list(columns)
+    with path.open("w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(header)
+        for capture in plan:
+            fixed = bool(capture.notes.get(FIXED_STAND_KEY))
+            flange = registration.flange_to_base_for(capture.target_to_camera)
+            for frame in range(capture.frames):
+                stamp = DRIFT_RUN_START_TIME + datetime.timedelta(seconds=FIXED_STAND_SECONDS_PER_CAPTURE * capture.order + frame)
+                values = {"timestamp": stamp.isoformat(), "sensor_temp_c": DRIFT_RUN_TEST_TEMPERATURE_C + 0.5 * capture.order}
+                row = [capture.file_name(frame)]
+                if "x_mm" in header:
+                    if fixed and not junk_position:
+                        row += [""] * len(position_columns)
+                    elif fixed:
+                        row += [JUNK_READ_BACK_MM] * 3 + ["quaternion_wxyz", 1.0, 0.0, 0.0, 0.0]
+                    else:
+                        row += [*flange.translation, "quaternion_wxyz", *quaternion_wxyz(flange.rotation)]
+                for column in columns:
+                    row.append("" if fixed and column == blank_cell else values[column])
+                writer.writerow(row)
+
+
+def test_manifest_of_a_fixed_stand_log_without_read_back_columns(tmp_path: Path):
+    """Specification Section 4, Step 3 (fixed stand): a pose log with only the file, the capture time and the sensor
+    temperature builds the manifest of the drift run: the target pose is the nominal pose of the plan, the robot pose is the
+    flange pose the registration gives for it, both constant, and the manifest carries the fixed_stand flag. The same holds
+    for a log whose position cells are empty beside ordinary rows that keep theirs, and robot values found on a fixed-stand
+    row are ignored."""
+    from sensorperf.io.manifest import load_manifest
+    plan, _, registration, root, plan_csv = fixed_stand_setup(tmp_path)
+    log = tmp_path / "pose_log_time_and_temperature_only.csv"
+    write_fixed_stand_log(log, plan, registration)
+    assert "x_mm" not in log.read_text().splitlines()[0]
+    nominal = fronto_parallel_pose(0.0, 0.0, PARAMS.z_reference_mm)
+    commanded_flange = registration.flange_to_base_for(nominal)
+
+    def check(records: list[FrameRecord], count: int) -> None:
+        """The records of the run: nominal poses, the flag, time and temperature."""
+        assert len(records) == count and {r.subseries for r in records} == {SUBSERIES_DRIFT_RUN}
+        for record in records:
+            assert np.allclose(record.target_pose_camera.translation, nominal.translation, atol=POSE_TOLERANCE)
+            assert np.allclose(record.target_pose_camera.rotation, nominal.rotation, atol=POSE_TOLERANCE)
+            assert np.allclose(record.robot_pose.translation, commanded_flange.translation, atol=POSE_TOLERANCE)
+            assert np.allclose(record.robot_pose.rotation, commanded_flange.rotation, atol=POSE_TOLERANCE)
+            assert record.metadata == {FIXED_STAND_KEY: "true"}
+        assert [r.sensor_temp_c for r in records[::2]] == [DRIFT_RUN_TEST_TEMPERATURE_C + 0.5 * k for k in range(5)]
+        assert records[2].timestamp == (DRIFT_RUN_START_TIME + datetime.timedelta(seconds=FIXED_STAND_SECONDS_PER_CAPTURE)).isoformat()
+
+    records = build_manifest(log, root, plan_csv, registration, strict=True)
+    check(records, 10)
+    write_manifest_csv(root / "manifest.csv", records)
+    loaded = load_manifest(root / "manifest.csv")                       # the robot pose columns are filled: it loads back
+    check(loaded, 10)
+    assert FIXED_STAND_KEY in (root / "manifest.csv").read_text().splitlines()[0].split(",")
+    # Robot pose values on a fixed-stand row are not used.
+    junk = tmp_path / "pose_log_junk.csv"
+    write_fixed_stand_log(junk, plan, registration, junk_position=True)
+    check(build_manifest(junk, root, plan_csv, registration, strict=True), 10)
+    # Through the command line.
+    out = tmp_path / "manifest_cli.csv"
+    assert manifest_cli.main(["--pose-log", str(log), "--captures", str(root), "--plan", str(plan_csv), "--registration",
+                              str(write_registration_file(tmp_path, registration)), "--out", str(out), "--strict"]) == 0
+    assert out.exists()
+
+
+def write_registration_file(folder: Path, registration: Registration) -> Path:
+    """registration.json of a registration, for the command line."""
+    path = folder / "registration.json"
+    registration.save(path)
+    return path
+
+
+def test_manifest_mixes_fixed_stand_rows_and_read_back_rows(tmp_path: Path):
+    """A pose log of the whole session: the ordinary poses keep their read-back pose through the registration; the drift-run
+    rows of the same log, with empty robot pose cells, get the nominal pose."""
+    plan, _, registration, root, plan_csv = fixed_stand_setup(tmp_path, extra_main_poses=2)
+    log = tmp_path / "pose_log.csv"
+    write_fixed_stand_log(log, plan, registration)
+    records = build_manifest(log, root, plan_csv, registration, strict=True)
+    ordinary = [r for r in records if r.subseries != SUBSERIES_DRIFT_RUN]
+    run = [r for r in records if r.subseries == SUBSERIES_DRIFT_RUN]
+    assert ordinary and len(run) == 10
+    planned = {c.pose_key(): c for c in plan}
+    for record in ordinary:
+        distance, angle = record.target_pose_camera.difference_from(planned[record.pose_key()].target_to_camera)
+        assert distance < POSE_TOLERANCE and angle < POSE_TOLERANCE and FIXED_STAND_KEY not in record.metadata
+    assert all(r.metadata.get(FIXED_STAND_KEY) == "true" for r in run)
+
+
+def test_manifest_of_a_fixed_stand_log_needs_time_and_temperature(tmp_path: Path):
+    """The drift analysis needs the capture time and the sensor temperature: a log without either column, or with an empty
+    cell in it, fails and the message names the column. A log without position columns is still an error for a pose that
+    is not on a fixed stand."""
+    plan, _, registration, root, plan_csv = fixed_stand_setup(tmp_path)
+    for column, kept in (("sensor_temp_c", ("timestamp",)), ("timestamp", ("sensor_temp_c",))):
+        log = tmp_path / f"without_{column}.csv"
+        write_fixed_stand_log(log, plan, registration, columns=kept)
+        with pytest.raises(PoseLogError, match=f"no '{column}' column"):
+            build_manifest(log, root, plan_csv, registration)
+        records, messages = build_manifest_with_report(log, root, plan_csv, registration)
+        assert any(f"'{column}'" in error for error in messages.errors)
+        assert manifest_cli.main(["--pose-log", str(log), "--captures", str(root), "--plan", str(plan_csv),
+                                  "--registration", str(write_registration_file(tmp_path, registration))]) == 2
+    for column in ("sensor_temp_c", "timestamp"):
+        log = tmp_path / f"empty_{column}.csv"
+        write_fixed_stand_log(log, plan, registration, blank_cell=column)
+        with pytest.raises(PoseLogError, match=f"column '{column}' is empty on 10 row"):
+            build_manifest(log, root, plan_csv, registration)
+    # Not a fixed stand: the position columns stay required.
+    ordinary, _, _, ordinary_root, ordinary_csv = fixed_stand_setup(tmp_path / "ordinary", extra_main_poses=1)
+    log = tmp_path / "ordinary_without_position.csv"
+    with log.open("w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["file", "timestamp", "sensor_temp_c"])
+        for capture in ordinary:
+            for frame in range(capture.frames):
+                writer.writerow([capture.file_name(frame), DRIFT_RUN_START_TIME.isoformat(), DRIFT_RUN_TEST_TEMPERATURE_C])
+    with pytest.raises(PoseLogError, match="lacks columns"):
+        build_manifest(log, ordinary_root, ordinary_csv, registration)

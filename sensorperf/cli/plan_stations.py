@@ -20,11 +20,23 @@ with drift sentinels inserted on the budget clock. ``--filters-off`` appends the
 B-Z (Section 4, Step 4.2) after each filters-on series; the summary lists it outside the main budget. Two further
 options, both off by default: ``--lateral-sweep`` adds the optional second pass of B-HV (Section 6.1, Step 6: T3a swept
 in H and then in V in steps of LATERAL_SWEEP_STEP_PX over LATERAL_SWEEP_SPAN_PX at Z_REFERENCE_MM, outside the main
-budget), and ``--reuse-c-first-frames`` lets the first frame of each C pose count as a D trial (Section 8, Reuse), so the
+budget), ``--drift-run`` adds the optional separate drift run (Section 4, Step 3: T2 on a fixed stand at Z_REFERENCE_MM, the
+robot idle, one capture every DRIFT_RUN_CAPTURE_INTERVAL_MIN minutes for DRIFT_RUN_DURATION_MIN minutes, 241 captures with the
+default parameters, outside the main budget and with no drift sentinels around it), and ``--reuse-c-first-frames`` lets the first frame of each C pose count as a D trial (Section 8, Reuse), so the
 D main series plans only the remaining poses (the Section 9 budget is still computed without the reuse). Every random draw uses
 ``np.random.default_rng(seed)`` with a seed derived from ``--seed`` and logged in
 poses.csv. A target that would not fit the field of view at its station is pulled
 inward along its field direction and the summary says so (Section 5, Step 1).
+
+Drift run on a fixed stand (``--drift-run``)
+    The plate stands still on a fixed stand and the robot is idle, so these captures have no read-back robot pose. Their
+    rows in poses.csv carry the NOMINAL pose of T2 at the reference station (center field, fronto-parallel) and the notes
+    field ``fixed_stand=true`` (the JSON notes read ``"fixed_stand": true``). ``make_manifest`` copies the robot pose columns
+    and the target pose of the manifest from that nominal pose, so the pose log of the run needs only the capture time
+    (``timestamp``) and the sensor temperature (``sensor_temp_c``) per capture and leaves the robot pose columns empty; the
+    registered pose is constant for the run, and the drift analysis uses only the relative mean Z against the first capture
+    after the settling, so an absolute error of the stand's pose does not enter. The run is taken on its own day: to plan it
+    alone give ``--series`` without letters (``--drift-run --series``) and use the same registration as for the session.
 
 Frames and conventions (millimeters, degrees at the interface)
     camera frame  the left IR camera: Z along the optical axis, H = x along
@@ -97,9 +109,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="sensor_config.json with the sensor geometry; without it the indicative geometry is used")
     parser.add_argument("--parameters", type=Path, metavar="PATH",
                         help="parameters.json with overrides of the Section 2 parameter table")
-    parser.add_argument("--series", nargs="+", metavar="LETTER", default=None,
+    parser.add_argument("--series", nargs="*", metavar="LETTER", default=None,
                         help="subset of series to plan, by procedure letter: " + " ".join(PLANNED_SERIES)
-                             + " (R registration, A noise, B edges, Z depth steps, C area, D detection); default all")
+                             + " (R registration, A noise, B edges, Z depth steps, C area, D detection); default all. "
+                               "Without letters (--series alone) no series is planned, which is meant for a plan of the "
+                               "optional drift run alone (--drift-run)")
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED, metavar="N",
                         help="master random seed; every shuffle and offset draws from it and is logged (default %(default)s)")
     parser.add_argument("--no-extended", action="store_true",
@@ -125,6 +139,16 @@ def build_parser() -> argparse.ArgumentParser:
                              "swept in H and then in V at Z_REFERENCE_MM in steps of LATERAL_SWEEP_STEP_PX over "
                              "LATERAL_SWEEP_SPAN_PX (20 poses per axis, approached from alternating directions); its poses "
                              "are labeled lateral_sweep and are listed outside the main budget in plan_summary.txt")
+    parser.add_argument("--drift-run", action="store_true",
+                        help="add the optional separate drift run (Section 4, Step 3): T2 on a FIXED STAND at the reference "
+                             "station, the robot idle, SENTINEL_FRAMES frames every DRIFT_RUN_CAPTURE_INTERVAL_MIN minutes for "
+                             "DRIFT_RUN_DURATION_MIN minutes (241 captures with the default parameters; procedure S, "
+                             "sub-series drift_run, pose indices from P4000). The captures are listed outside the main budget "
+                             "in plan_summary.txt (count, frames, pose-index range, file names). Their poses.csv rows hold the "
+                             "nominal pose of T2 at the reference station and the notes field fixed_stand=true: make_manifest "
+                             "copies the robot pose columns from the nominal pose, so the pose log needs only timestamp and "
+                             "sensor_temp_c for them (the registered pose is constant, and the analysis uses only the "
+                             "relative mean Z). Give --series without letters to plan the run alone")
     parser.add_argument("--open-background", action="store_true",
                         help="add the open-background variant of the C series for the cutout arrays (Section 7, Step 4)")
     return parser
@@ -148,7 +172,11 @@ def main(argv: list[str] | None = None) -> int:
                                  filters_off=args.filters_off,
                                  open_background=args.open_background, extended=not args.no_extended, targets=targets,
                                  series=args.series, diagnostics=diagnostics, staircase=args.staircase,
-                                 reuse_c_first_frames=args.reuse_c_first_frames, lateral_sweep=args.lateral_sweep)
+                                 reuse_c_first_frames=args.reuse_c_first_frames, lateral_sweep=args.lateral_sweep,
+                                 drift_run=args.drift_run)
+        if not plan:
+            raise PlanInputError("nothing to plan: --series was given without letters and --drift-run was not given; "
+                                 "name the series to plan, or add --drift-run")
     except (OSError, ValueError, MissingSensorValue, PlanInputError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return EXIT_INPUT_ERROR

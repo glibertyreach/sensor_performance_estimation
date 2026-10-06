@@ -28,6 +28,22 @@ Frames and conventions
 - Poses are stored in CSV as six values: x, y, z in mm and a rotation vector
   (axis times angle) in degrees.
 
+Plate on a fixed stand (the optional drift run)
+-----------------------------------------------
+The captures of the optional separate drift run (Section 4, Step 3; sub-series ``drift_run``) show T2 on a FIXED STAND
+with the robot idle. There is no read-back robot pose for such a plate (the robot does not hold it), and the pose the plan
+registers for it is constant for the whole run. The plan therefore marks these poses with ``fixed_stand=true`` in the
+notes of poses.csv (``FIXED_STAND_KEY``), and ``make_manifest`` follows this rule for every pose so marked:
+
+- the pose log needs only the capture time (``timestamp``) and the sensor temperature (``sensor_temp_c``) per frame; the
+  robot pose columns (x_mm, y_mm, z_mm, rotation_type, r1 .. r9) may be absent or empty;
+- ``target_pose_camera`` is the NOMINAL pose of the plan (T2 at the reference station, center field, fronto-parallel),
+  and ``robot_pose`` is the flange pose the registration gives for that nominal pose, so both pose columns of the
+  manifest are copied from the commanded pose; robot pose values that a log does carry for such a row are not used;
+- the manifest carries the flag as its extra column ``fixed_stand`` (``true``), so that the analysis knows the pose
+  columns are nominal and not read back. The drift analysis uses only the RELATIVE mean Z of each capture against the first
+  capture after the settling, so an absolute error of the stand's pose does not enter the result.
+
 The columns of Section 9 are all present (``MANIFEST_COLUMNS``); the columns
 after the document's list (sub-series, tilt, step, visit) carry the details of
 the A tilt sub-series, the B-Z ladder, ramp and staircase, and the C and D variants,
@@ -134,6 +150,12 @@ drift (Section 5, Step 3). The value is ``true`` or ``false`` (:func:`format_fla
 sentinel row and empty on every other row. Like ``field_fraction_achieved`` it is an extra column: the metadata columns come
 after MANIFEST_COLUMNS in alphabetical order, so this one follows ``field_fraction_achieved``. The plan carries it in
 ``notes["mount_reference"]`` of the sentinel pose."""
+
+FIXED_STAND_KEY = "fixed_stand"
+"""Plan-notes key and manifest metadata column marking a pose of a plate on a FIXED STAND with the robot idle (the optional
+drift run, sub-series ``drift_run``): the value is ``true`` (:func:`format_flag`; :func:`parse_flag` reads it). Such a pose
+has no read-back robot pose; the manifest builder copies the robot pose and the target pose from the nominal pose of the
+plan and requires the capture time and the sensor temperature in the pose log (see the module docstring)."""
 
 FLAG_TRUE_TEXT = "true"
 FLAG_FALSE_TEXT = "false"

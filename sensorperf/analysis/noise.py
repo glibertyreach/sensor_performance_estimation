@@ -88,7 +88,7 @@ from sensorperf.features.depth_features import temporal_statistics
 from sensorperf.features.planes import fit_plane_robust, plane_depth_image
 from sensorperf.io.capture_set import PoseStack, load_stack
 from sensorperf.io.manifest import (
-    FIELD_FRACTION_ACHIEVED_KEY, FrameRecord, SENTINEL_MOUNT_REFERENCE_KEY, SUBSERIES_DRIFT_RUN, SUBSERIES_MAIN, SUBSERIES_TILT, TILT_AXIS_H,
+    FIELD_FRACTION_ACHIEVED_KEY, FIXED_STAND_KEY, FrameRecord, SENTINEL_MOUNT_REFERENCE_KEY, SUBSERIES_DRIFT_RUN, SUBSERIES_MAIN, SUBSERIES_TILT, TILT_AXIS_H,
     TILT_AXIS_V, group_by_pose, parse_flag, select,
 )
 from sensorperf.io.session import Session
@@ -955,7 +955,9 @@ def a_mount_epochs(records: Sequence[FrameRecord], epochs: dict[tuple, int]) -> 
 def _frame_means(session: Session, records: list[FrameRecord], options: NoiseOptions,
                  epochs: dict[tuple, int]) -> list[dict[str, Any]]:
     """Per frame of the sentinel poses: the mounted target, its gap and mount number, time (s since epoch),
-    temperature, ROI mean of Z - Z_GT and of Z."""
+    temperature, ROI mean of Z - Z_GT and of Z, and whether the plate stood on a fixed stand (``fixed_stand``: the manifest's
+    pose columns are the NOMINAL pose of the plan, not a read-back pose; the ROI is cast from that pose, which is all the
+    drift run needs of it)."""
     out = []
     for pose_id, (key, group) in enumerate(group_by_pose(records).items()):
         stack = load_stack(group)
@@ -970,6 +972,7 @@ def _frame_means(session: Session, records: list[FrameRecord], options: NoiseOpt
             out.append({"pose_id": pose_id, "target_id": frame_record.target_id, "gap_mm": frame_record.gap_mm,
                         "epoch": epochs.get(key, 0),
                         "reference": parse_flag(frame_record.metadata.get(SENTINEL_MOUNT_REFERENCE_KEY)),
+                        "fixed_stand": bool(parse_flag(frame_record.metadata.get(FIXED_STAND_KEY))),
                         "time_s": None if stamp is None else stamp.timestamp(),
                         "temperature_c": frame_record.sensor_temp_c,
                         "registered_mm": float(np.mean((frame - geometry.z_front_gt)[ok])),
@@ -1251,9 +1254,16 @@ def fit_drift_run(hours: Sequence[float], temperature_c: Sequence[float | None],
 def analyze_drift_run(session: Session, options: NoiseOptions, sigma_t_reference_mm: float) -> DriftRunFit | None:
     """The optional separate drift run, or None when the manifest has no frames of sub-series ``drift_run``. Each capture
     (pose) gives its time (hours since the first frame of the run), the mean logged sensor temperature and the ROI mean of
-    the plate depth (the sentinel reference ``options.sentinel_reference``, as in the session's sentinels; the robot is
-    idle, so the registered pose is constant); :func:`fit_drift_run` does the rest, settling for
-    ``options.drift_run_settle_min`` (default WARMUP_DRIFT_WINDOW_MIN)."""
+    the plate depth; :func:`fit_drift_run` does the rest, settling for ``options.drift_run_settle_min`` (default
+    WARMUP_DRIFT_WINDOW_MIN).
+
+    The robot is idle and the plate stands on a fixed stand, so the run has no read-back robot pose and needs no registration:
+    the manifest rows carry ``fixed_stand=true`` and the nominal pose of the plan in their pose columns
+    (``acquisition.pose_log``). Only the region of interest is cast from that pose, and the depth of a fixed-stand capture is
+    the RAW ROI mean, never the difference from the registered plane: the fit uses only the mean Z relative to the first
+    capture after the settling, so the absolute position of the stand does not enter, and a registration that is missing or
+    not accurate cannot affect the result. Captures of a drift run without the flag (a manifest built by hand, with a measured
+    pose) follow ``options.sentinel_reference`` as the session's sentinels do."""
     records = select(session.records, procedure=PROCEDURE_SENTINEL, subseries=SUBSERIES_DRIFT_RUN)
     if not records:
         return None
@@ -1264,17 +1274,24 @@ def analyze_drift_run(session: Session, options: NoiseOptions, sigma_t_reference
 def drift_run_from_frames(frames: list[dict[str, Any]], options: NoiseOptions, params, sigma_t_reference_mm: float
                           ) -> DriftRunFit | None:
     """:func:`fit_drift_run` on the per-frame dictionaries of :func:`_frame_means` of the drift-run frames: they are
-    grouped by pose into captures (time, temperature and mean Z averaged over the capture's frames). None without frames."""
+    grouped by pose into captures (time, temperature and mean Z averaged over the capture's frames). None without frames.
+    A frame with ``fixed_stand`` true uses its raw mean (:func:`analyze_drift_run`)."""
     if not frames:
         return None
     origin = min(f["time_s"] for f in frames)
-    key = "registered_mm" if options.sentinel_reference == "registered" else "raw_mm"
+    registered = options.sentinel_reference == "registered"
+
+    def depth_mm(frame: dict[str, Any]) -> float:
+        """The frame's depth for the drift line: raw for a plate on a fixed stand (no registered plane to subtract),
+        else the option's reference."""
+        return frame["registered_mm"] if registered and not frame.get("fixed_stand") else frame["raw_mm"]
+
     captures = []
     for pose_id in sorted({f["pose_id"] for f in frames}):
         members = [f for f in frames if f["pose_id"] == pose_id]
         known = [f["temperature_c"] for f in members if f["temperature_c"] is not None]
         captures.append((float(np.mean([(f["time_s"] - origin) / SECONDS_PER_HOUR for f in members])),
-                         float(np.mean(known)) if known else None, float(np.mean([f[key] for f in members]))))
+                         float(np.mean(known)) if known else None, float(np.mean([depth_mm(f) for f in members]))))
     captures.sort(key=lambda c: c[0])
     settle_min = params.warmup_drift_window_min if options.drift_run_settle_min is None else options.drift_run_settle_min
     return fit_drift_run([c[0] for c in captures], [c[1] for c in captures], [c[2] for c in captures], settle_min,

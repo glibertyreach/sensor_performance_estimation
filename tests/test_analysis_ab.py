@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import csv
 import dataclasses
+import datetime
 import json
 import math
 import re
@@ -673,6 +674,76 @@ def test_drift_run_frames_are_not_session_sentinels(session):
     assert len(noise.session_sentinels(mixed)) == len(noise.session_sentinels(session.records))
     assert not any(r.subseries == SUBSERIES_DRIFT_RUN for r in noise.session_sentinels(mixed))
     assert noise.mount_epochs(mixed) == noise.mount_epochs(session.records)
+
+
+FIXED_STAND_CAPTURES = 61
+"""Captures of the synthetic fixed-stand drift run of the analysis test (two hours at the 2-minute interval)."""
+FIXED_STAND_FRAMES = 2
+"""Frames per capture of that run."""
+FIXED_STAND_OFFSET_MM = 3.0
+"""Absolute error of the stand's pose in the synthetic run: the plate stands this much farther than the nominal pose. It must
+not enter the result, which uses only the mean Z relative to the first capture after the settling."""
+
+
+def test_drift_run_analysis_runs_on_a_fixed_stand_manifest(session, monkeypatch):
+    """Section 10, Step 11 and Section 4, Step 3: the drift-run path of the noise analysis runs on a manifest whose rows are
+    those of a plate on a fixed stand (``fixed_stand=true``, the pose columns copied from the nominal pose, no registration in
+    the session) on the synthetic arrays of the drift-run test (mean Z following the temperature, exponential warm-up). It
+    recovers the slope, and neither the absolute error of the stand nor the registered plane enters."""
+    from sensorperf.io.capture_set import load_stack
+    from sensorperf.io.manifest import DRIFT_RUN_POSE_INDEX_BASE, FIXED_STAND_KEY, SUBSERIES_DRIFT_RUN, format_flag
+    sentinel = next(r for r in session.records if r.procedure == "S" and r.target_id == "T2")
+    template = load_stack([r for r in session.records if r.pose_key() == sentinel.pose_key()])
+    start = datetime.datetime(2026, 10, 5, 8, 0, 0)
+    rng = np.random.default_rng(SIMULATION_SEED)
+    truth_by_pose, run = {}, []
+    for index in range(FIXED_STAND_CAPTURES):
+        minutes = index * 2.0
+        temperature = DRIFT_RUN_START_C + DRIFT_RUN_RISE_C * (1.0 - math.exp(-minutes / DRIFT_RUN_TIME_CONSTANT_MIN))
+        truth_by_pose[DRIFT_RUN_POSE_INDEX_BASE + index] = (sentinel.station_z_mm + FIXED_STAND_OFFSET_MM
+                                                              + DRIFT_RUN_SLOPE_MM_PER_C * (temperature - DRIFT_RUN_START_C)
+                                                              + rng.normal(0.0, DRIFT_RUN_NOISE_MM))
+        for frame in range(FIXED_STAND_FRAMES):
+            stamp = start + datetime.timedelta(minutes=minutes, seconds=frame)
+            run.append(dataclasses.replace(
+                sentinel, subseries=SUBSERIES_DRIFT_RUN, pose_index=DRIFT_RUN_POSE_INDEX_BASE + index, frame_index=frame,
+                timestamp=stamp.isoformat(), sensor_temp_c=temperature, metadata={FIXED_STAND_KEY: format_flag(True)}))
+
+    def synthetic_stack(records):
+        """The stack of one pose with the synthetic plate depth in every pixel (the real camera of the quick session)."""
+        records = sorted(records, key=lambda r: r.frame_index)
+        value = truth_by_pose[records[0].pose_index]
+        return dataclasses.replace(template, depth=np.full((len(records),) + template.depth.shape[1:], value), records=records)
+
+    monkeypatch.setattr(noise, "load_stack", synthetic_stack)
+    # No registration in the session: the drift run must not need one.
+    bare = dataclasses.replace(session, records=list(session.records) + run, registration=None)
+    for reference in ("registered", "raw"):
+        fit = noise.analyze_drift_run(bare, noise.NoiseOptions(sentinel_reference=reference), DRIFT_RUN_SIGMA_T_MM)
+        assert fit is not None and fit.has_fit and len(fit.hours) == FIXED_STAND_CAPTURES
+        assert fit.slope_mm_per_c == pytest.approx(DRIFT_RUN_SLOPE_MM_PER_C, rel=DRIFT_RUN_SLOPE_TOLERANCE)
+        assert fit.mean_z_mm[fit.used_in_fit.index(True)] == 0.0                # relative to the first settled capture
+        assert fit.residual_rms_mm < 3.0 * DRIFT_RUN_NOISE_MM
+    # The captures are no sentinels of the session, and a session without them has no drift run.
+    assert noise.analyze_drift_run(session, noise.NoiseOptions(), DRIFT_RUN_SIGMA_T_MM) is None
+
+
+def test_drift_run_depth_of_a_fixed_stand_is_the_raw_mean():
+    """A fixed-stand capture has no registered plane to subtract: its raw mean is used, whatever ``sentinel_reference`` says,
+    so a registered value that is not usable (NaN) does not stop the fit; a frame without the flag follows the option."""
+    frames = [dict(f, registered_mm=float("nan"), fixed_stand=True) for f in _drift_run_frames()]
+    fit = noise.drift_run_from_frames(frames, noise.NoiseOptions(sentinel_reference="registered"), _default_parameters(),
+                                      DRIFT_RUN_SIGMA_T_MM)
+    assert fit.has_fit and fit.slope_mm_per_c == pytest.approx(DRIFT_RUN_SLOPE_MM_PER_C, rel=DRIFT_RUN_SLOPE_TOLERANCE)
+    unflagged = [dict(f, registered_mm=float("nan")) for f in _drift_run_frames()]
+    assert not noise.drift_run_from_frames(unflagged, noise.NoiseOptions(sentinel_reference="registered"),
+                                           _default_parameters(), DRIFT_RUN_SIGMA_T_MM).has_fit
+
+
+def _default_parameters():
+    """The default Section 2 parameters."""
+    from sensorperf.parameters import CharacterizationParameters
+    return CharacterizationParameters()
 
 
 def test_a_step11_mounts_are_analyzed_when_a_has_no_t2_sentinels(session, monkeypatch):

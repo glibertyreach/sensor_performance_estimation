@@ -284,6 +284,11 @@ Section 7, Step 1; Section 8, Step 3) in the way each section says.
 def build_manifest(pose_log_csv, captures_dir, plan_csv, registration: Registration, sensor_config_id) -> list[FrameRecord]
     # matches files to plan rows by the Section 9 file name, takes the read-back pose from the log,
     # computes target_pose_camera through the registration, complains by name about unmatched files/rows
+    # Fixed-stand rule (plate on a stand, robot idle; plan notes fixed_stand=true, the optional drift run): the log needs only
+    # timestamp and sensor_temp_c for such a pose (a missing column, or an empty cell, is an error naming the column); the
+    # position/rotation columns may be absent or empty on those rows and are ignored if present. target_pose_camera is the
+    # nominal pose of the plan, robot_pose is registration.flange_to_base_for(nominal), and the manifest column fixed_stand
+    # (io.manifest.FIXED_STAND_KEY) is "true". LogFrame.pose is None for such a frame.
 ```
 
 ### acquisition/check.py
@@ -451,6 +456,13 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
   (Section 4, Step 3: `plan_drift_run`, procedure S in the sentinels folder, sub-series `SUBSERIES_DRIFT_RUN`, one capture per pose
   index, `drift_run_duration_min` / `drift_run_capture_interval_min` + 1 = 241 captures of `sentinel_frames` frames) from
   `DRIFT_RUN_POSE_INDEX_BASE` = 4000, so that a capture never shares a pose key with an in-session sentinel.
+  `plan_stations --drift-run` (`plan_full_session(drift_run=True)`) appends the 241 captures after the session's poses, whatever
+  `--series` selects (`--series` without letters plans the run alone). The run is outside the main budget
+  (`SUBSERIES_DRIFT_RUN` is in `OPTIONAL_SUBSERIES`, so the totals stay 7,194 poses, 42,520 frames, 7.18 h), gets no drift sentinels
+  and is not counted by `count_sentinel_remounts`; plan_summary.txt lists its captures, frames, pose-index range and file names and
+  says that the robot is idle and the plate stands on a fixed stand at the reference station. Each pose carries the nominal T2 pose
+  (center field, fronto-parallel) and `notes["fixed_stand"] = True` (`FIXED_STAND_KEY`, carried into the manifest as the column
+  `fixed_stand` by `PlannedCapture.manifest_metadata`); the manifest rule for such poses is in `acquisition/pose_log.py` below.
   `format_pose_index` writes four digits from `FOUR_DIGIT_POSE_INDEX_MIN` (the lowest base) on, and plan_summary.txt lists the
   range in use by each optional set. (The staircase of the filters-off repeat, labeled `filters_off`, stays in the filters-off
   range.)
@@ -515,7 +527,10 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
   sentinels) is fitted by `analyze_drift_run`: mean plate Z relative to the first capture after `drift_run_settle_min` (default
   `warmup_drift_window_min`) against the sensor temperature, a straight line (slope mm per degree, intercept, residual RMS), the
   warm-up time at which the drift over the window first fell below `warmup_drift_fraction_of_sigma` x sigma_t, written as
-  `A_drift_run.csv`, `A_drift_run_fit.json` and the figure `A_drift_run`. With that line `attribute_sentinel_drift` adds to
+  `A_drift_run.csv`, `A_drift_run_fit.json` and the figure `A_drift_run`. The run needs no read-back robot pose and no registration:
+  its manifest rows are marked `fixed_stand` (pose columns = the nominal pose), the ROI is cast from that pose, and the depth of a
+  fixed-stand frame is the raw ROI mean (`drift_run_from_frames`; the fit is relative to the first settled capture, so the stand's
+  absolute pose error does not enter); a drift-run frame without the flag follows `NoiseOptions.sentinel_reference`. With that line `attribute_sentinel_drift` adds to
   `A_sentinel_drift.csv` the drift of each mount predicted from its logged temperatures, observed minus predicted, and `attribution`
   ("sensor" within `DRIFT_ATTRIBUTION_NOISE_FACTOR` x sigma_t / sqrt(sentinel_frames), else "robot or mount"); the columns are
   empty without a drift run. The simulator does not log a sensor temperature, so the tests build the run from synthetic frames.

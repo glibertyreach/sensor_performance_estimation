@@ -43,6 +43,16 @@ base frame, the read-back flange pose = flange -> base)
     makes the small ladder rungs meaningless; ``build_manifest`` warns, naming the problem, when every z_mm value of the
     series-Z rows has fewer decimals.
 
+Plate on a fixed stand (the optional drift run; plan notes ``fixed_stand=true``)
+    The captures of the drift run (``plan_stations --drift-run``) show T2 on a fixed stand with the robot idle, so there
+    is no read-back robot pose for them. Their log rows need only ``timestamp`` and ``sensor_temp_c``: the position and
+    rotation columns may be absent or empty on these rows (the other rows of the same log keep them), and ANY values
+    found there are ignored. The manifest takes the target pose from the nominal pose of the plan and the robot pose from
+    the flange pose the registration gives for that nominal pose (see ``sensorperf.io.manifest``). The drift analysis needs
+    the time and the temperature of every capture, so a missing ``timestamp`` or ``sensor_temp_c`` column, or an empty cell
+    in it, on such a row is an error that names the column. The rule applies to the poses that the plan marks, wherever the
+    rows appear (format 1 or 2).
+
 Rotation conventions (adapted from ``sphcal/cli/make_manifest.py`` of the
 depth-calibration repository, which this table reproduces verbatim; all through
 scipy.spatial.transform.Rotation; the result is the flange-to-base rotation
@@ -91,7 +101,7 @@ from scipy.spatial.transform import Rotation
 from sensorperf.acquisition.plan import MIN_POSE_LOG_DECIMALS, PlannedCapture, read_plan_csv
 from sensorperf.geometry.registration import Registration
 from sensorperf.geometry.transforms import RigidTransform
-from sensorperf.io.manifest import FrameRecord, format_file_name, parse_file_name, validate_record
+from sensorperf.io.manifest import FIXED_STAND_KEY, FrameRecord, format_file_name, parse_file_name, validate_record
 from sensorperf.parameters import PROCEDURE_ZSTEP
 
 # ---------------------------------------------------------------------------
@@ -140,6 +150,9 @@ IDENTITY_COLUMNS = ("procedure", "target_id", "gap_mm", "station_z_mm", "field",
 OPTIONAL_TEXT_COLUMNS = ("timestamp",)
 OPTIONAL_FLOAT_COLUMNS = ("sensor_temp_c", "air_temp_c")
 """Optional pose log columns copied to the manifest."""
+FIXED_STAND_REQUIRED_COLUMNS = ("timestamp", "sensor_temp_c")
+"""Pose log columns that every row of a fixed-stand pose (the optional drift run) must fill in: the drift analysis plots the
+mean Z of each capture against its time and the sensor temperature."""
 FRAME_SEPARATOR = "_f"
 """Separator of the pose part and the frame index in a Section 9 file name."""
 CAPTURE_PATTERN = "*.mc"
@@ -170,7 +183,8 @@ class LogFrame:
 
     pose_key: tuple
     frame_index: int
-    pose: RigidTransform
+    pose: RigidTransform | None
+    """The read-back flange pose; None for a pose of a plate on a fixed stand (the manifest uses the nominal pose)."""
     text: dict[str, str]
     numbers: dict[str, float | None]
     where: str
@@ -304,18 +318,24 @@ def read_pose_log(path: str | Path, plan_by_key: dict[tuple, PlannedCapture],
     has_position = all(c in columns for c in LOG_TRANSLATION_COLUMNS) or all(c in columns for c in PLAN_TRANSLATION_COLUMNS)
     per_file = "file" in columns
     has_identity = all(c in columns for c in IDENTITY_COLUMNS)
-    if not has_position or not (per_file or has_identity):
+    # The poses of a plate on a fixed stand need no position columns: find which rows they are before the check.
+    fixed_keys = {key for key, planned in plan_by_key.items() if planned.notes.get(FIXED_STAND_KEY)}
+    fixed_rows = [(per_file or has_identity) and _quiet_row_key(row, per_file) in fixed_keys for row in rows]
+    if not (per_file or has_identity) or not (has_position or all(fixed_rows)):
         messages.errors.append(
-            f"the pose log {path} lacks columns. Expected x_mm, y_mm, z_mm, rotation_type, r1..r9 and either a "
+            f"the pose log {path} lacks columns. Expected x_mm, y_mm, z_mm, rotation_type, r1..r9 (only the rows of a plate "
+            f"on a fixed stand, the drift run, may leave them out) and either a "
             f"'file' column (one row per frame) or the identity columns {', '.join(IDENTITY_COLUMNS)} with 'frames' "
             "(one row per pose) or 'frame_index' (one row per frame)")
         return []
+    _check_fixed_stand_columns(columns, rows, fixed_rows, path, messages)
     entries: list[LogFrame] = []
     z_text_by_where: dict[str, str] = {}                        # raw z_mm text per line, for the resolution check
-    for line, row in enumerate(rows, start=2):                  # line 1 is the header
+    for line, (row, fixed) in enumerate(zip(rows, fixed_rows), start=2):    # line 1 is the header
         where = f"pose log line {line}"
         z_text_by_where[where] = (row.get(LOG_TRANSLATION_COLUMNS[2]) or row.get(PLAN_TRANSLATION_COLUMNS[2]) or "").strip()
-        pose = robot_pose_from_columns(row, where, messages)
+        # A plate on a fixed stand has no read-back pose: whatever the row holds there is not used (None = nominal pose).
+        pose = None if fixed else robot_pose_from_columns(row, where, messages)
         text = {c: (row.get(c) or "").strip() for c in OPTIONAL_TEXT_COLUMNS if c in row}
         numbers: dict[str, float | None] = {}
         for column in OPTIONAL_FLOAT_COLUMNS:
@@ -323,7 +343,7 @@ def read_pose_log(path: str | Path, plan_by_key: dict[tuple, PlannedCapture],
                 numbers[column] = _number(row, column)
             except ValueError as error:
                 messages.errors.append(f"{where}: {error}")
-        if pose is None:
+        if pose is None and not fixed:
             continue
         if per_file and (row.get("file") or "").strip():
             name = Path((row.get("file") or "").strip()).name
@@ -359,6 +379,42 @@ def read_pose_log(path: str | Path, plan_by_key: dict[tuple, PlannedCapture],
             entries.append(LogFrame(key, index, pose, text, numbers, where))
     _check_z_resolution(entries, z_text_by_where, messages)
     return entries
+
+
+def _quiet_row_key(row: dict, per_file: bool) -> tuple | None:
+    """The pose key of a log row, or None when it cannot be read (the errors of such a row are reported when the row itself
+    is read; this is only the question whether the row belongs to a pose of a plate on a fixed stand)."""
+    if per_file and (row.get("file") or "").strip():
+        name = Path((row.get("file") or "").strip()).name
+        try:
+            fields_ = parse_file_name(name if name.endswith(".mc") else name + ".mc")
+        except ValueError:
+            return None
+        return (fields_["procedure"], fields_["target_id"], fields_["gap_mm"], fields_["station_z_mm"], fields_["field"],
+                fields_["pose_index"])
+    return _identity_key(row, "", Messages())
+
+
+def _check_fixed_stand_columns(columns: list[str], rows: list[dict], fixed_rows: list[bool], path: str | Path,
+                               messages: Messages) -> None:
+    """Every row of a pose of a plate on a fixed stand must fill in ``timestamp`` and ``sensor_temp_c`` (the drift run
+    analysis needs both). A missing column is one error naming it; an empty cell is one error per column that names the
+    column and the first lines concerned."""
+    if not any(fixed_rows):
+        return
+    for column in FIXED_STAND_REQUIRED_COLUMNS:
+        if column not in columns:
+            messages.errors.append(
+                f"the pose log {path} has no '{column}' column, which the captures of a plate on a fixed stand (the drift "
+                f"run, notes {FIXED_STAND_KEY}=true) need: the drift analysis uses the capture time and the sensor "
+                "temperature of every capture; add the column and fill it in")
+            continue
+        empty_lines = [f"line {line}" for line, (row, fixed) in enumerate(zip(rows, fixed_rows), start=2)
+                       if fixed and not (row.get(column) or "").strip()]
+        if empty_lines:
+            messages.errors.append(
+                f"the pose log {path}: column '{column}' is empty on {len(empty_lines)} row(s) of a plate on a fixed stand "
+                f"(the drift run needs it for every capture): {_listed(empty_lines)}")
 
 
 def _decimals(text: str) -> int | None:
@@ -511,11 +567,19 @@ def _frame_name(entry: LogFrame) -> str:
 
 def _record(planned: PlannedCapture, frame_index: int, path: Path, entry: LogFrame, registration: Registration,
             sensor_config_id: str) -> FrameRecord:
-    """The manifest record of one frame: plan fields, the read-back pose and the target pose through the registration."""
+    """The manifest record of one frame: plan fields, the read-back pose and the target pose through the registration.
+    For a pose of a plate on a fixed stand (``entry.pose`` is None) both poses are copied from the nominal pose of the plan:
+    the target pose as planned, the robot pose as the flange pose the registration gives for it."""
+    if entry.pose is None:
+        robot_pose = registration.flange_to_base_for(planned.target_to_camera)
+        target_pose_camera = planned.target_to_camera
+    else:
+        robot_pose = entry.pose
+        target_pose_camera = registration.target_to_camera(entry.pose)
     return FrameRecord(
         path=path, procedure=planned.procedure, target_id=planned.target_id, gap_mm=planned.gap_mm,
         station_z_mm=planned.station_z_mm, field=planned.field, pose_index=planned.pose_index,
-        frame_index=frame_index, robot_pose=entry.pose, target_pose_camera=registration.target_to_camera(entry.pose),
+        frame_index=frame_index, robot_pose=robot_pose, target_pose_camera=target_pose_camera,
         seed=planned.seed, offset_h_mm=planned.offset_h_mm, offset_v_mm=planned.offset_v_mm,
         timestamp=entry.text.get("timestamp", ""),
         sensor_temp_c=entry.numbers.get("sensor_temp_c"), air_temp_c=entry.numbers.get("air_temp_c"),
