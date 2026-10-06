@@ -735,5 +735,11 @@ Reviewer findings (proposals; nothing executed until Neil closes the chunk):
 - C16-R6 (end-of-review item, agreed at C07): the style pass of Sections 1, 3 and 4 (closed before the plain-language
   rule) runs after C16 closes, declared as intended, with the gate; the figure index/table check (gate check 4) stays
   "index absent" because the document has no figure index, which is acceptable for a three-figure document.
-Neil's comments: (pending)
+Neil's comments (2026-10-06): R1 to R6 approved; closed.
+Executed (document rev 112; gate PASS, scope ['15']): R1 the robot-repeatability, registration-depth-offset and
+thermal-drift rows updated (ramp, 0.1 mm floor and truth rule; the reported standard error of about 0.08 mm
+replaces the rough estimate; sentinels on the mounted target, attribution, drift run); R2 four new rows (field
+coverage, tilt sub-series range, quantizer dithering, 2-D image); R3 the Limitations paragraph extended; R4 the
+open questions gain the 2-D sensor position and three questions the procedure answers; R5 values in words beside
+the two registration names. R6 (the style pass of Sections 1, 3, 4) follows as the closing step of the review.
 
