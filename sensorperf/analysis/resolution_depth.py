@@ -16,9 +16,11 @@ Steps (per station Z0)
      front plane is perpendicular to the optical axis and the z component of the target pose is its depth. The
      commanded ``step_mm`` is only the label of the rung; it is never the truth.
   2  Regression of the mean Delta on the true step over the ladder: slope (gain), intercept, largest deviation. Rungs
-     whose true step is below ``robot_repeatability_mm`` (the step truth is then no better than the robot itself) get
-     ``truth_reliable`` = False: they are excluded from this regression, kept in the detection curve of Step 4, and the
-     note says how many rungs were flagged. The registration enters only through the DIFFERENCE of two registered
+     whose true step is below TWICE the robot repeatability (``params.truth_reliable_rung_floor_mm`` =
+     ``TRUTH_RELIABLE_RUNG_TO_REPEATABILITY_RATIO`` x ``robot_repeatability_mm``, Section 11.2, Step 10; the same ratio
+     gives the floor the ladder itself applies, Section 6.2, Step 2, so a rung the ladder raised to its floor is just
+     reliable) get ``truth_reliable`` = False: the step truth is then too close to the robot's own scatter. They are
+     excluded from this regression, kept in the detection curve of Step 4, and the note says how many rungs were flagged. The registration enters only through the DIFFERENCE of two registered
      poses: its translation cancels and a rotation error acts through the cosine of the angle error (negligible), so
      the step truth is as good as the robot's relative motion accuracy.
      The robot's own read-back scatter is reported from the A -> A pairs (``robot_readback_repeatability_mm``, per
@@ -53,10 +55,11 @@ Steps (per station Z0)
      quantum q = dZ_q k / Z^2 is reported. Single pixels (the temporal median of a few columns) are drawn the same way.
      DITHERING: a staircase changes over a window of half a quantum either by about nothing (on a plateau) or by about a
      quantum (across a step), a smooth ramp by half a quantum everywhere. A curve is stepped when fewer than
-     ``RAMP_MAX_INTERMEDIATE_FRACTION`` of its window changes lie between ``RAMP_INTERMEDIATE_BAND`` of the quantum, and
-     smooth otherwise. A smooth row average over stepped single pixels (the pixels step at different rows, from their
+     ``ramp_max_intermediate_fraction`` (0.5) of its window changes lie within ``ramp_intermediate_band`` (0.25 to 0.75)
+     of the quantum, and smooth otherwise; both are parameters chosen by argument, not from data (Section 11.2, Step 14). A smooth row average over stepped single pixels (the pixels step at different rows, from their
      fixed pattern or noise) means that the sensor's interpolation or the noise dithers the quantizer; the plateaus are
-     then not resolved in the average and the quantum comes from the pooled depth levels (``quantum_method`` says which).
+     then not resolved in the average and the quantum comes from the pooled depth levels (``quantum_method`` says which:
+     "plateaus" or "depth levels").
   6  The staircase, when it was captured (sub-series "staircase", the optional second pass, ordered by the commanded
      displacement): sensed Z of single pixels and of the
      20 x 20 patch against the read-back Z of each step (the z component of the target pose, whose uncertainty is the
@@ -68,7 +71,7 @@ The quantum of Steps 5 and 6. Plateau widths need a ramp or a staircase much fin
 steps. When too few complete plateaus exist (the demonstration plan has three staircase steps; a dithered ramp has none in
 its row average) the quantum is the one of the depth levels of the single-pixel readings pooled over all frames of the
 pose (the staircase adds a few Z0 frames of the ladder as the zero point), by the phase-resultant method of Analysis A,
-Step 8 (``noise.estimate_quantum_phase_resultant``); ``quantum_method`` says which.
+Step 8 (``noise.estimate_quantum_phase_resultant``); ``quantum_method`` says which ("plateaus" or "depth levels").
 
 Conventions: docs/design/code_design.md Section 4. Millimeters, pixels; arrays are (H, W); no-read is NaN.
 """
@@ -94,7 +97,7 @@ from sensorperf.io.manifest import (
     select,
 )
 from sensorperf.io.session import Session
-from sensorperf.parameters import FIELD_POSITION_CENTER, PROCEDURE_ZSTEP
+from sensorperf.parameters import FIELD_POSITION_CENTER, PROCEDURE_ZSTEP, CharacterizationParameters
 from sensorperf.stats.intervals import bootstrap_statistic
 from sensorperf.stats.psychometric import PsychometricFitParameters, fit_psychometric
 
@@ -129,7 +132,8 @@ RUNG_COLUMNS = (
 """Columns of Z_resolution_rungs.csv, one row per station, patch size and ladder rung: the commanded step (the label),
 the mean true step, the mean sensed step, the detection counts, the read-back minus commanded step, the ratio of
 ``robot_repeatability_mm`` to the true step (the truth uncertainty of the rung), and ``truth_reliable`` (False for a rung
-whose true step is below ``robot_repeatability_mm``: reported, but not part of the gain regression)."""
+whose true step is below twice ``robot_repeatability_mm``, Section 11.2, Step 10: reported, but not part of the gain
+regression)."""
 RAMP_CSV_NAME = "Z_ramp_rows.csv"
 RAMP_COLUMNS = ("station_z_mm", "row", "true_depth_mm", "row_average_mm", "row_average_minus_true_mm")
 """Z_ramp_rows.csv: one row per image row of each ramp pose, the true depth of the row, the row average (fixed pattern of A
@@ -186,12 +190,12 @@ more, asks for ``MIN_COMPLETE_PLATEAUS``)."""
 RAMP_PLATEAU_MIN_WIDTH_ROWS = PLATEAU_MIN_WIDTH_STEPS
 """The ramp's plateau-width estimate is used only if the median plateau spans at least this many rows: the guard
 ``PLATEAU_MIN_WIDTH_STEPS`` of the staircase (steps) counted in rows, since the rows are the ramp's steps."""
-RAMP_INTERMEDIATE_BAND = (0.25, 0.75)
-"""Changes of a ramp curve over a window of half a quantum, as fractions of the quantum, that count as intermediate: a
-staircase changes by about 0 (on a plateau) or about 1 (across a step), a smooth ramp by about 0.5."""
-RAMP_MAX_INTERMEDIATE_FRACTION = 0.5
-"""A ramp curve is stepped when fewer than this fraction of its window changes are intermediate (``RAMP_INTERMEDIATE_BAND``),
-and smooth otherwise."""
+QUANTUM_METHOD_PLATEAUS = "plateaus"
+"""``quantum_method`` of a quantum taken from the widths of the plateaus of a ramp or a staircase."""
+QUANTUM_METHOD_DEPTH_LEVELS = "depth levels"
+"""``quantum_method`` of a quantum taken from the spacing of the populated depth levels of the pooled single-pixel readings
+(the phase-resultant method of Analysis A, Step 8). Whether the levels were no finer than the output LSB is in
+``quantum_is_lsb``."""
 RAMP_ROW_SPREAD_NOTE_FRACTION = 0.1
 """The ramp's rows are not at one true depth (the tilt axis is not parallel to the baseline, or the plate is also
 rotated about the optical axis) when the true depth varies along a row by more than this fraction of the quantum; the
@@ -288,14 +292,14 @@ class PatchResult:
     pair_true_mm: list[float] = field(default_factory=list)
     pair_delta_mm: list[float] = field(default_factory=list)
     pair_reliable: list[bool] = field(default_factory=list)
-    """For each pair of ``pair_true_mm``: False when the rung's true step is below the robot repeatability."""
+    """For each pair of ``pair_true_mm``: False when the rung's true step is below twice the robot repeatability."""
     rung_labels_mm: list[float] = field(default_factory=list)
     """Commanded step (``step_mm``, the label of the rung) of each level of ``steps_mm``."""
     rung_readback_offset_mm: list[float] = field(default_factory=list)
     """Mean read-back step minus the commanded step of each level of ``steps_mm``, mm."""
     rung_reliable: list[bool] = field(default_factory=list)
     """``truth_reliable`` of each level of ``steps_mm``: False when the mean true step of the rung is below
-    ``robot_repeatability_mm``."""
+    ``params.truth_reliable_rung_floor_mm`` (twice ``robot_repeatability_mm``)."""
     rung_robot_ratio: list[float] = field(default_factory=list)
     """``robot_repeatability_mm`` divided by the mean true step of each level of ``steps_mm``: the truth uncertainty of
     the rung as a fraction of the step."""
@@ -325,6 +329,10 @@ class StaircaseResult:
     """Sensed Z of a few single pixels at each staircase point."""
     quantum_mm: float = float("nan")
     quantum_method: str = "unavailable"
+    """QUANTUM_METHOD_PLATEAUS or QUANTUM_METHOD_DEPTH_LEVELS ("unavailable" when no quantum was found)."""
+    quantum_is_lsb: bool = False
+    """True when the depth levels were no finer than the output LSB, so the quantum found is the quantizer of the output
+    format and not the sensor's disparity quantum (no q is implied then)."""
     quantum_plateau_mm: float = float("nan")
     quantum_levels_mm: float = float("nan")
     quantum_jump_height_mm: float = float("nan")
@@ -367,6 +375,10 @@ class RampResult:
     rows_per_quantum: float = float("nan")
     quantum_mm: float = float("nan")
     quantum_method: str = "unavailable"
+    """QUANTUM_METHOD_PLATEAUS or QUANTUM_METHOD_DEPTH_LEVELS ("unavailable" when no quantum was found)."""
+    quantum_is_lsb: bool = False
+    """True when the depth levels were no finer than the output LSB, so the quantum found is the quantizer of the output
+    format and not the sensor's disparity quantum (no q is implied then)."""
     quantum_plateau_mm: float = float("nan")
     quantum_levels_mm: float = float("nan")
     expected_quantum_mm: float = float("nan")
@@ -378,7 +390,7 @@ class RampResult:
     """The true depth spanned by the rows, in expected quanta (the plan asks for ``ramp_quanta`` over the plate's visible
     height; the region of interest is somewhat shorter)."""
     row_intermediate_fraction: float = float("nan")
-    """Fraction of the window changes of the row average that are intermediate (``RAMP_INTERMEDIATE_BAND``): near 0 for a
+    """Fraction of the window changes of the row average that are intermediate (``ramp_intermediate_band``): near 0 for a
     staircase, near 1 for a smooth curve."""
     pixel_intermediate_fraction: float = float("nan")
     """The same for the plotted single pixels (median over the pixels)."""
@@ -540,6 +552,14 @@ def _fit_curve(levels: np.ndarray, detections: np.ndarray, trials: np.ndarray, g
                             PsychometricFitParameters(lapse_rate_max=lapse_max))
 
 
+def rung_truth_is_reliable(true_step_mm: float, params: CharacterizationParameters) -> bool:
+    """The truth rule of Section 11.2, Step 10: the step truth of a rung is reliable when its true step is at least
+    ``params.truth_reliable_rung_floor_mm``, twice the robot repeatability (``TRUTH_RELIABLE_RUNG_TO_REPEATABILITY_RATIO``),
+    the floor the ladder itself applies (Section 6.2, Step 2). A true step that equals the limit up to rounding of the
+    registration product (``TRUTH_COMPARISON_TOLERANCE_MM``) reaches it."""
+    return bool(true_step_mm >= params.truth_reliable_rung_floor_mm - TRUTH_COMPARISON_TOLERANCE_MM)
+
+
 def _analyze_station(session: Session, station: float, visits: list[_Visit], options: DepthResolutionOptions,
                      rng: np.random.Generator, notes: list[str]) -> list[PatchResult]:
     params = session.params
@@ -616,8 +636,9 @@ def _analyze_station(session: Session, station: float, visits: list[_Visit], opt
                 out.pair_true_mm.extend(true_values)
                 out.pair_delta_mm.extend(deltas)
                 pair_steps.extend([index] * len(true_values))
-                # truth_reliable: the true step reaches the robot's repeatability (Section 3.1, ISO 9283).
-                reliable[index] = levels[index] >= params.robot_repeatability_mm - TRUTH_COMPARISON_TOLERANCE_MM
+                # truth_reliable (Section 11.2, Step 10): the true step reaches TWICE the robot's repeatability
+                # (ISO 9283, Section 3.1), the floor the ladder applies (Section 6.2, Step 2).
+                reliable[index] = rung_truth_is_reliable(levels[index], params)
         have = trials > 0
         out.steps_mm, out.mean_delta_mm = levels[have].tolist(), mean_delta[have].tolist()
         out.rung_labels_mm = [float(step_sizes[i]) for i in np.flatnonzero(have)]
@@ -634,9 +655,9 @@ def _analyze_station(session: Session, station: float, visits: list[_Visit], opt
         if out.flagged_rungs:
             flagged_labels = ", ".join(f"{step:g}" for step, ok in zip(out.rung_labels_mm, out.rung_reliable) if not ok)
             flagged_note = (f"{out.flagged_rungs} of {int(have.sum())} ladder rungs flagged truth_reliable = False "
-                            f"(commanded {flagged_labels} mm, true step below the robot repeatability of "
-                            f"{params.robot_repeatability_mm:g} mm): excluded from the gain regression, kept in the "
-                            "detection curve")
+                            f"(commanded {flagged_labels} mm, true step below twice the robot repeatability of "
+                            f"{params.robot_repeatability_mm:g} mm, that is {params.truth_reliable_rung_floor_mm:g} mm): "
+                            "excluded from the gain regression, kept in the detection curve")
         out.detections, out.trials = detections[have].astype(int).tolist(), trials[have].astype(int).tolist()
         out.cycles = len(per_cycle)
         out.tiles_per_pair = float(np.mean(tile_counts)) if tile_counts else float("nan")
@@ -785,11 +806,10 @@ def _analyze_staircase(session: Session, station: float, stair_records: list[Fra
                 f"staircase step {spacing:.3g} mm is too coarse for plateau widths (expected quantum "
                 f"{result.expected_quantum_mm:.3g} mm, at least {PLATEAU_MIN_STEPS_PER_QUANTUM:g} steps per quantum needed)")
     if math.isfinite(result.quantum_plateau_mm):
-        result.quantum_mm, result.quantum_method = result.quantum_plateau_mm, "plateau widths"
+        result.quantum_mm, result.quantum_method = result.quantum_plateau_mm, QUANTUM_METHOD_PLATEAUS
     elif math.isfinite(levels_mm):
         result.quantum_mm = levels_mm
-        result.quantum_method = ("depth levels of the pooled single-pixel readings (output LSB is the quantizer)"
-                                 if is_lsb else "depth levels of the pooled single-pixel readings (phase resultant)")
+        result.quantum_method, result.quantum_is_lsb = QUANTUM_METHOD_DEPTH_LEVELS, bool(is_lsb)
     # Is the patch mean smooth (quantizer dithered)?
     if len(true_z) >= 3 and math.isfinite(result.quantum_mm):
         line = np.polyfit(true_z, result.patch_mean_mm, 1)
@@ -838,13 +858,15 @@ def _windowed_jumps(values: np.ndarray, positions: np.ndarray, window: int,
     return mask, centers, heights
 
 
-def _intermediate_fraction(values: np.ndarray, window: int, quantum_mm: float) -> float:
-    """Fraction of the changes of a curve over ``window`` samples whose size lies in ``RAMP_INTERMEDIATE_BAND`` times the
-    quantum (NaN for a curve shorter than the window): about 0 for a staircase, about 1 for a smooth ramp."""
+def _intermediate_fraction(values: np.ndarray, window: int, quantum_mm: float,
+                           band: tuple[float, float]) -> float:
+    """Fraction of the changes of a curve over ``window`` samples whose size lies in ``band`` (the parameter
+    ``ramp_intermediate_band``, as fractions of the quantum; NaN for a curve shorter than the window): about 0 for a
+    staircase, about 1 for a smooth ramp."""
     if values.size <= window:
         return float("nan")
     change = np.abs(values[window:] - values[:-window]) / quantum_mm
-    return float(np.mean((change >= RAMP_INTERMEDIATE_BAND[0]) & (change <= RAMP_INTERMEDIATE_BAND[1])))
+    return float(np.mean((change >= band[0]) & (change <= band[1])))
 
 
 def _fixed_pattern_map(previous: dict, station: float) -> np.ndarray | None:
@@ -937,13 +959,14 @@ def _analyze_ramp(session: Session, station: float, records: list[FrameRecord], 
         result.rows_per_quantum = expected / spacing
         window = max(1, int(round(RAMP_JUMP_WINDOW_FRACTION * result.rows_per_quantum)))
         # Dithering: a smooth row average over stepped single pixels.
-        result.row_intermediate_fraction = _intermediate_fraction(row_average, window, expected)
-        result.row_is_smooth = bool(result.row_intermediate_fraction >= RAMP_MAX_INTERMEDIATE_FRACTION)
-        pixel_fractions = [_intermediate_fraction(np.array(y), window, expected) for y in pixel_curves]
+        band, max_fraction = params.ramp_intermediate_band, params.ramp_max_intermediate_fraction
+        result.row_intermediate_fraction = _intermediate_fraction(row_average, window, expected, band)
+        result.row_is_smooth = bool(result.row_intermediate_fraction >= max_fraction)
+        pixel_fractions = [_intermediate_fraction(np.array(y), window, expected, band) for y in pixel_curves]
         pixel_fractions = [f for f in pixel_fractions if math.isfinite(f)]
         if pixel_fractions:
             result.pixel_intermediate_fraction = float(np.median(pixel_fractions))
-            result.pixels_stepped = bool(result.pixel_intermediate_fraction < RAMP_MAX_INTERMEDIATE_FRACTION)
+            result.pixels_stepped = bool(result.pixel_intermediate_fraction < max_fraction)
             result.dithered = bool(result.row_is_smooth and result.pixels_stepped)
         # Plateau widths of the row average (the staircase's detection, jumps over a window of rows).
         if rows.size > window + 1:
@@ -978,14 +1001,13 @@ def _analyze_ramp(session: Session, station: float, records: list[FrameRecord], 
     elif result.row_is_smooth:
         notes.append("the row average is smooth and so are the single pixels: no quantization steps are seen")
     if math.isfinite(result.quantum_plateau_mm):
-        result.quantum_mm, result.quantum_method = result.quantum_plateau_mm, "plateau widths of the row average"
+        result.quantum_mm, result.quantum_method = result.quantum_plateau_mm, QUANTUM_METHOD_PLATEAUS
     elif math.isfinite(levels_mm):
         result.quantum_mm = levels_mm
-        result.quantum_method = ("depth levels of the pooled single-pixel readings (output LSB is the quantizer)"
-                                 if is_lsb else "depth levels of the pooled single-pixel readings (phase resultant)")
-    if math.isfinite(result.quantum_mm) and "output LSB" not in result.quantum_method:
+        result.quantum_method, result.quantum_is_lsb = QUANTUM_METHOD_DEPTH_LEVELS, bool(is_lsb)
+    if math.isfinite(result.quantum_mm) and not result.quantum_is_lsb:
         result.q_px = float(session.geometry.disparity_quantum_px(result.quantum_mm, mean_depth))
-    elif "output LSB" in result.quantum_method and math.isfinite(expected) and q_expected is not None:
+    elif result.quantum_is_lsb and math.isfinite(expected) and q_expected is not None:
         notes.append(f"the pooled depth levels are no finer than the output LSB ({lsb_mm:g} mm), against an expected "
                      f"quantum of {expected:.3g} mm: the quantum is not resolved by this method (no implied q)")
     result.note = "; ".join(notes)

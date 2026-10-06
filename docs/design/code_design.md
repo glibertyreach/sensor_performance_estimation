@@ -556,12 +556,46 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
   figures draw the predicted D_0 with a hollow marker and a dashed extrapolation and label it "predicted". The
   pilot level selection and the continuous-angle variant are gone; the pilot keeps only the post check
   (`acquisition.check.pilot_post_check`).
+- B-HV (`analysis/resolution_lateral.py`, Section 11.1). The pooled robot-stepped ESF, the slanted-edge ESF, the rise distance,
+  LSF, MTF, s_50 and the linearity test are as before; the sweep poses (sub-series `lateral_sweep`) stay out of the pooled ESF.
+  New Step 9, the edge position transfer (`analyze_edge_transfer`, `fit_edge_transfer`, `EdgeTransfer`): every nominal and jitter
+  pose of an edge gets its own s_50 from its own binned ESF (`pose_s50`: a bin is valid with `TRANSFER_MIN_READS_PER_BIN` (3)
+  reads, a pose with fewer than `TRANSFER_MIN_VALID_BIN_FRACTION` (0.5) of its bins valid is skipped and counted) and its
+  read-back lateral offset across the edge in px. The offset is measured, not commanded: it is the shift, from the nominal pose to
+  this pose, of the mean signed distance s of a fixed set of reference pixels (the pixels the nominal pose selected for the edge)
+  to the true edge line projected from the read-back pose, so it is the component of the read-back lateral offset perpendicular
+  to the (slanted) edge divided by p(Z). Sign and gain: s is measured against each pose's own true edge, so a sensor that follows
+  the edge exactly has a flat s_50 against the offset; the fit regresses s_50 on the offset and reports the lateral gain as ONE PLUS
+  the slope (the slope of the sensed edge position, `s_50 + offset`, on the true one, expected 1; the transfer figure plots that
+  position against the offset with the line of gain 1), the intercept is s_50 at the nominal pose (the edge bias of Step 8) and the
+  standard error is that of the slope. Line, a sine and cosine at 1 px (pixel locking) and a sine and cosine at the projector dot
+  pitch are fitted together by least squares, not one after the other, because over a short span a sequential fit leaks a periodic
+  term into the slope; a term is skipped with a note when fewer than `TRANSFER_MIN_RESIDUAL_DOF` (2) degrees of freedom would
+  remain (the five-pose demonstration series fits only the line) or when it is not separable from the others (condition number of the
+  column-scaled design above `TRANSFER_MAX_CONDITION_NUMBER`, which a dot pitch of exactly 1 px gives). The dot pitch is the
+  correlation length of Analysis A at the nearest station (`corr_len_h_px` for H edges, `corr_len_v_px` for V edges, from
+  `previous["A"].main_rows()`); without A the term is skipped with a note. The lateral sweep: for each edge the sweep poses along the
+  axis that moves it (H sweep for left and right edges) give the approach hysteresis, the mean s_50 approached from the negative
+  side minus that from the positive side (sign of s: positive toward the front side), and a refit of the periodic terms on the sweep
+  poses alone with the approach as a nuisance regressor. The manifest written by the planner does not carry the plan's
+  `approach_direction` note (`PlannedCapture.manifest_metadata` emits only the field fraction, the mount reference and the fixed-stand
+  flag), so `sweep_axis_and_approach` reads it when a manifest has it and otherwise derives it from the logged offset by the plan's
+  rule (k-th pose of an axis at k x `lateral_sweep_step_px`, odd k from the negative side). Summary columns `lateral_gain`,
+  `lateral_gain_se`, `pixel_lock_amplitude_px`, `dot_pitch_amplitude_px`, `dot_pitch_px`, `transfer_poses`, `hysteresis_px`,
+  `sweep_pixel_lock_amplitude_px`, `sweep_dot_pitch_amplitude_px` (NaN where not available); the details JSON keeps every pose's point,
+  both fits (with the intercept) and the skipped counts; the figure `B_transfer` (PNG and SVG) has, per station, the sensed edge
+  position against the offset with the fitted line per edge series and the residual against the offset modulo 1 px. The bootstrap
+  is now Step 10. The forward-model terms (rise H and V at the reference station, mean s_50) are unchanged.
 - B-Z (`analysis/resolution_depth.py`, Section 11.2). The step-ladder analysis works per station: the rungs differ from station
   to station, and it uses the read-back displacement as the truth, so only the reporting changed: `truth_reliable` and
   `delta_50_is_bound` are evaluated against each station's own rung set (a delta_50 below the station's smallest reliable rung is
   a bound, which happens more often at the far stations whose smallest rung is 0.39 to 1.55 mm), and every rung carries the ratio
   of `robot_repeatability_mm` to its true step (`rung_robot_ratio`, `robot_repeatability_ratio` in `Z_resolution_rungs.csv`; the
-  ratio of the smallest rung is in the summary). New Step 5, the ramp (`_analyze_ramp`, `RampResult`): per ramp pose, the
+  ratio of the smallest rung is in the summary). The truth rule (Section 11.2, Step 10) is that a rung smaller than TWICE the robot
+  repeatability is flagged `truth_reliable` = False (`rung_truth_is_reliable`, `CharacterizationParameters.truth_reliable_rung_floor_mm`
+  = `TRUTH_RELIABLE_RUNG_TO_REPEATABILITY_RATIO` (2) x `robot_repeatability_mm`); the same ratio gives the default of the ladder
+  floor `robot_min_resolvable_move_mm` (2 x 0.05 = 0.1 mm), so the two cannot diverge at the defaults and a rung the ladder raised to
+  its floor is just reliable. New Step 5, the ramp (`_analyze_ramp`, `RampResult`): per ramp pose, the
   fixed-pattern map of A at the station is subtracted from the frame-mean depth (A now keeps the map, the frame-mean depth minus
   its fitted plane, as `PoseDiagnostics.fixed_pattern_mm` for the center-field main poses; with no A result or a map that is NaN
   over the region of interest nothing is subtracted and the note says so), the depth is averaged along each image row within the
@@ -572,13 +606,14 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
   `PLATEAU_MIN_STEPS_PER_QUANTUM` rows per expected quantum and a median plateau of `RAMP_PLATEAU_MIN_WIDTH_ROWS` (= the
   staircase's `PLATEAU_MIN_WIDTH_STEPS`, in rows) or more. The expected quantum is q Z^2 / k from A's q (the prediction, reported)
   or the pooled depth levels. Dithering: a window change of a staircase is about 0 or about 1 quantum, of a smooth ramp about 0.5; a
-  curve with at least half of its changes in 0.25 to 0.75 quantum is smooth (`RAMP_INTERMEDIATE_BAND`,
-  `RAMP_MAX_INTERMEDIATE_FRACTION`), and a smooth row average over stepped single pixels (temporal medians of five columns) is
+  curve with at least half of its changes in 0.25 to 0.75 quantum is smooth (the parameters `ramp_intermediate_band` and
+  `ramp_max_intermediate_fraction` of `CharacterizationParameters`, chosen by argument, not from data), and a smooth row average over stepped single pixels (temporal medians of five columns) is
   flagged `dithered`; the plateaus are then not used and the quantum is that of the pooled depth levels (when that is the output
   LSB, no q is implied). Output: per station in `Z_resolution_summary.csv` the columns `ramp_tilt_deg`,
   `ramp_fixed_pattern_subtracted`, `ramp_plateaus`, `ramp_quantum_mm`, `ramp_quantum_predicted_mm`, `ramp_q_px`,
-  `ramp_quantum_method`, `ramp_dithered`, and, beside them, `staircase_quantum_mm`, `staircase_quantum_predicted_mm` and
-  `staircase_quantum_method` (the former `quantum_*` columns, renamed) when the optional staircase was captured; a ramp at a
+  `ramp_quantum_method` ("plateaus" or "depth levels"; `RampResult.quantum_is_lsb` says when the levels were no finer than the output
+  LSB), `ramp_dithered`, and, beside them, `staircase_quantum_mm`, `staircase_quantum_predicted_mm` and
+  `staircase_quantum_method` (the former `quantum_*` columns, renamed, with the same two words) when the optional staircase was captured; a ramp at a
   station without a ladder (the six stations outside the reduced set) is a row with an empty `patch_px`. Also `Z_ramp_rows.csv`,
   the figures `Z_ramp` (row average and single pixels against true depth with the plateau edges) and `Z_quantum_vs_z` (ramp and
   staircase quanta with q Z^2 / k) in PNG and SVG, and the ramp quantum in the forward-model terms (the staircase's where a station

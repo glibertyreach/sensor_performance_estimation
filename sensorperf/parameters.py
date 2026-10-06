@@ -77,13 +77,12 @@ ROBOT_REPEATABILITY_DEFAULT_MM = 0.05
 """Default of ``CharacterizationParameters.robot_repeatability_mm``: the position repeatability required of the robot
 (ISO 9283, Section 3.1 equipment list; the value is the document's requirement, not a measurement)."""
 TRUTH_RELIABLE_RUNG_TO_REPEATABILITY_RATIO = 2.0
-"""A Z-step rung must be at least this many times the robot repeatability for its step truth to count as reliable. It is
-the ONE number behind two rules that must not diverge: the floor the step ladder applies (Section 6.2, Step 2: a rung
-below the smallest Z move the robot is trusted to make, ``robot_min_resolvable_move_mm``, is raised to it; its default is
-this ratio times ``ROBOT_REPEATABILITY_DEFAULT_MM``, 0.1 mm) and the truth rule of Analysis B-Z (Section 11.2, Step 10:
-a rung smaller than this ratio times ``robot_repeatability_mm`` is flagged ``truth_reliable = False`` and left out of the
-gain regression; see ``CharacterizationParameters.truth_reliable_rung_floor_mm``). At the indicative values no rung is
-flagged; the rule matters for a robot less repeatable than the requirement."""
+"""The truth rule of Analysis B-Z (Section 11.2, Step 10): a Z-step rung smaller than this many times the robot repeatability
+(``robot_repeatability_mm``) is flagged ``truth_reliable = False`` and left out of the gain regression (see
+``CharacterizationParameters.truth_reliable_rung_floor_mm``). It is a SEPARATE rule from the floor of the step ladder
+(Section 6.2, Step 2), which is ``robot_min_resolvable_move_mm`` alone, an independent equipment figure; the two coincide at
+the defaults (2 x 0.05 mm = 0.1 mm), so at the indicative values no rung is flagged, but they are not tied: the rule
+follows the repeatability, the ladder floor does not."""
 
 # Numerical guards.
 MIN_POSITIVE_DEPTH_MM = 1.0e-6
@@ -289,10 +288,12 @@ class CharacterizationParameters:
     dZ_q(Z0) = q Z0^2 / k with the Tier-A q until Analysis A has measured one (Section 6.2). Each rung is raised to at
     least ``robot_min_resolvable_move_mm``. At the indicative geometry the rungs run from 0.1 to 3.1 mm at 400 mm, 0.39 to
     12.4 mm at 800 mm and 1.55 to 50 mm at 1600 mm; the planner lists them per station in plan_summary.txt."""
-    robot_min_resolvable_move_mm: float = TRUTH_RELIABLE_RUNG_TO_REPEATABILITY_RATIO * ROBOT_REPEATABILITY_DEFAULT_MM
-    """The smallest Z move the robot is trusted to execute (Neil's figure, mm; the default is
-    ``TRUTH_RELIABLE_RUNG_TO_REPEATABILITY_RATIO`` times the required repeatability, 0.1 mm). A ladder rung or a staircase
-    step smaller than this is raised to it; the analysis takes the read-back displacement as the truth in any case."""
+    robot_min_resolvable_move_mm: float = 0.1
+    """The smallest Z move the robot is trusted to execute (Neil's statement of what the robot can resolve, mm; an
+    independent parameter, not derived from the repeatability). It is the floor of the step ladder (Section 6.2, Step 2): a
+    ladder rung or a staircase step smaller than this is raised to it. The analysis takes the read-back displacement as the
+    truth in any case. The separate truth rule of Analysis B-Z (twice ``robot_repeatability_mm``, see
+    ``TRUTH_RELIABLE_RUNG_TO_REPEATABILITY_RATIO``) gives the same 0.1 mm at the defaults, but the two do not follow each other."""
     robot_repeatability_mm: float = ROBOT_REPEATABILITY_DEFAULT_MM
     """Position repeatability of the robot (ISO 9283), the equipment requirement of Section 3.1. A ladder rung smaller than
     ``TRUTH_RELIABLE_RUNG_TO_REPEATABILITY_RATIO`` (2) times this has a step truth too close to the robot's own scatter, so
@@ -546,8 +547,8 @@ class CharacterizationParameters:
     @property
     def truth_reliable_rung_floor_mm(self) -> float:
         """The smallest Z-step rung whose step truth is reliable, mm: ``TRUTH_RELIABLE_RUNG_TO_REPEATABILITY_RATIO`` times
-        ``robot_repeatability_mm`` (Section 11.2, Step 10; the same ratio defines the default of the ladder floor
-        ``robot_min_resolvable_move_mm``, Section 6.2, Step 2)."""
+        ``robot_repeatability_mm`` (Section 11.2, Step 10). Independent of the ladder floor ``robot_min_resolvable_move_mm``
+        (Section 6.2, Step 2), with which it coincides at the defaults (0.1 mm)."""
         return TRUTH_RELIABLE_RUNG_TO_REPEATABILITY_RATIO * self.robot_repeatability_mm
 
     def lateral_sweep_positions_px(self) -> tuple[float, ...]:
