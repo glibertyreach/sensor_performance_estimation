@@ -519,3 +519,17 @@ fraction and drift rate per row, drift figure. Also executed in the same update,
 follow-up F1 ("accept first option"): Section 5, Step 3 now says the boundary sentinel is captured on the target
 mounted at that moment and T2 serves wherever it is mounted anyway, matching the code. Code (noise.py) and the
 technician procedure Section 14 delegated. The renderer fix for continued numbering is in commit 218323a.
+
+## Drift run (Neil's question during C11 close-out, 2026-10-06)
+Neil asked about measuring sensor drift separately and omitting the sentinels. Reviewer assessment given in
+chat: a separate static run measures the sensor alone (not the robot's thermal growth or mount events), the
+sentinels cost under 1% of the session, and the drift-versus-temperature relation may not reproduce between
+days; recommendation: keep the sentinels and add the separate run as an optional pre-session measurement.
+Neil's decision: add the optional separate drift run to Section 4. Executed (document rev 97; gate PASS, scope
+['2', '4', '9', '10']): Section 4, Step 3 gains the optional run (T2 on a fixed stand at the reference station,
+robot idle, from cold, SENTINEL_FRAMES frames every DRIFT_RUN_CAPTURE_INTERVAL_MIN = 2 min for
+DRIFT_RUN_DURATION_MIN = 480 min, temperatures logged, files under sentinels/ with the sub-series label
+drift_run, outside the budget); Section 2 gains the two rows; Section 9 lists the run among the optional captures
+excluded from the budget; Section 10, Step 11 compares each mount's sentinel drift with the drift predicted from
+the run's temperature relation. The two values (480 min, 2 min) are reviewer choices open to change. Code and
+technician procedure follow (noise analysis agent, then the procedure's Section 3/4).
