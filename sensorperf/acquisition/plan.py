@@ -83,8 +83,8 @@ from sensorperf.geometry.targets import (
 )
 from sensorperf.geometry.transforms import RigidTransform
 from sensorperf.io.manifest import (
-    FIELD_FRACTION_ACHIEVED_KEY, FILTERS_OFF_POSE_INDEX_BASE, LATERAL_SWEEP_POSE_INDEX_BASE, SENTINEL_MOUNT_REFERENCE_KEY,
-    STAIRCASE_POSE_INDEX_BASE, SUBSERIES_EXTENDED, SUBSERIES_FIELD, SUBSERIES_FILTERS_OFF, SUBSERIES_JITTER, SUBSERIES_LATERAL_SWEEP, SUBSERIES_LADDER, SUBSERIES_MAIN,
+    DRIFT_RUN_POSE_INDEX_BASE, FIELD_FRACTION_ACHIEVED_KEY, FILTERS_OFF_POSE_INDEX_BASE, LATERAL_SWEEP_POSE_INDEX_BASE, SENTINEL_MOUNT_REFERENCE_KEY,
+    STAIRCASE_POSE_INDEX_BASE, SUBSERIES_DRIFT_RUN, SUBSERIES_EXTENDED, SUBSERIES_FIELD, SUBSERIES_FILTERS_OFF, SUBSERIES_JITTER, SUBSERIES_LATERAL_SWEEP, SUBSERIES_LADDER, SUBSERIES_MAIN,
     SUBSERIES_NOMINAL, SUBSERIES_OPEN, SUBSERIES_RAMP, SUBSERIES_REMOUNT, SUBSERIES_SENTINEL, SUBSERIES_STAIRCASE, SUBSERIES_TILT,
     TARGET_POSE_COLUMNS, TILT_AXIS_H, TILT_AXIS_V, VISIT_A, VISIT_B, format_file_name, format_flag, pose_to_six,
     six_to_pose,
@@ -1279,6 +1279,23 @@ def count_sentinel_remounts(plan: Sequence[PlannedCapture]) -> int:
                and _mounted_target_id(plan, position) not in (None, capture.target_id))
 
 
+def plan_drift_run(params: CharacterizationParameters) -> list[PlannedCapture]:
+    """The OPTIONAL separate drift run of Section 4, Step 3, outside the Section 9 budget: T2 on a fixed stand at
+    Z_REFERENCE_MM, fronto-parallel and centered, the robot idle, one capture of SENTINEL_FRAMES frames every
+    DRIFT_RUN_CAPTURE_INTERVAL_MIN minutes for DRIFT_RUN_DURATION_MIN minutes (the first capture at time zero, so
+    duration / interval + 1 captures). Procedure S (the sentinels folder), sub-series ``drift_run``; the pose index counts
+    the captures from DRIFT_RUN_POSE_INDEX_BASE, so no capture shares a pose key with an in-session sentinel. The order
+    runs 0..N-1 on its own: the run is taken on another day, in a plan file of its own."""
+    captures = int(math.floor(params.drift_run_duration_min / params.drift_run_capture_interval_min + 1e-9)) + 1
+    pose = fronto_parallel_pose(0.0, 0.0, params.z_reference_mm)
+    counter = _PoseCounter(DRIFT_RUN_POSE_INDEX_BASE)
+    note = {SENTINEL_NOTE_KEY: f"drift run on the fixed stand: T2 at Z = {params.z_reference_mm:g} mm, robot idle"}
+    return _renumber([_new_capture(counter, PROCEDURE_SENTINEL, TARGET_NOISE_PLATE, None, params.z_reference_mm,
+                                   FIELD_POSITION_CENTER, params.sentinel_frames, SUBSERIES_DRIFT_RUN, pose,
+                                   notes=dict(note))
+                      for _ in range(captures)])
+
+
 def insert_sentinels(plan: list[PlannedCapture], params: CharacterizationParameters, geometry: SensorGeometry,
                      seconds_per_frame: float, move_settle_s: float,
                      diagnostics: PlanDiagnostics | None = None,
@@ -1637,7 +1654,8 @@ def _subseries_lines(plan: Sequence[PlannedCapture]) -> list[str]:
 
 OPTIONAL_POSE_INDEX_BASES = {SUBSERIES_FILTERS_OFF: FILTERS_OFF_POSE_INDEX_BASE,
                              SUBSERIES_STAIRCASE: STAIRCASE_POSE_INDEX_BASE,
-                             SUBSERIES_LATERAL_SWEEP: LATERAL_SWEEP_POSE_INDEX_BASE}
+                             SUBSERIES_LATERAL_SWEEP: LATERAL_SWEEP_POSE_INDEX_BASE,
+                             SUBSERIES_DRIFT_RUN: DRIFT_RUN_POSE_INDEX_BASE}
 """The pose-index base of each optional sub-series (all of them outside the Section 9 budget; ranges in ``io.manifest``)."""
 
 

@@ -441,10 +441,22 @@ def test_a_step4_fixed_pattern_clamp_and_formula():
     """Section 10, Step 4: sigma_fp^2 = var - sigma_t^2 / N exactly, and a variance below the temporal share is clamped to
     zero and reported as clamped."""
     values = np.array([-1.0, 1.0, -1.0, 1.0])                                        # variance 1
-    sigma_fp, clamped = noise.fixed_pattern_sigma_mm(values, sigma_t_rms_mm=2.0, frames=16)     # 1 - 4 / 16 = 0.75
+    sigma_fp, clamped = noise.fixed_pattern_sigma_mm(values, temporal_share=2.0 ** 2 / 16)      # 1 - 4 / 16 = 0.75
     assert sigma_fp == pytest.approx(math.sqrt(0.75)) and not clamped
-    sigma_fp, clamped = noise.fixed_pattern_sigma_mm(values, sigma_t_rms_mm=2.0, frames=2)      # 1 - 2 < 0
+    sigma_fp, clamped = noise.fixed_pattern_sigma_mm(values, temporal_share=2.0 ** 2 / 2)       # 1 - 2 < 0
     assert sigma_fp == 0.0 and clamped
+
+
+def test_a_step4_temporal_share_counts_the_frames_each_pixel_was_read():
+    """Section 10, Step 4: the temporal share is the ROI mean of sigma_t^2(u, v) / n(u, v) with n the number of frames in which
+    the pixel was read, so that no-reads do not bias it; with every pixel read in every frame it is sigma_t^2 / N."""
+    variance = np.array([[1.0, 4.0], [4.0, np.nan]])
+    mask = np.ones((2, 2), dtype=bool)
+    full = np.full((2, 2), 10)
+    assert noise.temporal_share_mm2(variance, full, mask) == pytest.approx(np.mean([1.0, 4.0, 4.0]) / 10)
+    partly = np.array([[10, 2], [4, 0]])                                  # the pixel with 2 reads has the larger share
+    assert noise.temporal_share_mm2(variance, partly, mask) == pytest.approx(np.mean([1.0 / 10, 4.0 / 2, 4.0 / 4]))
+    assert noise.temporal_share_mm2(variance, full, np.zeros((2, 2), dtype=bool)) == 0.0
 
 
 def test_a_step5_closure_holds_for_a_known_static_map(session):
@@ -524,6 +536,162 @@ def test_a_step11_target_drifts_flag_uses_the_threshold():
     longer = noise.target_drifts(frames, noise.NoiseOptions(), 0.0, {0}, threshold_mm=0.6, mount_hours={0: 1.5})
     assert [d.flagged for d in below] == [False, False] and [d.flagged for d in above] == [True, False]
     assert longer[0].flagged and longer[0].mount_hours == 1.5                     # 0.5 mm/h x 1.5 h = 0.75 mm
+
+
+# ---------------------------------------------------------------------------
+# Step 11: the optional separate drift run and the robustness of the per-mount analysis
+# ---------------------------------------------------------------------------
+DRIFT_RUN_SLOPE_MM_PER_C = 0.02
+"""True slope of the synthetic drift run, mm per degree C."""
+DRIFT_RUN_START_C = 25.0
+DRIFT_RUN_RISE_C = 15.0
+DRIFT_RUN_TIME_CONSTANT_MIN = 60.0
+"""Synthetic sensor warm-up: T(t) = start + rise (1 - exp(-t / time constant))."""
+DRIFT_RUN_NOISE_MM = 0.0005
+"""Noise of the mean Z of one synthetic capture, mm."""
+DRIFT_RUN_SLOPE_TOLERANCE = 0.10
+"""The slope recovered from the synthetic run is within this fraction of the truth."""
+DRIFT_RUN_SIGMA_T_MM = 0.1
+"""sigma_t at the reference station used for the allowance of the synthetic cases, mm (sentinel noise 0.1 / sqrt(30))."""
+ATTRIBUTION_STEP_MM = 0.2
+"""Step added to the mount that the sensor cannot explain, mm (more than twice the allowance of 4 x the sentinel noise of 0.018 mm)."""
+
+
+def _drift_run_frames(slope: float = DRIFT_RUN_SLOPE_MM_PER_C, captures: int = 241, interval_min: float = 2.0) -> list[dict]:
+    """Frame dictionaries of ``_frame_means`` for a drift run: one frame per capture, the plate's mean Z following the sensor
+    temperature (an exponential warm-up) with the given slope, plus noise."""
+    rng = np.random.default_rng(SIMULATION_SEED)
+    frames = []
+    for index in range(captures):
+        minutes = index * interval_min
+        temperature = DRIFT_RUN_START_C + DRIFT_RUN_RISE_C * (1.0 - math.exp(-minutes / DRIFT_RUN_TIME_CONSTANT_MIN))
+        value = 800.0 + slope * (temperature - DRIFT_RUN_START_C) + rng.normal(0.0, DRIFT_RUN_NOISE_MM)
+        frames.append({"pose_id": index, "target_id": "T2", "gap_mm": None, "epoch": 0, "time_s": minutes * 60.0,
+                       "temperature_c": temperature, "registered_mm": value, "raw_mm": value, "station_z_mm": 800.0})
+    return frames
+
+
+def test_a_step11_drift_run_fit_recovers_the_temperature_slope(session):
+    """Section 10, Step 11 (optional drift run): the line of the run's mean Z, relative to its first capture after the settling
+    (WARMUP_DRIFT_WINDOW_MIN), against the sensor temperature recovers the synthetic slope within 10 percent with a residual
+    near the capture noise; the captures before the settling stay out of the fit; the warm-up time is the first capture at
+    which the drift over WARMUP_DRIFT_WINDOW_MIN fell below WARMUP_DRIFT_FRACTION_OF_SIGMA x sigma_t."""
+    params = session.params
+    fit = noise.drift_run_from_frames(_drift_run_frames(), noise.NoiseOptions(), params, DRIFT_RUN_SIGMA_T_MM)
+    assert fit.has_fit and len(fit.hours) == 241
+    assert fit.slope_mm_per_c == pytest.approx(DRIFT_RUN_SLOPE_MM_PER_C, rel=DRIFT_RUN_SLOPE_TOLERANCE)
+    assert fit.residual_rms_mm < 3.0 * DRIFT_RUN_NOISE_MM
+    settled = [h * 60.0 >= params.warmup_drift_window_min - 1e-6 for h in fit.hours]
+    assert fit.used_in_fit == settled and fit.fit_captures == sum(settled)
+    assert fit.reference_hours * 60.0 == pytest.approx(params.warmup_drift_window_min)
+    assert fit.mean_z_mm[settled.index(True)] == 0.0                       # relative to the reference capture
+    assert all(math.isnan(r) for r, used in zip(fit.residual_mm, fit.used_in_fit) if not used)
+    # Warm-up: the drift over the window is slope x 15 / 60 x exp(-t / 60 min) x 10 min per minute of temperature rise.
+    threshold = params.warmup_drift_fraction_of_sigma * DRIFT_RUN_SIGMA_T_MM
+    assert fit.warmup_threshold_mm == pytest.approx(threshold)
+    expected = DRIFT_RUN_TIME_CONSTANT_MIN * math.log(
+        DRIFT_RUN_SLOPE_MM_PER_C * DRIFT_RUN_RISE_C / DRIFT_RUN_TIME_CONSTANT_MIN * params.warmup_drift_window_min / threshold)
+    assert fit.warmup_time_min == pytest.approx(expected, abs=params.warmup_drift_window_min)
+    # A threshold the run never reaches, and a run without temperature, are said rather than fitted.
+    never = noise.drift_run_from_frames(_drift_run_frames(), noise.NoiseOptions(), params, 1.0e-9)
+    assert never.warmup_time_min is None and "did not fall below" in never.note
+    blind = [dict(f, temperature_c=None) for f in _drift_run_frames()]
+    assert not noise.drift_run_from_frames(blind, noise.NoiseOptions(), params, DRIFT_RUN_SIGMA_T_MM).has_fit
+
+
+def _attribution_frames(step_mm: float) -> list[dict]:
+    """Sentinel frames of two mounts of T2 whose first and last sentinel poses differ by 4 degrees C: mount 0 follows the
+    drift-run line exactly (plus noise); mount 1 follows it plus a step of ``step_mm`` before its last sentinel."""
+    rng = np.random.default_rng(SIMULATION_SEED)
+    frames, pose_id = [], 0
+    for mount, hours_of_poses in ((0, [0.0, 1.0, 2.0]), (1, [3.0, 4.0, 5.0])):
+        for position, hour in enumerate(hours_of_poses):
+            temperature = 30.0 + 2.0 * position
+            value = (0.5 * (mount + 1) + DRIFT_RUN_SLOPE_MM_PER_C * (temperature - 30.0)
+                     + (step_mm if mount == 1 and position == 2 else 0.0) + rng.normal(0.0, DRIFT_RUN_NOISE_MM))
+            frames.append({"pose_id": pose_id, "target_id": "T2", "gap_mm": None, "epoch": mount, "time_s": hour * 3600.0,
+                           "temperature_c": temperature, "registered_mm": value, "raw_mm": value, "station_z_mm": 800.0})
+            pose_id += 1
+    return frames
+
+
+def test_a_step11_attribution_sensor_versus_robot_or_mount(session):
+    """Section 10, Step 11: with the drift run's line, a mount whose drift follows the logged temperature is attributed to the
+    "sensor" (the observed minus predicted drift is within DRIFT_ATTRIBUTION_NOISE_FACTOR x sigma_t / sqrt(SENTINEL_FRAMES)),
+    a mount with an added step to "robot or mount"; with no drift run nothing is set."""
+    fit = noise.drift_run_from_frames(_drift_run_frames(), noise.NoiseOptions(), session.params, DRIFT_RUN_SIGMA_T_MM)
+    targets = noise.target_drifts(_attribution_frames(ATTRIBUTION_STEP_MM), noise.NoiseOptions(), 0.0, {0, 1})
+    noise.attribute_sentinel_drift(targets, fit, DRIFT_RUN_SIGMA_T_MM, session.params.sentinel_frames)
+    allowance = noise.DRIFT_ATTRIBUTION_NOISE_FACTOR * DRIFT_RUN_SIGMA_T_MM / math.sqrt(session.params.sentinel_frames)
+    assert ATTRIBUTION_STEP_MM > 2.0 * allowance
+    sensor, stepped = targets
+    assert sensor.predicted_drift_mm == pytest.approx(DRIFT_RUN_SLOPE_MM_PER_C * 4.0, rel=DRIFT_RUN_SLOPE_TOLERANCE)
+    assert abs(sensor.observed_minus_predicted_mm) <= allowance and sensor.attribution == "sensor"
+    assert stepped.observed_minus_predicted_mm == pytest.approx(ATTRIBUTION_STEP_MM, abs=allowance)
+    assert stepped.attribution == "robot or mount"
+    row = noise.sentinel_drift_row(stepped)
+    assert (row["predicted_drift_mm"], row["attribution"]) == (stepped.predicted_drift_mm, "robot or mount")
+    for column in ("predicted_drift_mm", "observed_minus_predicted_mm", "attribution"):
+        assert column in noise.SENTINEL_DRIFT_COLUMNS
+    # Without a drift run (or a fit) the columns stay empty and nothing else changes.
+    plain = noise.target_drifts(_attribution_frames(ATTRIBUTION_STEP_MM), noise.NoiseOptions(), 0.0, {0, 1})
+    noise.attribute_sentinel_drift(plain, None, DRIFT_RUN_SIGMA_T_MM, session.params.sentinel_frames)
+    assert all(math.isnan(t.predicted_drift_mm) and t.attribution == "" for t in plain)
+    assert [t.rate_mm_per_hour for t in plain] == [t.rate_mm_per_hour for t in targets]
+
+
+def test_a_step11_drift_run_outputs(result_a, session, analysis_dir, tmp_path):
+    """Section 10, Step 11: A_drift_run.csv has one row per capture (time, temperature, mean Z, residual), A_drift_run_fit.json
+    the slope, intercept, residual RMS and warm-up time, and the drift-run figure exists as PNG and SVG. The quick session has
+    no drift run, so its output folder has none of these files and the attribution columns of its A_sentinel_drift.csv are
+    empty."""
+    assert result_a.drift_run is None
+    assert not (analysis_dir / noise.DRIFT_RUN_CSV_NAME).exists()
+    plain = _read_csv(analysis_dir / noise.SENTINEL_DRIFT_CSV_NAME)
+    assert all(m["predicted_drift_mm"] == m["observed_minus_predicted_mm"] == m["attribution"] == "" for m in plain)
+    fit = noise.drift_run_from_frames(_drift_run_frames(captures=61), noise.NoiseOptions(), session.params,
+                                      DRIFT_RUN_SIGMA_T_MM)
+    noise.write_outputs(dataclasses.replace(result_a, drift_run=fit), tmp_path)
+    rows = _read_csv(tmp_path / noise.DRIFT_RUN_CSV_NAME)
+    assert len(rows) == 61 and list(rows[0]) == list(noise.DRIFT_RUN_COLUMNS)
+    assert rows[0]["residual_mm"] == "" and rows[-1]["residual_mm"] != "" and rows[-1]["used_in_fit"] == "True"
+    details = json.loads((tmp_path / noise.DRIFT_RUN_FIT_JSON_NAME).read_text())
+    assert details["slope_mm_per_c"] == pytest.approx(DRIFT_RUN_SLOPE_MM_PER_C, rel=DRIFT_RUN_SLOPE_TOLERANCE)
+    assert {"intercept_mm", "residual_rms_mm", "warmup_time_min"} <= set(details)
+    for extension in ("png", "svg"):
+        assert (tmp_path / f"{noise.DRIFT_RUN_FIGURE_STEM}.{extension}").stat().st_size > 0
+
+
+def test_drift_run_frames_are_not_session_sentinels(session):
+    """Section 4, Step 3: captures of the drift run share the sentinels folder and procedure letter but belong to no mount: they
+    stay out of the session's sentinels and of the mount numbering."""
+    from sensorperf.io.manifest import DRIFT_RUN_POSE_INDEX_BASE, SUBSERIES_DRIFT_RUN
+    sentinel = next(r for r in session.records if r.procedure == "S" and r.target_id == "T2")
+    run = [dataclasses.replace(sentinel, subseries=SUBSERIES_DRIFT_RUN, pose_index=DRIFT_RUN_POSE_INDEX_BASE + i,
+                               metadata={}) for i in range(3)]
+    mixed = list(session.records) + run
+    assert len(noise.session_sentinels(mixed)) == len(noise.session_sentinels(session.records))
+    assert not any(r.subseries == SUBSERIES_DRIFT_RUN for r in noise.session_sentinels(mixed))
+    assert noise.mount_epochs(mixed) == noise.mount_epochs(session.records)
+
+
+def test_a_step11_mounts_are_analyzed_when_a_has_no_t2_sentinels(session, monkeypatch):
+    """Section 10, Step 11: when A's own mount has no T2 sentinel, the per-mount analysis still runs for every mount with at
+    least two sentinels (rate, flag), the A bias correction is skipped, and the result says so."""
+    frames = _synthetic_frames(0.0, 0.001, [("T3b", 1, [10.0, 11.0, 12.0]), ("T5", 2, [20.0])], mount_rates={1: 0.5})
+    rows = _mount_session_rows({0: 0.0}, flagged_threshold_sigma_mm=1.0)
+    monkeypatch.setattr(noise, "_frame_means", lambda *args, **kwargs: frames)
+    monkeypatch.setattr(noise, "a_mount_epochs", lambda *args, **kwargs: {0})
+    monkeypatch.setattr(noise, "_mount_hours", lambda *args, **kwargs: {})
+    drift = noise.analyze_sentinels(session, rows, None, 12.0, noise.NoiseOptions(), 0.0,
+                                    epochs=noise.mount_epochs(session.records))
+    assert drift is not None and not drift.correction_applied
+    assert [(t.target_id, t.mount, t.sentinel_poses) for t in drift.targets] == [("T3b", 1, 3), ("T5", 2, 1)]
+    assert drift.targets[0].rate_mm_per_hour == pytest.approx(0.5, rel=DRIFT_RECOVERY_TOLERANCE)
+    assert drift.targets[0].flagged and not drift.targets[1].flagged
+    assert "A bias correction is skipped" in drift.note and math.isnan(drift.rate_mm_per_hour)
+    assert all(row.bias_correction_mm == 0.0 and row.bias_corrected_mm == row.bias_mm for row in rows[1:])   # [0]: reference row
+
 
 
 def test_a_step12_legacy_boxes_skipped_and_said(result_a):

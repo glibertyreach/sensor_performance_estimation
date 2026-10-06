@@ -447,7 +447,10 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
 - *Pose-index ranges* (`io/manifest.py`: `OPTIONAL_POSE_INDEX_RANGE_SIZE` = 1000 and the three bases). The pose index of the file name
   has three digits for the main plan (P000 to P999) and four for each optional set planned outside the budget, each in a
   range of its own so that the ranges cannot overlap: filters-off repeat from `FILTERS_OFF_POSE_INDEX_BASE` = 1000 (P1000 to
-  P1999), staircase from `STAIRCASE_POSE_INDEX_BASE` = 2000, lateral sweep from `LATERAL_SWEEP_POSE_INDEX_BASE` = 3000.
+  P1999), staircase from `STAIRCASE_POSE_INDEX_BASE` = 2000, lateral sweep from `LATERAL_SWEEP_POSE_INDEX_BASE` = 3000, optional drift run
+  (Section 4, Step 3: `plan_drift_run`, procedure S in the sentinels folder, sub-series `SUBSERIES_DRIFT_RUN`, one capture per pose
+  index, `drift_run_duration_min` / `drift_run_capture_interval_min` + 1 = 241 captures of `sentinel_frames` frames) from
+  `DRIFT_RUN_POSE_INDEX_BASE` = 4000, so that a capture never shares a pose key with an in-session sentinel.
   `format_pose_index` writes four digits from `FOUR_DIGIT_POSE_INDEX_MIN` (the lowest base) on, and plan_summary.txt lists the
   range in use by each optional set. (The staircase of the filters-off repeat, labeled `filters_off`, stays in the filters-off
   range.)
@@ -488,7 +491,8 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
 **Analyses.**
 - A: Step 4 reports `sigma_fp_mm` about the REGISTERED plane, with the temporal share of the frame average removed:
   sigma_fp^2 = var(Zbar - Z_GT) - sigma_t^2 / N (`noise.fixed_pattern_sigma_mm`; about 1 % of sigma_t^2 at 100 frames, clamped at
-  zero with a note when the clamp acts). The free plane fitted to Zbar serves only for `plane_angle_deg`. The fixed-pattern map
+  zero with a note when the clamp acts; N is counted per pixel, the ROI mean of sigma_t^2(u, v) / n(u, v) with n the frames in which
+  the pixel was read, so that no-reads do not bias it, which is the specification's formula when every pixel is read in every frame). The free plane fitted to Zbar serves only for `plane_angle_deg`. The fixed-pattern map
   kept for the B-Z ramp (`PoseDiagnostics.fixed_pattern_mm`) is Zbar - Z_GT - bias on the same plane. Because sigma_t, sigma_fp,
   the bias and sigma_tot are now all about one plane, the Step 5 closure sigma_tot^2 / (sigma_t^2 + sigma_fp^2 + bias^2) is 1
   to a few percent on simulated data (algebraically 1 when every pixel is read in every frame); the tolerance stays
@@ -505,7 +509,16 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
   from its bias (`bias_correction_mm`; the largest size per mount is `correction_applied_mm`). A mount with a single sentinel has
   only its reference (no rate, never flagged). `A_noise_summary.csv` has a `field_fraction_achieved` column per pose (station and
   field), read from the manifest metadata and NaN when the manifest does not provide it, and `drift_rate_mm_per_h` and
-  `drift_flagged` of the mount the pose was captured on (empty without a sentinel line).
+  `drift_flagged` of the mount the pose was captured on (empty without a sentinel line). Every mount with at least two sentinels is
+  analyzed even when A's own mount lacks T2 sentinels: only the pooled A line and the A bias correction are then skipped, with a note.
+  The optional drift run (`SUBSERIES_DRIFT_RUN`; `noise.session_sentinels` and `mount_epochs` leave it out of the session's
+  sentinels) is fitted by `analyze_drift_run`: mean plate Z relative to the first capture after `drift_run_settle_min` (default
+  `warmup_drift_window_min`) against the sensor temperature, a straight line (slope mm per degree, intercept, residual RMS), the
+  warm-up time at which the drift over the window first fell below `warmup_drift_fraction_of_sigma` x sigma_t, written as
+  `A_drift_run.csv`, `A_drift_run_fit.json` and the figure `A_drift_run`. With that line `attribute_sentinel_drift` adds to
+  `A_sentinel_drift.csv` the drift of each mount predicted from its logged temperatures, observed minus predicted, and `attribution`
+  ("sensor" within `DRIFT_ATTRIBUTION_NOISE_FACTOR` x sigma_t / sqrt(sentinel_frames), else "robot or mount"); the columns are
+  empty without a drift run. The simulator does not log a sensor temperature, so the tests build the run from synthetic frames.
 - C: transfer curves A_sensed/A_true and A_sensed/A_geo against D_px pooled over features and stations (the summary rows
   keep `site_id` / `level_index`; figures draw one curve per feature). The overlap (scaling) test of `analysis/overlap.py`
   compares neighboring features over their shared D_px range: per (kind, gap, ratio) and pair the mean difference of the two

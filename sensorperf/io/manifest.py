@@ -60,6 +60,11 @@ SUBSERIES_FILTERS_OFF = "filters_off"
 """A repeat with the sensor's own filters off (Section 5, Step 7)."""
 SUBSERIES_SENTINEL = "sentinel"
 """A drift sentinel capture."""
+SUBSERIES_DRIFT_RUN = "drift_run"
+"""A capture of the OPTIONAL separate drift run (Section 4, Step 3): T2 on a fixed stand at the reference station, robot
+idle, SENTINEL_FRAMES frames every DRIFT_RUN_CAPTURE_INTERVAL_MIN minutes. Its files go in the sentinels folder (procedure
+letter of the sentinels) and its pose index counts the captures from DRIFT_RUN_POSE_INDEX_BASE; the capture time and the
+sensor temperature are logged as for a sentinel. It is not a sentinel of any mount."""
 SUBSERIES_WARMUP = "warmup"
 """Warm-up monitoring captures (Section 4, Step 3)."""
 SUBSERIES_SETTLE_SERVO = "settle_servo"
@@ -159,6 +164,7 @@ POSE_INDEX_DIGITS digits, and POSE_INDEX_DIGITS_OPTIONAL digits for the optional
 #     filters-off repeat         P1000 to P1999   (A, B-HV and B-Z; Section 4, Step 4.2)
 #     optional B-Z staircase     P2000 to P2999   (Section 6.2, second pass)
 #     optional B-HV lateral sweep P3000 to P3999  (Section 6.1, Step 6)
+#     optional drift run          P4000 to P4999  (Section 4, Step 3; sentinels folder, sub-series drift_run)
 OPTIONAL_POSE_INDEX_RANGE_SIZE = 1000
 """Number of pose indices reserved for the main plan and for each optional set. The B-Z series has up to about 150 poses at
 one station (ladder, ramp), the staircase about 30 and the lateral sweep 40, so each range is wide enough."""
@@ -169,7 +175,12 @@ STAIRCASE_POSE_INDEX_BASE = 2 * OPTIONAL_POSE_INDEX_RANGE_SIZE
 """First pose index of the optional B-Z staircase (Section 6.2, second pass; ``plan_stations --staircase``)."""
 LATERAL_SWEEP_POSE_INDEX_BASE = 3 * OPTIONAL_POSE_INDEX_RANGE_SIZE
 """First pose index of the optional B-HV lateral sweep (Section 6.1, Step 6; ``plan_stations --lateral-sweep``)."""
-OPTIONAL_POSE_INDEX_BASES = (FILTERS_OFF_POSE_INDEX_BASE, STAIRCASE_POSE_INDEX_BASE, LATERAL_SWEEP_POSE_INDEX_BASE)
+DRIFT_RUN_POSE_INDEX_BASE = 4 * OPTIONAL_POSE_INDEX_RANGE_SIZE
+"""First pose index of the optional drift run (Section 4, Step 3): the pose index counts its captures from here, so that a
+capture never shares a pose key with an in-session sentinel at the same station (the run has about 240 captures, within the
+range)."""
+OPTIONAL_POSE_INDEX_BASES = (FILTERS_OFF_POSE_INDEX_BASE, STAIRCASE_POSE_INDEX_BASE, LATERAL_SWEEP_POSE_INDEX_BASE,
+                             DRIFT_RUN_POSE_INDEX_BASE)
 """The first pose index of each optional set; the lowest of them is where file names switch to four digits."""
 FOUR_DIGIT_POSE_INDEX_MIN = min(OPTIONAL_POSE_INDEX_BASES)
 """Pose indices from this one on are written with POSE_INDEX_DIGITS_OPTIONAL digits in file names."""

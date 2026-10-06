@@ -31,7 +31,7 @@ from sensorperf.acquisition.plan import (
     DOCUMENT_ESTIMATE_FRAMES, DOCUMENT_ESTIMATE_HOURS, DOCUMENT_ESTIMATE_POSES, PLAN_CSV_NAME, PLAN_FIGURE_NAME, PLAN_SUMMARY_NAME, PlanDiagnostics,
     PlannedCapture, SERIES_ORDER, TIER_A_DISPARITY_QUANTUM_PX, budget_total, capture_budget, capture_duration_s,
     camera_of, fit_violation_px, format_budget_table, insert_sentinels, jitter_offset_mm, place_in_field,
-    plan_detection_series, plan_edge_series, plan_full_session, plan_noise_series, plan_registration,
+    plan_detection_series, plan_drift_run, plan_edge_series, plan_full_session, plan_noise_series, plan_registration,
     plan_zstep_series, read_plan_csv, write_plan, APPROACH_FROM_BELOW, MIN_POSE_LOG_DECIMALS,
     count_sentinel_remounts, tilt_is_feasible, tilt_near_edge_mm,
 )
@@ -44,9 +44,9 @@ from sensorperf.geometry.registration import Registration, plane_of_pose
 from sensorperf.geometry.targets import fronto_parallel_pose, make_standard_target_set
 from sensorperf.geometry.transforms import RigidTransform
 from sensorperf.io.manifest import (
-    FIELD_FRACTION_ACHIEVED_KEY, FILTERS_OFF_POSE_INDEX_BASE, FOUR_DIGIT_POSE_INDEX_MIN, FrameRecord,
+    DRIFT_RUN_POSE_INDEX_BASE, FIELD_FRACTION_ACHIEVED_KEY, FILTERS_OFF_POSE_INDEX_BASE, FOUR_DIGIT_POSE_INDEX_MIN, FrameRecord,
     LATERAL_SWEEP_POSE_INDEX_BASE, OPTIONAL_POSE_INDEX_RANGE_SIZE, SENTINEL_MOUNT_REFERENCE_KEY, STAIRCASE_POSE_INDEX_BASE,
-    SUBSERIES_FIELD, SUBSERIES_JITTER, VISIT_A, VISIT_B, format_file_name, parse_file_name, parse_flag, write_manifest_csv,
+    SUBSERIES_DRIFT_RUN, SUBSERIES_FIELD, SUBSERIES_JITTER, VISIT_A, VISIT_B, format_file_name, parse_file_name, parse_flag, write_manifest_csv,
 )
 from sensorperf.features.planes import plane_depth_image
 from sensorperf.io.matcloud import write_matcloud
@@ -1403,3 +1403,60 @@ def test_registration_cli_defaults_to_the_plane_only_solve(tmp_path: Path):
     """Redesign note Section 3: with no pattern plate the command line registers by plane correspondence
     (solve_from_planes) unless told otherwise."""
     assert register_cli.build_parser().get_default("method") == register_cli.METHOD_PLANES
+
+
+# ---------------------------------------------------------------------------
+# The optional separate drift run (Section 4, Step 3)
+# ---------------------------------------------------------------------------
+DRIFT_RUN_TEST_DURATION_MIN = 8.0
+DRIFT_RUN_TEST_INTERVAL_MIN = 2.0
+"""A short drift run for the test that writes files: 8 minutes every 2 minutes is 5 captures."""
+DRIFT_RUN_TEST_TEMPERATURE_C = 31.5
+"""Sensor temperature logged for the first capture of the test run; it rises 0.5 degrees per capture."""
+
+
+def test_plan_drift_run_and_its_manifest(tmp_path: Path):
+    """Section 4, Step 3 (optional drift run): the plan has duration / interval + 1 captures of SENTINEL_FRAMES frames of T2
+    at the reference station, procedure S, sub-series drift_run, pose index counting the captures from
+    DRIFT_RUN_POSE_INDEX_BASE (four-digit file names, never the pose key of an in-session sentinel). The manifest builder
+    accepts them through the plan and the log, carries the sub-series, the capture time and the sensor temperature, and the
+    manifest loads back."""
+    from sensorperf.io.manifest import load_manifest
+    full = plan_drift_run(PARAMS)
+    assert len(full) == int(PARAMS.drift_run_duration_min / PARAMS.drift_run_capture_interval_min) + 1 == 241
+    assert (PARAMS.drift_run_duration_min, PARAMS.drift_run_capture_interval_min) == (480.0, 2.0)
+    assert {(c.procedure, c.target_id, c.station_z_mm, c.frames, c.subseries) for c in full} == {
+        (PROCEDURE_SENTINEL, TARGET_NOISE_PLATE, PARAMS.z_reference_mm, PARAMS.sentinel_frames, SUBSERIES_DRIFT_RUN)}
+    assert [c.pose_index for c in full] == list(range(DRIFT_RUN_POSE_INDEX_BASE, DRIFT_RUN_POSE_INDEX_BASE + 241))
+    assert DRIFT_RUN_POSE_INDEX_BASE >= FOUR_DIGIT_POSE_INDEX_MIN and "P4000_" in full[0].file_name(0)
+    sentinel_keys = {c.pose_key() for c in plan_noise_series(SMALL_PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED))
+                     if c.procedure == PROCEDURE_SENTINEL}
+    assert not sentinel_keys & {c.pose_key() for c in full}
+
+    params = dataclasses.replace(SMALL_PARAMS, drift_run_duration_min=DRIFT_RUN_TEST_DURATION_MIN,
+                                 drift_run_capture_interval_min=DRIFT_RUN_TEST_INTERVAL_MIN, sentinel_frames=2)
+    plan = plan_drift_run(params)
+    assert len(plan) == 5
+    registration = random_registration()
+    root = tmp_path / "session"
+    write_empty_captures(root, plan)
+    write_plan(tmp_path / "plan", plan, None, params, GEOMETRY)
+    with (tmp_path / "pose_log.csv").open("w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["file", "x_mm", "y_mm", "z_mm", "rotation_type", "r1", "r2", "r3", "r4", "timestamp", "sensor_temp_c"])
+        for capture in plan:
+            flange = registration.flange_to_base_for(capture.target_to_camera)
+            for frame in range(capture.frames):
+                writer.writerow([capture.file_name(frame), *flange.translation, "quaternion_wxyz",
+                                 *quaternion_wxyz(flange.rotation),
+                                 f"2026-10-05T08:{int(capture.order * DRIFT_RUN_TEST_INTERVAL_MIN):02d}:{frame:02d}",
+                                 DRIFT_RUN_TEST_TEMPERATURE_C + 0.5 * capture.order])
+    records = build_manifest(tmp_path / "pose_log.csv", root, tmp_path / "plan" / PLAN_CSV_NAME, registration, strict=True)
+    assert len(records) == 10 and {r.subseries for r in records} == {SUBSERIES_DRIFT_RUN}
+    assert [r.sensor_temp_c for r in records[::2]] == [DRIFT_RUN_TEST_TEMPERATURE_C + 0.5 * k for k in range(5)]
+    assert records[2].timestamp.startswith("2026-10-05T08:02")
+    assert all(r.path.parent.name == "sentinels" and not r.metadata for r in records)    # no mount-reference flag
+    write_manifest_csv(root / "manifest.csv", records)
+    loaded = load_manifest(root / "manifest.csv")
+    assert [(r.subseries, r.pose_index, r.sensor_temp_c) for r in loaded] == \
+           [(r.subseries, r.pose_index, r.sensor_temp_c) for r in records]

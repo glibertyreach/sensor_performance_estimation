@@ -222,6 +222,14 @@ class CharacterizationParameters:
     """Interval between drift sentinel captures."""
     sentinel_frames: int = 30
     """Frames per drift sentinel (Section 5, Step 3)."""
+    drift_run_duration_min: float = 480.0
+    """Duration of the OPTIONAL separate drift run (Section 4, Step 3), minutes: long enough to cover the warm-up and the
+    planned session length. The run is made before the session (the same day or the day before) with the robot idle, T2 on a
+    fixed stand at the reference station (Z_REFERENCE_MM), fronto-parallel, the sensor powered from cold. Its captures are
+    SENTINEL_FRAMES frames each, files in the sentinels folder with the sub-series label ``drift_run``. It costs no robot time
+    and is outside the Section 9 budget."""
+    drift_run_capture_interval_min: float = 2.0
+    """Interval between the captures of the optional drift run, minutes (SENTINEL_FRAMES frames per capture)."""
     robot_settle_time_s: float = 2.0
     """Wait after motion before a capture; Step 4.4 verifies it."""
     settle_check_frames: int = 100
