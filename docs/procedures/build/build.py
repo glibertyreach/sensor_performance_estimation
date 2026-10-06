@@ -276,6 +276,7 @@ def derived_values(params: CharacterizationParameters, geometry: SensorGeometry,
     shifted = [c for c in ramp if c.notes.get("ramp_center_shift_mm", 0.0) > 0.0]
     low_probability = params.detection_low_probability
 
+    drift_run = planning.plan_drift_run(params)       # the optional separate drift run (Section 4, Step 3), its own plan
     values = {
         "build_date": dt.date.today().isoformat(),
         "z_min_mm": int(params.z_min_mm),
@@ -325,6 +326,13 @@ def derived_values(params: CharacterizationParameters, geometry: SensorGeometry,
         "indicative_fx_px": f"{geometry.sensor_fx_px:.0f}",
         "noise_station_frames": params.frames_per_noise_station,
         "sentinel_frames": params.sentinel_frames,
+        "drift_run_captures": len(drift_run),
+        "drift_run_frames": f"{sum(c.frames for c in drift_run):,}",
+        "drift_run_hours": f"{params.drift_run_duration_min / 60.0:g}",
+        "drift_run_first_pose": drift_run[0].pose_index,
+        "drift_run_station_code": f"{int(drift_run[0].station_z_mm):04d}",
+        "drift_run_first_file": drift_run[0].file_name(0),
+        "drift_run_last_file": drift_run[-1].file_name(drift_run[-1].frames - 1),
         "budget_frame_rate_hz": f"{BUDGET_FRAME_RATE_HZ:g}",
         "pose_log_min_decimals": MIN_POSE_LOG_DECIMALS,
         "pose_index_digits": {3: "three", 4: "four"}.get(manifest_module.POSE_INDEX_DIGITS, manifest_module.POSE_INDEX_DIGITS),
