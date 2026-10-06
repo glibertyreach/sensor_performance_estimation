@@ -85,9 +85,9 @@
   },
   "C15": {
     "title": "Analysis E, boundary bias",
-    "reviewed": null,
-    "tier": null,
-    "note": "not yet reviewed"
+    "reviewed": "2026-10-06",
+    "tier": "fable",
+    "note": "Section 14 executed at rev 110: visibility rules, width definitions, sign relation, intervals, outputs; Section 12 2-D visibility computed"
   },
   "C16": {
     "title": "Uncertainty, limitations, open questions",

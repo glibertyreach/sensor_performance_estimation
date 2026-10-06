@@ -691,5 +691,16 @@ Reviewer findings (proposals; nothing executed until Neil closes the chunk):
   surface-assignment window (SURFACE_ASSIGNMENT_SIGMA_MULTIPLE), 0.25 px bins.
 - C15-R7 (Step 6, low): say that the feature-scale classification uses the D trials (one frame per pose) and the
   C frames, so the fill-in fraction near D_50 has the same trial counts as Section 13.
-Neil's comments: (pending)
+Neil's comments (2026-10-06): R1 to R7 approved; closed. Note (on the 2-D visibility sentence of Section 12,
+Step 7): the 2-D image's visibility should be computable from the light properties and the camera, light and
+surface geometry.
+Executed (document rev 110; gate PASS, scope ['2', '12', '14']): R1 Step 1 as-built projector position, primary
+and check rules, the midway coincidence; R2 Step 4 equivalent-width definitions; R3 Step 5 sign relation; R4 Step 7
+intervals for β_read, π_near, W_fab and W_drop with 2000 resamples (code change); R5 Step 8 files, figures and the
+four forward-model terms; R6 plain style in Steps 1, 2, 3; R7 Step 6 trial counts. From Neil's note: Section 12,
+Step 7 now computes the 2-D image's visible area A_geo_2D as the one-center projection from the 2-D sensor's
+as-built position with its collocated illumination (new Section 2 row CAMERA_2D_OFFSET_MM, from the datasheet),
+reported beside A_geo, and says that brightness follows from the light's properties and the camera, light and
+surface geometry (cosine over squared distance, times reflectance), which the procedure records but does not
+characterize. Code (boundary intervals, A_geo_2D) delegated after the Analysis D agent lands.
 
