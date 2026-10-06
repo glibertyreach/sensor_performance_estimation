@@ -510,4 +510,12 @@ Reviewer findings (proposals; nothing executed until Neil closes the chunk):
 - Pipeline: the renderer restarted the step numbers after the formula (10–13 shown as 1–4); fixed by honoring the
   continued list's start number.
 
-Neil's comments: (pending)
+Neil's comments (2026-10-06): R1 correction term approved; R2 to R6 approved. Closed.
+Executed (document rev 95; gate PASS, scope ['10', '5']): Step 4 σ_fp about the registered plane with the σ_t²/N
+correction, free plane kept only for the angle; Step 5 closure with the 20% tolerance named; Steps 1, 7, 8, 12
+in the plain style; Step 7 points to the Section 5, Step 7 quick-look; Step 9 states the 1/σ_t weights (what the
+code does); Step 10 "at each tilt station"; Step 11 drift rate per mounted target and the flag; Step 13 field
+fraction and drift rate per row, drift figure. Also executed in the same update, from Neil's decision on
+follow-up F1 ("accept first option"): Section 5, Step 3 now says the boundary sentinel is captured on the target
+mounted at that moment and T2 serves wherever it is mounted anyway, matching the code. Code (noise.py) and the
+technician procedure Section 14 delegated. The renderer fix for continued numbering is in commit 218323a.

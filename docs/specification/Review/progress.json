@@ -1,98 +1,98 @@
 {
- "C01": {
-  "title": "Purpose and scope",
-  "reviewed": "2026-10-05",
-  "tier": "fable",
-  "note": "P1 + R1–R5 executed; gate PASS; scope diff §1 only; Step 4.5 side check deferred to C05"
- },
- "C02": {
-  "title": "Parameters and relations",
-  "reviewed": "2026-10-05",
-  "tier": "fable",
-  "note": "R1–R9 executed (30 parameter rows added, 9 cell edits); gate PASS; scope diff §2 only; literal replacements deferred to their chunks"
- },
- "C03": {
-  "title": "Equipment and targets",
-  "reviewed": "2026-10-05",
-  "tier": "fable",
-  "note": "P1–P3 + R1–R7 executed as the Z-sweep redesign (3 features per plate, 400–1600 mm ladder, plane registration); gate PASS with all touched sections intended; Section 9 budget table pending the plan tool"
- },
- "C04": {
-  "title": "Chamfered boundaries",
-  "reviewed": "2026-10-05",
-  "tier": "fable",
-  "note": "R1, R2, R4 and P2 executed; P1 fixed in the render pipeline; R3 code follow-up"
- },
- "C05": {
-  "title": "Setup, warm-up, registration",
-  "reviewed": "2026-10-05",
-  "tier": "fable",
-  "note": "R1–R6 executed; N1 (noise-plate field coverage rule) carried to C06"
- },
- "C06": {
-  "title": "Acquisition A, noise plate",
-  "reviewed": "2026-10-05",
-  "tier": "fable",
-  "note": "R1–R6 executed; P1 answered with the Part I definitions; P2 style decision pending (Section 5 is the sample)"
- },
- "C07": {
-  "title": "Acquisition B, edges and Z steps",
-  "reviewed": "2026-10-05",
-  "tier": "fable",
-  "note": "R1–R4 and P1 executed; Section 6 in plain-language style; code and procedure pending the planner agent"
- },
- "C08": {
-  "title": "Acquisition C, area arrays",
-  "reviewed": "2026-10-05",
-  "tier": "fable",
-  "note": "R1–R4 executed; optional lateral sweep added to 6.1; edge position transfer analysis scheduled for C12"
- },
- "C09": {
-  "title": "Acquisition D, detection trials",
-  "reviewed": "2026-10-05",
-  "tier": "fable",
-  "note": "R1 (D_5 measured, D_0 predicted) and R2–R4 executed; code and procedure pending"
- },
- "C10": {
-  "title": "Data logging, layout, budget",
-  "reviewed": "2026-10-05",
-  "tier": "fable",
-  "note": "R2–R4 executed; R1 budget refill pending the ramp code"
- },
- "C11": {
-  "title": "Analysis A, noise vs Z",
-  "reviewed": null,
-  "tier": null,
-  "note": "not yet reviewed"
- },
- "C12": {
-  "title": "Analysis B, resolution H, V, Z",
-  "reviewed": null,
-  "tier": null,
-  "note": "not yet reviewed"
- },
- "C13": {
-  "title": "Analysis C, area",
-  "reviewed": null,
-  "tier": null,
-  "note": "not yet reviewed"
- },
- "C14": {
-  "title": "Analysis D, detectability",
-  "reviewed": null,
-  "tier": null,
-  "note": "not yet reviewed"
- },
- "C15": {
-  "title": "Analysis E, boundary bias",
-  "reviewed": null,
-  "tier": null,
-  "note": "not yet reviewed"
- },
- "C16": {
-  "title": "Uncertainty, limitations, open questions",
-  "reviewed": null,
-  "tier": null,
-  "note": "not yet reviewed"
- }
+  "C01": {
+    "title": "Purpose and scope",
+    "reviewed": "2026-10-05",
+    "tier": "fable",
+    "note": "P1 + R1–R5 executed; gate PASS; scope diff §1 only; Step 4.5 side check deferred to C05"
+  },
+  "C02": {
+    "title": "Parameters and relations",
+    "reviewed": "2026-10-05",
+    "tier": "fable",
+    "note": "R1–R9 executed (30 parameter rows added, 9 cell edits); gate PASS; scope diff §2 only; literal replacements deferred to their chunks"
+  },
+  "C03": {
+    "title": "Equipment and targets",
+    "reviewed": "2026-10-05",
+    "tier": "fable",
+    "note": "P1–P3 + R1–R7 executed as the Z-sweep redesign (3 features per plate, 400–1600 mm ladder, plane registration); gate PASS with all touched sections intended; Section 9 budget table pending the plan tool"
+  },
+  "C04": {
+    "title": "Chamfered boundaries",
+    "reviewed": "2026-10-05",
+    "tier": "fable",
+    "note": "R1, R2, R4 and P2 executed; P1 fixed in the render pipeline; R3 code follow-up"
+  },
+  "C05": {
+    "title": "Setup, warm-up, registration",
+    "reviewed": "2026-10-05",
+    "tier": "fable",
+    "note": "R1–R6 executed; N1 (noise-plate field coverage rule) carried to C06"
+  },
+  "C06": {
+    "title": "Acquisition A, noise plate",
+    "reviewed": "2026-10-05",
+    "tier": "fable",
+    "note": "R1–R6 executed; P1 answered with the Part I definitions; P2 style decision pending (Section 5 is the sample)"
+  },
+  "C07": {
+    "title": "Acquisition B, edges and Z steps",
+    "reviewed": "2026-10-05",
+    "tier": "fable",
+    "note": "R1–R4 and P1 executed; Section 6 in plain-language style; code and procedure pending the planner agent"
+  },
+  "C08": {
+    "title": "Acquisition C, area arrays",
+    "reviewed": "2026-10-05",
+    "tier": "fable",
+    "note": "R1–R4 executed; optional lateral sweep added to 6.1; edge position transfer analysis scheduled for C12"
+  },
+  "C09": {
+    "title": "Acquisition D, detection trials",
+    "reviewed": "2026-10-05",
+    "tier": "fable",
+    "note": "R1 (D_5 measured, D_0 predicted) and R2–R4 executed; code and procedure pending"
+  },
+  "C10": {
+    "title": "Data logging, layout, budget",
+    "reviewed": "2026-10-05",
+    "tier": "fable",
+    "note": "R2–R4 executed; R1 budget refill pending the ramp code"
+  },
+  "C11": {
+    "title": "Analysis A, noise vs Z",
+    "reviewed": "2026-10-06",
+    "tier": "fable",
+    "note": "Section 10 executed at rev 95: σ_fp correction and registered-plane closure, plain style, drift per mount, outputs; sentinel alignment (F1) in Section 5"
+  },
+  "C12": {
+    "title": "Analysis B, resolution H, V, Z",
+    "reviewed": null,
+    "tier": null,
+    "note": "not yet reviewed"
+  },
+  "C13": {
+    "title": "Analysis C, area",
+    "reviewed": null,
+    "tier": null,
+    "note": "not yet reviewed"
+  },
+  "C14": {
+    "title": "Analysis D, detectability",
+    "reviewed": null,
+    "tier": null,
+    "note": "not yet reviewed"
+  },
+  "C15": {
+    "title": "Analysis E, boundary bias",
+    "reviewed": null,
+    "tier": null,
+    "note": "not yet reviewed"
+  },
+  "C16": {
+    "title": "Uncertainty, limitations, open questions",
+    "reviewed": null,
+    "tier": null,
+    "note": "not yet reviewed"
+  }
 }
