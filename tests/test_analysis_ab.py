@@ -1138,10 +1138,16 @@ def test_z_truth_rule_is_twice_the_robot_repeatability():
     assert not resolution_depth.rung_truth_is_reliable(TRUTH_RULE_SMALL_RUNG_MM, params)
     assert resolution_depth.rung_truth_is_reliable(TRUTH_RULE_LARGE_RUNG_MM, params)
     assert not resolution_depth.rung_truth_is_reliable(0.05, params)          # one times the repeatability no longer passes
+    # The ladder floor is its own parameter (0.1 mm); the two rules coincide at the defaults, so a rung raised to the floor is
+    # reliable, but they are not tied.
+    assert params.robot_min_resolvable_move_mm == 0.1
     assert params.robot_min_resolvable_move_mm == pytest.approx(params.truth_reliable_rung_floor_mm)
     floored = z_step_rungs_mm(params, 0.001)                  # an expected quantum so small that the floor decides
     assert floored == [pytest.approx(params.robot_min_resolvable_move_mm)]
     assert all(resolution_depth.rung_truth_is_reliable(rung, params) for rung in floored)
+    apart = replace(params, robot_repeatability_mm=LESS_REPEATABLE_ROBOT_MM)
+    assert apart.robot_min_resolvable_move_mm == 0.1 and z_step_rungs_mm(apart, 0.001) == floored
+    assert not all(resolution_depth.rung_truth_is_reliable(rung, apart) for rung in floored)
     # The factor follows the repeatability.
     worse = replace(params, robot_repeatability_mm=LESS_REPEATABLE_ROBOT_MM)
     assert worse.truth_reliable_rung_floor_mm == pytest.approx(2.0 * LESS_REPEATABLE_ROBOT_MM)

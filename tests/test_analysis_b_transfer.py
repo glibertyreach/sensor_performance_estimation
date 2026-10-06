@@ -19,7 +19,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from sensorperf.acquisition.plan import APPROACH_DIRECTION_KEY, plan_edge_series
+from sensorperf.acquisition.plan import plan_edge_series
 from sensorperf.analysis import resolution_lateral
 from sensorperf.analysis.resolution_lateral import (
     LateralOptions, PoseBins, TransferPoint, analyze_edge_transfer, approach_hysteresis, fit_edge_transfer, pose_s50,
@@ -27,7 +27,7 @@ from sensorperf.analysis.resolution_lateral import (
 )
 from sensorperf.cli import simulate as simulate_cli
 from sensorperf.geometry.targets import make_standard_target_set
-from sensorperf.io.manifest import SUBSERIES_LATERAL_SWEEP
+from sensorperf.io.manifest import APPROACH_DIRECTION_KEY, SUBSERIES_LATERAL_SWEEP
 from sensorperf.io.session import Session
 from sensorperf.parameters import CharacterizationParameters, SensorGeometry
 from sensorperf.simulate.demo_plan import demo_registration, scaled_geometry
@@ -251,24 +251,28 @@ def test_sweep_poses_are_used_only_by_the_transfer(sweep_session, sweep_result):
         assert np.allclose(fractions, fractions[0], rtol=1.0e-3) and SWEEP_ACROSS_EDGE_FRACTION_RANGE[0] < fractions[0] <= 1.0
 
 
-def test_sweep_approach_direction_follows_the_plan(sweep_session):
-    """The manifest written by the planner does not carry ``approach_direction``, so the analysis derives it from the logged
-    offset by the plan's rule; for every sweep pose the derived axis and side are the planned ``approach_direction``. A
-    manifest that does carry the metadata is read as it is."""
+def test_sweep_approach_direction_round_trips_through_the_manifest(sweep_session):
+    """The plan's ``approach_direction`` note reaches the manifest as a metadata column (empty for other poses) and the
+    analysis reads it: for every sweep pose the column equals the planned direction and the analysis returns that axis and
+    side. Only for a manifest without the column does it derive the same answer from the logged offset by the plan's rule."""
     session, plan = sweep_session
     planned = {c.pose_index: c.notes[APPROACH_DIRECTION_KEY] for c in plan if c.subseries == SUBSERIES_LATERAL_SWEEP}
     assert len(planned) == 2 * SWEEP_AXIS_POSES
     pitch = session.geometry.pixel_footprint_mm(session.params.z_reference_mm)
+    step = session.params.lateral_sweep_step_px
     checked = 0
     for record in session.records:
-        if record.subseries != SUBSERIES_LATERAL_SWEEP or record.frame_index != 0:
+        if record.subseries != SUBSERIES_LATERAL_SWEEP:
+            assert APPROACH_DIRECTION_KEY not in record.metadata          # empty cell for every other pose
             continue
-        axis, from_negative = sweep_axis_and_approach(record, pitch, session.params.lateral_sweep_step_px)
-        assert APPROACH_DIRECTION_KEY not in record.metadata
-        assert (("-" if from_negative else "+") + axis) == planned[record.pose_index]
-        told = replace(record, metadata={APPROACH_DIRECTION_KEY: "+V"})
-        assert sweep_axis_and_approach(told, pitch, session.params.lateral_sweep_step_px) == ("V", False)
-        checked += 1
+        direction = planned[record.pose_index]
+        assert record.metadata[APPROACH_DIRECTION_KEY] == direction
+        assert sweep_axis_and_approach(record, pitch, step) == (direction[1], direction[0] == "-")
+        stripped = replace(record, metadata={})                          # a manifest without the column: the fallback rule
+        assert sweep_axis_and_approach(stripped, pitch, step) == (direction[1], direction[0] == "-")
+        told = replace(record, metadata={APPROACH_DIRECTION_KEY: "+V"})  # the column wins over the offset
+        assert sweep_axis_and_approach(told, pitch, step) == ("V", False)
+        checked += record.frame_index == 0
     assert checked == 2 * SWEEP_AXIS_POSES
 
 

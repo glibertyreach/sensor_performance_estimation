@@ -157,6 +157,12 @@ drift run, sub-series ``drift_run``): the value is ``true`` (:func:`format_flag`
 has no read-back robot pose; the manifest builder copies the robot pose and the target pose from the nominal pose of the
 plan and requires the capture time and the sensor temperature in the pose log (see the module docstring)."""
 
+APPROACH_DIRECTION_KEY = "approach_direction"
+"""Plan-notes key and manifest metadata column of a pose of the optional lateral sweep (sub-series ``lateral_sweep``): the
+side the robot approached the pose from, ``-H``, ``+H``, ``-V`` or ``+V`` (``-`` = it arrived moving toward positive offsets,
+from the negative side; the letter is the swept axis). Empty on every other row. Analysis B-HV reads it for the approach
+hysteresis of the edge position transfer."""
+
 FLAG_TRUE_TEXT = "true"
 FLAG_FALSE_TEXT = "false"
 """Text of a boolean manifest metadata value."""

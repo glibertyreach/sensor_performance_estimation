@@ -34,7 +34,7 @@ the square carries the slant, so every edge is slanted against the pixel grid):
             registration, relative to the nominal pose, divided by p(Z). The regression, its sign convention and the
             periodic terms are described at :func:`fit_edge_transfer`. Where the optional lateral sweep poses exist
             (sub-series "lateral_sweep", the approach direction in the manifest metadata ``approach_direction`` or,
-            when the manifest does not carry it, derived from the sweep rule of the plan) they are used ONLY here:
+            when the manifest lacks the column, derived from the sweep rule of the plan) they are used ONLY here:
             the approach hysteresis (mean s_50 of the poses approached from the negative side minus that of the poses
             approached from the positive side) and a refit of the periodic terms on the sweep poses alone at the
             sweep's 0.1 px spacing. They are never pooled into the ESF (the sweep covers only +/- 1 px and would bias it).
@@ -56,7 +56,7 @@ from typing import Any
 
 import numpy as np
 
-from sensorperf.acquisition.plan import APPROACH_DIRECTION_KEY, LATERAL_SWEEP_APPROACH_PERIOD
+from sensorperf.acquisition.plan import LATERAL_SWEEP_APPROACH_PERIOD
 from sensorperf.analysis.common import (
     PoseGeometry, hann_smooth, new_figure, pose_geometry, reference_planes, save_figure, write_csv_rows, write_json,
 )
@@ -66,7 +66,9 @@ from sensorperf.geometry.targets import (
     SQUARE_EDGE_TOP, SQUARE_EDGES, SURFACE_NONE, Feature,
 )
 from sensorperf.io.capture_set import load_stack
-from sensorperf.io.manifest import SUBSERIES_LATERAL_SWEEP, SUBSERIES_NOMINAL, FrameRecord, group_by_pose, select
+from sensorperf.io.manifest import (
+    APPROACH_DIRECTION_KEY, SUBSERIES_LATERAL_SWEEP, SUBSERIES_NOMINAL, FrameRecord, group_by_pose, select,
+)
 from sensorperf.io.session import Session
 from sensorperf.parameters import PROCEDURE_EDGES, CharacterizationParameters
 from sensorperf.stats.intervals import bootstrap_statistic
@@ -653,9 +655,9 @@ def sweep_axis_and_approach(record: FrameRecord, pixel_footprint_mm: float,
                             sweep_step_px: float) -> tuple[str, bool | None]:
     """(axis, approached from the negative side) of a lateral-sweep pose.
 
-    The manifest metadata ``approach_direction`` ("-H", "+H", "-V" or "+V", the plan's note) is used where the manifest
-    carries it. The manifest written by the planner at present does not, so otherwise the sweep rule of the plan is applied
-    to the logged offset: the axis is the one the pose is offset along, and the k-th pose of an axis, at k x the sweep step,
+    The manifest metadata column ``approach_direction`` ("-H", "+H", "-V" or "+V", the plan's note, carried by
+    ``PlannedCapture.manifest_metadata``) is used whenever the pose has it. Only when it is absent (a manifest written
+    before the column existed) is the sweep rule of the plan applied to the logged offset: the axis is the one the pose is offset along, and the k-th pose of an axis, at k x the sweep step,
     is approached from the negative side for odd k (the 1st, 3rd, ...) and from the positive side for even k
     (``LATERAL_SWEEP_APPROACH_PERIOD``). None for the approach when the offset is not a multiple of the step."""
     direction = record.metadata.get(APPROACH_DIRECTION_KEY, "")

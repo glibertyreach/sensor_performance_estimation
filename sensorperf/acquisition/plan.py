@@ -83,7 +83,7 @@ from sensorperf.geometry.targets import (
 )
 from sensorperf.geometry.transforms import RigidTransform
 from sensorperf.io.manifest import (
-    DRIFT_RUN_POSE_INDEX_BASE, FIELD_FRACTION_ACHIEVED_KEY, FILTERS_OFF_POSE_INDEX_BASE, FIXED_STAND_KEY, LATERAL_SWEEP_POSE_INDEX_BASE, SENTINEL_MOUNT_REFERENCE_KEY,
+    APPROACH_DIRECTION_KEY, DRIFT_RUN_POSE_INDEX_BASE, FIELD_FRACTION_ACHIEVED_KEY, FILTERS_OFF_POSE_INDEX_BASE, FIXED_STAND_KEY, LATERAL_SWEEP_POSE_INDEX_BASE, SENTINEL_MOUNT_REFERENCE_KEY,
     STAIRCASE_POSE_INDEX_BASE, SUBSERIES_DRIFT_RUN, SUBSERIES_EXTENDED, SUBSERIES_FIELD, SUBSERIES_FILTERS_OFF, SUBSERIES_JITTER, SUBSERIES_LATERAL_SWEEP, SUBSERIES_LADDER, SUBSERIES_MAIN,
     SUBSERIES_NOMINAL, SUBSERIES_OPEN, SUBSERIES_RAMP, SUBSERIES_REMOUNT, SUBSERIES_SENTINEL, SUBSERIES_STAIRCASE, SUBSERIES_TILT,
     TARGET_POSE_COLUMNS, TILT_AXIS_H, TILT_AXIS_V, VISIT_A, VISIT_B, format_file_name, format_flag, pose_to_six,
@@ -262,7 +262,8 @@ class PlannedCapture:
         fraction of the requested field offset, for a pose placed at a field position, and the mount-reference flag of a
         drift sentinel (``sentinel_mount_reference``: true for the first sentinel after its target was mounted, false for
         a later one), and the fixed-stand flag (``fixed_stand``: true for a capture of the optional drift run, whose plate
-        stands still on a fixed stand, see ``io.manifest``). Any other pose has none of them, so the cell stays empty."""
+        stands still on a fixed stand, see ``io.manifest``), and the approach direction of a lateral-sweep pose
+        (``approach_direction``: "-H", "+H", "-V" or "+V"). Any other pose has none of them, so the cell stays empty."""
         metadata: dict[str, str] = {}
         fraction = self.notes.get(FIELD_FRACTION_ACHIEVED_KEY)
         if fraction is not None:
@@ -272,6 +273,9 @@ class PlannedCapture:
             metadata[SENTINEL_MOUNT_REFERENCE_KEY] = format_flag(bool(reference))
         if self.notes.get(FIXED_STAND_KEY):
             metadata[FIXED_STAND_KEY] = format_flag(True)
+        direction = self.notes.get(APPROACH_DIRECTION_KEY)
+        if direction:
+            metadata[APPROACH_DIRECTION_KEY] = str(direction)
         return metadata
 
 
@@ -794,8 +798,6 @@ LATERAL_SWEEP_AXES = ("H", "V")
 LATERAL_SWEEP_APPROACH_PERIOD = 2
 """The approach direction of the lateral sweep alternates with this period: the 1st, 3rd, ... pose of an axis from the
 negative side, the 2nd, 4th, ... from the positive side."""
-APPROACH_DIRECTION_KEY = "approach_direction"
-"""``notes`` key of a lateral-sweep pose: the side the robot approaches the pose from, "-H", "+H", "-V" or "+V"."""
 
 
 def _plan_lateral_sweep(counter: _PoseCounter, params: CharacterizationParameters, geometry: SensorGeometry,

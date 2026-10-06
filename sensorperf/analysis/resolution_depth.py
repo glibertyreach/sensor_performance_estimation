@@ -17,9 +17,9 @@ Steps (per station Z0)
      commanded ``step_mm`` is only the label of the rung; it is never the truth.
   2  Regression of the mean Delta on the true step over the ladder: slope (gain), intercept, largest deviation. Rungs
      whose true step is below TWICE the robot repeatability (``params.truth_reliable_rung_floor_mm`` =
-     ``TRUTH_RELIABLE_RUNG_TO_REPEATABILITY_RATIO`` x ``robot_repeatability_mm``, Section 11.2, Step 10; the same ratio
-     gives the floor the ladder itself applies, Section 6.2, Step 2, so a rung the ladder raised to its floor is just
-     reliable) get ``truth_reliable`` = False: the step truth is then too close to the robot's own scatter. They are
+     ``TRUTH_RELIABLE_RUNG_TO_REPEATABILITY_RATIO`` x ``robot_repeatability_mm``, Section 11.2, Step 10; a rule of its
+     own, separate from the ladder floor ``robot_min_resolvable_move_mm`` of Section 6.2, Step 2, with which it coincides at
+     the defaults, 0.1 mm) get ``truth_reliable`` = False: the step truth is then too close to the robot's own scatter. They are
      excluded from this regression, kept in the detection curve of Step 4, and the note says how many rungs were flagged. The registration enters only through the DIFFERENCE of two registered
      poses: its translation cancels and a rotation error acts through the cosine of the angle error (negligible), so
      the step truth is as good as the robot's relative motion accuracy.
@@ -554,8 +554,9 @@ def _fit_curve(levels: np.ndarray, detections: np.ndarray, trials: np.ndarray, g
 
 def rung_truth_is_reliable(true_step_mm: float, params: CharacterizationParameters) -> bool:
     """The truth rule of Section 11.2, Step 10: the step truth of a rung is reliable when its true step is at least
-    ``params.truth_reliable_rung_floor_mm``, twice the robot repeatability (``TRUTH_RELIABLE_RUNG_TO_REPEATABILITY_RATIO``),
-    the floor the ladder itself applies (Section 6.2, Step 2). A true step that equals the limit up to rounding of the
+    ``params.truth_reliable_rung_floor_mm``, twice the robot repeatability (``TRUTH_RELIABLE_RUNG_TO_REPEATABILITY_RATIO``).
+    The rule is separate from the ladder floor ``robot_min_resolvable_move_mm`` (Section 6.2, Step 2), which gives the same
+    0.1 mm at the defaults. A true step that equals the limit up to rounding of the
     registration product (``TRUTH_COMPARISON_TOLERANCE_MM``) reaches it."""
     return bool(true_step_mm >= params.truth_reliable_rung_floor_mm - TRUTH_COMPARISON_TOLERANCE_MM)
 

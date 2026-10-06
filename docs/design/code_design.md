@@ -577,10 +577,10 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
   `previous["A"].main_rows()`); without A the term is skipped with a note. The lateral sweep: for each edge the sweep poses along the
   axis that moves it (H sweep for left and right edges) give the approach hysteresis, the mean s_50 approached from the negative
   side minus that from the positive side (sign of s: positive toward the front side), and a refit of the periodic terms on the sweep
-  poses alone with the approach as a nuisance regressor. The manifest written by the planner does not carry the plan's
-  `approach_direction` note (`PlannedCapture.manifest_metadata` emits only the field fraction, the mount reference and the fixed-stand
-  flag), so `sweep_axis_and_approach` reads it when a manifest has it and otherwise derives it from the logged offset by the plan's
-  rule (k-th pose of an axis at k x `lateral_sweep_step_px`, odd k from the negative side). Summary columns `lateral_gain`,
+  poses alone with the approach as a nuisance regressor. The plan's `approach_direction` note is carried into the manifest
+  as a metadata column (`io.manifest.APPROACH_DIRECTION_KEY`, via `PlannedCapture.manifest_metadata`, like `field_fraction_achieved`;
+  empty for other poses); `sweep_axis_and_approach` reads the column and only for a manifest without it derives the direction from
+  the logged offset by the plan's rule (k-th pose of an axis at k x `lateral_sweep_step_px`, odd k from the negative side). Summary columns `lateral_gain`,
   `lateral_gain_se`, `pixel_lock_amplitude_px`, `dot_pitch_amplitude_px`, `dot_pitch_px`, `transfer_poses`, `hysteresis_px`,
   `sweep_pixel_lock_amplitude_px`, `sweep_dot_pitch_amplitude_px` (NaN where not available); the details JSON keeps every pose's point,
   both fits (with the intercept) and the skipped counts; the figure `B_transfer` (PNG and SVG) has, per station, the sensed edge
@@ -593,9 +593,9 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
   of `robot_repeatability_mm` to its true step (`rung_robot_ratio`, `robot_repeatability_ratio` in `Z_resolution_rungs.csv`; the
   ratio of the smallest rung is in the summary). The truth rule (Section 11.2, Step 10) is that a rung smaller than TWICE the robot
   repeatability is flagged `truth_reliable` = False (`rung_truth_is_reliable`, `CharacterizationParameters.truth_reliable_rung_floor_mm`
-  = `TRUTH_RELIABLE_RUNG_TO_REPEATABILITY_RATIO` (2) x `robot_repeatability_mm`); the same ratio gives the default of the ladder
-  floor `robot_min_resolvable_move_mm` (2 x 0.05 = 0.1 mm), so the two cannot diverge at the defaults and a rung the ladder raised to
-  its floor is just reliable. New Step 5, the ramp (`_analyze_ramp`, `RampResult`): per ramp pose, the
+  = `TRUTH_RELIABLE_RUNG_TO_REPEATABILITY_RATIO` (2) x `robot_repeatability_mm`); this is a rule of its own, separate from the ladder floor
+  `robot_min_resolvable_move_mm` (an independent parameter, 0.1 mm: the smallest Z move the robot can resolve), with which it
+  coincides at the defaults (2 x 0.05 = 0.1 mm), so at the indicative values no rung is flagged. New Step 5, the ramp (`_analyze_ramp`, `RampResult`): per ramp pose, the
   fixed-pattern map of A at the station is subtracted from the frame-mean depth (A now keeps the map, the frame-mean depth minus
   its fitted plane, as `PoseDiagnostics.fixed_pattern_mm` for the center-field main poses; with no A result or a map that is NaN
   over the region of interest nothing is subtracted and the note says so), the depth is averaged along each image row within the
