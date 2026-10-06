@@ -151,6 +151,11 @@ def group_list_items(items):
     keeps counting."""
     html = ""; stack = []  # each entry: [kind, level, item_open]
     for li in items:
+        if li.startswith('<p class="cont">'):
+            # continuation paragraph: stays inside the item that is open (or follows the list as a
+            # plain paragraph when no item is open)
+            html += li
+            continue
         m = re.match(r'<li data-kind="(\w+)" data-level="(\d+)" data-num="([^"]*)">', li)
         kind, level, num_id = m.group(1), int(m.group(2)), m.group(3)
         text = li[m.end():-len("</li>")]
@@ -208,6 +213,11 @@ def para_html(p):
     if L == 3: return f'<h3>{esc(t)}</h3>'
     if cap:    return f'<figcaption class="orphan">{esc(t)}</figcaption>'
     if "List" in st:
+        # A list-styled paragraph without numbering is a continuation paragraph of the previous
+        # item (the Docs export writes a second paragraph of one item this way); it is rendered
+        # inside the open item, not as a new numbered item.
+        if p._p.find(".//" + qn("w:numPr")) is None:
+            return f'<p class="cont">{esc(t)}</p>'
         kind, level, num_id = list_numbering(p)
         return f'<li data-kind="{kind}" data-level="{level}" data-num="{num_id}">{esc(t)}</li>'
     return f'<p>{esc(t)}</p>'
@@ -241,7 +251,7 @@ for child in d.element.body.iterchildren():
 # group consecutive <li> markers into nested <ol>/<ul>
 body = ""; buf = []
 for h in parts:
-    if h.startswith("<li "): buf.append(h)
+    if h.startswith("<li ") or (h.startswith('<p class="cont">') and buf): buf.append(h)
     else:
         if buf: body += group_list_items(buf); buf = []
         if h.startswith("<h"): CONTINUED_COUNTS.clear()
@@ -259,6 +269,7 @@ p {{ text-align:justify; margin:0 0 11pt; }}
 ul, ol {{ margin:0 0 11pt 0; padding-left:20pt; }} li > ol, li > ul {{ margin:6pt 0 0 0; }} li {{ margin:0 0 6pt; text-align:justify; }}
 figure {{ margin:14pt 0; text-align:center; page-break-inside:avoid; }}
 figure img {{ max-width:100%; max-height:340pt; border:.5pt solid #ccc; }}
+p.cont {{ margin:6pt 0 0 0; }}
 p.formula {{ text-align:center; margin:4pt 0 11pt; }} p.formula img {{ max-width:100%; }}
 figcaption {{ font-size:9pt; color:#555; font-style:italic; text-align:justify; margin-top:5pt; }}
 .tbl {{ border-collapse:collapse; width:100%; font-family:Arial,sans-serif; font-size:8.5pt; margin:8pt 0 12pt; }}
