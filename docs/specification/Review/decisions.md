@@ -704,3 +704,31 @@ reported beside A_geo, and says that brightness follows from the light's propert
 surface geometry (cosine over squared distance, times reflectance), which the procedure records but does not
 characterize. Code (boundary intervals, A_geo_2D) delegated after the Analysis D agent lands.
 
+## C16 — Section 15 Uncertainty budget, limitations, open questions (opened 2026-10-06)
+Reviewer findings (proposals; nothing executed until Neil closes the chunk):
+- C16-R1 (table, stale rows after C06–C15): "Thermal drift: unknown until the sentinels run; warm-up gate, sentinels,
+  ABAB ordering" should name the sentinels on the mounted target, the per-mount drift rate and attribution, and the
+  optional drift run of Section 4, Step 3. "Robot repeatability" should add that the ramp replaces the small Z
+  moves (no dependence on resolving them), the 0.1 mm ladder floor (ROBOT_MIN_RESOLVABLE_MOVE_MM) and the truth
+  rule of twice the repeatability. "Plane-registration depth offset: about 0.1 mm (rough estimate ...)" should say
+  the registration now reports the standard error of the camera depth offset directly (about 0.08 mm at ±20° with
+  30 poses at the indicative noise), which replaces the estimate.
+- C16-R2 (table, missing rows): field coverage (off-axis targets pulled inward at the near stations, achieved
+  fraction logged; affects the field comparisons of A and C); tilt sub-series only at 800 and 1600 mm with the
+  400 mm plate (affects the incidence-angle result); quantizer dithering (where the frames dither the quantizer the
+  ramp quantum comes from the depth-level spacing, Section 11, Step 15; affects δZ_q and q); 2-D image not
+  characterized (its visible area is computed, its brightness is not).
+- C16-R3 (Limitations paragraph): the B-Z sentence should read "set by the robot's repeatability through the rung
+  floor and the truth rule, reported as a bound"; add the dithering limitation and the 2-D image sentence; the
+  field-coverage limitation; say that the drift attribution to sensor or robot needs the optional drift run.
+- C16-R4 (Open questions): add the 2-D sensor position (CAMERA_2D_OFFSET_MM) to the dagger list; add "does the
+  sensor dither its disparity quantizer (answered by the ramp)", "is 0.1 mm the robot's resolvable Z move (checked
+  by the optional staircase)", and "is the sensor's thermal drift a reproducible function of its temperature
+  (answered by the drift run against the sentinels)".
+- C16-R5 (plain style): REGISTRATION_POSES (30 poses), REGISTRATION_TILT_RANGE_DEG (±20°), and the Step references
+  stay as they are; values in words where names appear.
+- C16-R6 (end-of-review item, agreed at C07): the style pass of Sections 1, 3 and 4 (closed before the plain-language
+  rule) runs after C16 closes, declared as intended, with the gate; the figure index/table check (gate check 4) stays
+  "index absent" because the document has no figure index, which is acceptable for a three-figure document.
+Neil's comments: (pending)
+
