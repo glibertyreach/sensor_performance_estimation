@@ -84,6 +84,15 @@ TRUTH_RELIABLE_RUNG_TO_REPEATABILITY_RATIO = 2.0
 the defaults (2 x 0.05 mm = 0.1 mm), so at the indicative values no rung is flagged, but they are not tied: the rule
 follows the repeatability, the ladder floor does not."""
 
+EXPECTED_D0_PX_DEFAULT = 7.0
+"""Default of ``CharacterizationParameters.expected_d0_px``: the expected minimum detectable diameter D_0, pixels (about 40
+pixels of area; Section 3.2). A module constant so that ``AREA_BIAS_FIT_D0_FACTOR`` can tie the default of the area
+edge-bias fit threshold to it."""
+AREA_BIAS_FIT_D0_FACTOR = 2.0
+"""The edge-bias fit of Analysis C (Section 12, Step 10) uses a feature only where its diameter is at least this many
+times the expected minimum detectable diameter ``EXPECTED_D0_PX_DEFAULT``, so that the bias does not depend on the diameter
+(``CharacterizationParameters.area_bias_fit_min_d_px``)."""
+
 # Numerical guards.
 MIN_POSITIVE_DEPTH_MM = 1.0e-6
 """A depth smaller than this is treated as zero in the relations below."""
@@ -380,6 +389,12 @@ class CharacterizationParameters:
     reference-plane exclusion in B and C, and the edge margin of the capture planner's field-of-view fit
     (``acquisition.plan``: a target must lie this many pixels inside the image, so the margin used to pull an
     off-axis pose inward is the same band the analysis shrinks the region of interest by)."""
+    area_bias_fit_min_d_px: float = AREA_BIAS_FIT_D0_FACTOR * EXPECTED_D0_PX_DEFAULT
+    """Smallest feature diameter, pixels at the station, that enters the fit of the area edge bias b against Z (C, Section 12,
+    Step 10): the fit uses the largest feature at the stations where its D_px is at least this, so that b does not depend on
+    D. The default is twice (AREA_BIAS_FIT_D0_FACTOR) the 7 px expected minimum detectable diameter (``expected_d0_px``), a
+    feature well above the size at which the sensor starts to lose it. The two are tied only through their defaults: if you
+    override ``expected_d0_px`` in the parameters JSON, override this one with it."""
     boundary_bin_width_px: float = 0.25
     """Signed-distance bin width (B, E): four bins per pixel."""
     surface_assignment_sigma_multiple: float = 3.0
@@ -453,7 +468,7 @@ class CharacterizationParameters:
     band BOUNDARY_BAND_HALF_WIDTH_PX, so that the analysis band of an outer cutout edge lies on front material at the
     far station). The plate (sites plus margin) must fit the field of view at Z_MIN with the phase-jitter span and
     the boundary band on every side; make_standard_target_set raises an error when it does not."""
-    expected_d0_px: float = 7.0
+    expected_d0_px: float = EXPECTED_D0_PX_DEFAULT
     """Expected minimum detectable size D_0 in pixels, from the detectability model of Section 3.2 (about 40 pixels of
     area, a diameter of 7 px), used before fabrication to size the disk support posts. Not a measured value: Analysis D
     replaces it with the predicted D_0."""
