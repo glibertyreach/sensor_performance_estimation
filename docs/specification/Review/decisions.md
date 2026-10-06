@@ -580,3 +580,35 @@ ramp item gains "or from the depth levels where the noise dithers them away". Th
 the two cross-references were updated. Code (resolution_lateral, resolution_depth) delegated; technician
 procedure Section 14 follows.
 
+## C13 — Section 12 Analysis C, true vs sensed area (opened 2026-10-06)
+Reviewer findings (proposals; nothing executed until Neil closes the chunk):
+- C13-R1 (Step 9, scaling test): "agreement within the bootstrap interval" does not say what is tested. The code
+  computes, for each pair of neighboring features and each ratio, the mean difference of the two transfer curves
+  over the shared D_px range and whether zero lies inside its bootstrap interval, one row per (kind, gap, ratio) in
+  C_overlap_test.csv. Proposal: state that test and that file.
+- C13-R2 (Step 7, projector light): "it is not known whether the VSX3000 needs projector light on a point to read
+  it" conflicts with the detection model behind the 7 px expected minimum (active stereo matches the projected
+  pattern; a point without projector light has no texture to match). Proposal: say the three-center version is
+  the expected one for that reason and the two-camera version is the check, and report which tracks the data.
+- C13-R3 (Step 11, method): the code cannot do "blur with the H and V line spread functions" as written, because
+  Section 11 hands over rise distances, not the LSF; it uses a Gaussian whose 10–90% rise equals the rise
+  distance, and makes the prediction twice (pure blur-and-threshold, and with the edge offset s_50 applied as a
+  growth of the front material, because a symmetric blur cannot shift the 0.5 crossing). Also the sign relation is
+  not stated: b_disk ≈ −s_50 and b_cutout ≈ +s_50. Proposal: require Section 11's outputs to include the LSF
+  (Step 16) and Step 11 here to use it, with the Gaussian of equal rise as the fallback; state the two predictions
+  and the sign relation. Code follows (resolution_lateral writes the LSF; area reads it).
+- C13-R4 (Step 10, fit rule): "the largest feature, well above D_50" needs the rule the code applies: the largest
+  feature at the stations where its D_px is at least a named threshold (AreaOptions.bias_fit_min_d_px, not in
+  Section 2). Proposal: name it AREA_BIAS_FIT_MIN_D_PX in Section 2 with its value and use it here.
+- C13-R5 (plain style): Step 1 "8 px band"; Step 3 the 0.5 threshold named (FRONT_READ_HEIGHT_THRESHOLD); Step 4
+  "grown by one pixel" (a code constant, fine as words); Step 5 the h = 0.5 contour (ESF_HALF_HEIGHT); Step 8 the
+  phase spread over the 30 jitter poses (PHASE_JITTER_POSES_AREA) and the temporal spread over the 10 frames
+  (FRAMES_PER_AREA_POSE); Step 1 add that a feature whose window leaves the image is skipped and counted.
+- C13-R6 (Step 12, low): the field comparison carries the achieved field fraction of each pose (Section 7) as a
+  factor; the open-background comparison is at the reference station only.
+- C13-R7 (Step 13, outputs): list as Section 11 does: C_area_summary.csv (one row per feature, station, gap,
+  field position and sub-series), C_overlap_test.csv, C_area_details.json; figures: transfer curves with the
+  overlap ranges shaded, b against Z, phase spread against D_px, predicted against measured area. No term of C
+  enters forward_model_parameters.json; b is a cross-check of the boundary widths of Section 14.
+Neil's comments: (pending)
+
