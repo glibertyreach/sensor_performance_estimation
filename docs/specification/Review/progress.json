@@ -3,7 +3,7 @@
     "title": "Purpose and scope",
     "reviewed": "2026-10-05",
     "tier": "fable",
-    "note": "P1 + R1–R5 executed; gate PASS; scope diff §1 only; Step 4.5 side check deferred to C05"
+    "note": "P1 + R1–R5 executed; gate PASS; scope diff §1 only; Step 4.5 side check deferred to C05 | closing style pass 2026-10-06 (rev 113)"
   },
   "C02": {
     "title": "Parameters and relations",
@@ -15,19 +15,19 @@
     "title": "Equipment and targets",
     "reviewed": "2026-10-05",
     "tier": "fable",
-    "note": "P1–P3 + R1–R7 executed as the Z-sweep redesign (3 features per plate, 400–1600 mm ladder, plane registration); gate PASS with all touched sections intended; Section 9 budget table pending the plan tool"
+    "note": "P1–P3 + R1–R7 executed as the Z-sweep redesign (3 features per plate, 400–1600 mm ladder, plane registration); gate PASS with all touched sections intended; Section 9 budget table pending the plan tool | closing style pass 2026-10-06 (rev 113)"
   },
   "C04": {
     "title": "Chamfered boundaries",
     "reviewed": "2026-10-05",
     "tier": "fable",
-    "note": "R1, R2, R4 and P2 executed; P1 fixed in the render pipeline; R3 code follow-up"
+    "note": "R1, R2, R4 and P2 executed; P1 fixed in the render pipeline; R3 code follow-up | closing style pass 2026-10-06 (rev 113)"
   },
   "C05": {
     "title": "Setup, warm-up, registration",
     "reviewed": "2026-10-05",
     "tier": "fable",
-    "note": "R1–R6 executed; N1 (noise-plate field coverage rule) carried to C06"
+    "note": "R1–R6 executed; N1 (noise-plate field coverage rule) carried to C06 | closing style pass 2026-10-06 (rev 113)"
   },
   "C06": {
     "title": "Acquisition A, noise plate",

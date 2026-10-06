@@ -743,3 +743,19 @@ coverage, tilt sub-series range, quantizer dithering, 2-D image); R3 the Limitat
 open questions gain the 2-D sensor position and three questions the procedure answers; R5 values in words beside
 the two registration names. R6 (the style pass of Sections 1, 3, 4) follows as the closing step of the review.
 
+## Closing style pass — Sections 1, 3 and 4 (2026-10-06)
+Agreed at C07 (C06-P2 decision): the plain-language rule applied to the chunks closed before it. Section 1 carries
+no parameter names and needed no change. Executed (document rev 113; gate PASS, scope ['3', '4']): in Section 3 the
+feature ladder, blank and control sites, datum and plate extents, the land limit, the chamfer rule paragraph and the
+disk support posts; in Section 4 Steps 1, 3, 4, 5.1, 5.2, 6, 7 and 8. Every value is now in words with the parameter
+name once in parentheses; the near and far limits are written as 400 and 1600 mm; Step 5.1 also lists the 2-D
+sensor position among the datasheet values; Step 7 quotes the registration's reported standard error (about 0.08 mm)
+in place of the earlier rough estimate. No substantive change was made in this pass.
+
+## Review complete (2026-10-06)
+All 16 chunks reviewed at the fable tier and executed; no rechecks outstanding. The gate passed after every rebuild.
+Final document revision 113; export archived as VSX3000_characterization_specification_20261006_*.docx (the latest
+file in archive/). Code: 236 tests pass at the closing commit; the technician procedure is at baseline 2026-10-06_05.
+Open code follow-ups logged above: F2 (record the approach direction for every pose), F6 (count an optional set's
+sentinels with that set), and the mount-check mode of check_captures (Step 4.8 tolerances).
+
