@@ -351,6 +351,13 @@ class CharacterizationParameters:
     # Detection (D, also used in B-Z)
     detection_false_alarm_target: float = 0.01
     """Target false-alarm rate per window; sets the threshold tau from the blank-site distribution."""
+    detection_min_blank_windows: int = 300
+    """The fewest blank windows that set the threshold tau at a station: three per false alarm at the 1 percent target
+    (detection_false_alarm_target), so that the 99 percent quantile of the blank windows rests on about three windows
+    above it, not on the single largest value. Where a station has fewer blank windows than this (a main station has
+    detection_trials_per_level trials per blank site), the window statistic is divided by sigma_tot(Z) and the nearest
+    neighboring stations are pooled until the count is reached (Section 13, Threshold); the extended stations reach it
+    on their own."""
     detection_min_connected_px: int = 2
     """Minimum connected region counted as a detection."""
     detection_window_margin_px: float = 3.0
