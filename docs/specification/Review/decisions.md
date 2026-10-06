@@ -670,3 +670,26 @@ R7 Section 12, Step 10 now cites Section 3.2, and the intro names the Section 3.
 (detection: τ pooling, best-shape minimums, prior comparison) delegated after the Analysis C agent lands, to avoid
 concurrent edits of the parameters module.
 
+## C15 — Section 14 Analysis E, boundary detection bias (opened 2026-10-06)
+Reviewer findings (proposals; nothing executed until Neil closes the chunk):
+- C15-R1 (Step 1, consistency with Section 12, Step 7 as revised): say that V is computed with the as-built
+  projector position, that the depth-read rule (both IR cameras and the projector) is the primary one and the
+  two-camera rule the check, and that the two coincide for a convex outline when the projector is midway.
+- C15-R2 (Step 4, definitions): the rates are given by the formula block, but the widths are not defined;
+  the code takes W_fab as the sum over bins of (reads at V = 0 in the bin / pixels in the bin) × bin width, an
+  equivalent width, and W_drop likewise with no-reads at V = 1. State both so a reader can compute them.
+- C15-R3 (Step 5, sign relation): the cross-check with s_50 and b has no stated relation; with the conventions of
+  Sections 11 and 12, foreground fattening means π_near > 0, s_50 < 0, b > 0 for disks and b < 0 for cutouts.
+  State it.
+- C15-R4 (Step 7, intervals): the code bootstraps intervals for β_read and π_near only. Proposal: intervals for
+  the two widths as well, from the same resamples (code change), and say the four quantities get intervals with
+  2000 resamples.
+- C15-R5 (Step 8, outputs and forward model): list E_boundary_bias.csv (one row per breakdown of Step 7 and per
+  visibility rule) and E_boundary_details.json; figures (PNG and SVG); and the forward-model terms as the code
+  writes them: W_fab, W_drop, π_near and β_read (the text omits β_read).
+- C15-R6 (plain style): Steps 1, 2, 3 carry names without values: 8 px band, the 3 × σ_tot(Z)
+  surface-assignment window (SURFACE_ASSIGNMENT_SIGMA_MULTIPLE), 0.25 px bins.
+- C15-R7 (Step 6, low): say that the feature-scale classification uses the D trials (one frame per pose) and the
+  C frames, so the fill-in fraction near D_50 has the same trial counts as Section 13.
+Neil's comments: (pending)
+
