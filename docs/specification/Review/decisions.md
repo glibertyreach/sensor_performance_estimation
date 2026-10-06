@@ -579,6 +579,11 @@ depth-level fallback; R4 plain style in Steps 1, 4, 7, 10, 11, 13; R5 new Step 1
 ramp item gains "or from the depth levels where the noise dithers them away". The 11.2 list now starts at 11 and
 the two cross-references were updated. Code (resolution_lateral, resolution_depth) delegated; technician
 procedure Section 14 follows.
+C12 addendum (rev 104, gate PASS, scope ['11']): the code pass showed that s is measured from each pose's own true
+edge, so an ideal sensor gives a constant s_50 and the lateral gain is 1 plus the regression slope, in a joint fit
+with the periodic terms; Step 9 now says so. Step 11's parenthetical now says the 2 × repeatability rule equals the
+0.1 mm ladder floor at the indicative values (ROBOT_MIN_RESOLVABLE_MOVE_MM stays Neil's independent figure). Code
+landed in commit 8f7bfc4 (199 tests); approach_direction becomes a manifest column in a follow-up.
 
 ## C13 — Section 12 Analysis C, true vs sensed area (opened 2026-10-06)
 Reviewer findings (proposals; nothing executed until Neil closes the chunk):
