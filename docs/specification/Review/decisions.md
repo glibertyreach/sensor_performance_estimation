@@ -568,5 +568,15 @@ Reviewer findings (proposals; nothing executed until Neil closes the chunk):
   preference index rather than "uses it as" that index.
 - C12-R7 (low, Step 5): "once aligned" leaves the alignment undefined; the code aligns the two ESFs by their s_50
   and reports the residual as an equivalent shift. Say so.
-Neil's comments: (pending)
+Neil's comments (2026-10-06): R1 to R7 approved. Closed.
+Executed (document rev 102; gate PASS, scope ['11', '2', '6']): R1 new Step 9 "Edge position transfer" (gain,
+pixel-locking and dot-pitch periodic terms, hysteresis from the optional sweep); R2 Step 11 (was 10) flags rungs
+below twice the repeatability and points to the gain regression of Step 12; R3 Step 15 (was 14) states the
+dithering condition, the stepped-or-smooth rule with RAMP_MAX_INTERMEDIATE_FRACTION = 0.5 and
+RAMP_INTERMEDIATE_BAND = 0.25 to 0.75 of a quantum (two Section 2 rows, marked chosen by argument), and the
+depth-level fallback; R4 plain style in Steps 1, 4, 7, 10, 11, 13; R5 new Step 16 Outputs; R6 sign of s_50 and
+"beside the near/far index"; R7 ESF alignment at the half-height crossings with the equivalent shift. Section 6.2's
+ramp item gains "or from the depth levels where the noise dithers them away". The 11.2 list now starts at 11 and
+the two cross-references were updated. Code (resolution_lateral, resolution_depth) delegated; technician
+procedure Section 14 follows.
 

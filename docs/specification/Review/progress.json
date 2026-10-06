@@ -67,9 +67,9 @@
   },
   "C12": {
     "title": "Analysis B, resolution H, V, Z",
-    "reviewed": null,
-    "tier": null,
-    "note": "not yet reviewed"
+    "reviewed": "2026-10-06",
+    "tier": "fable",
+    "note": "Section 11 executed at rev 102: edge position transfer step, 2x repeatability rule, ramp dithering rule and fallback, plain style, outputs step"
   },
   "C13": {
     "title": "Analysis C, area",
