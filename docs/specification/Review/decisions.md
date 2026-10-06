@@ -533,3 +533,40 @@ drift_run, outside the budget); Section 2 gains the two rows; Section 9 lists th
 excluded from the budget; Section 10, Step 11 compares each mount's sentinel drift with the drift predicted from
 the run's temperature relation. The two values (480 min, 2 min) are reviewer choices open to change. Code and
 technician procedure follow (noise analysis agent, then the procedure's Section 3/4).
+
+## C12 — Section 11 Analysis B, resolution in H, V, Z (opened 2026-10-06)
+Reviewer findings (proposals; nothing executed until Neil closes the chunk):
+- C12-R1 (Neil's C07 question; placement agreed at C08): add an "Edge position transfer" step to 11.1 after Step 8:
+  for every jitter pose of an edge, the pose's own edge crossing s_50(pose) against its read-back lateral offset
+  carried through the registration; regress to get the lateral gain (slope, expected 1), then fit the residual
+  with a 1 px periodic term (pixel locking) and a term at the projector dot pitch taken from the Section 10
+  correlation length; report both amplitudes and the gain per Z and orientation. Where the optional lateral sweep
+  of Section 6.1, Step 6 was run, add the approach hysteresis (mean difference of s_50 between the poses approached
+  from the negative and the positive side) and the periodic bias at 0.1 px resolution. No new capture; code
+  (resolution_lateral) and the technician procedure's Section 14 follow.
+- C12-R2 (stale reference and rule, Step 10): "left out of the gain regression of Step 2" should read Step 11; and
+  the truth rule "rungs smaller than ROBOT_REPEATABILITY_MM are flagged" is now never triggered, because the ladder
+  floor is 0.1 mm = 2 × 0.05 mm by the C07 decision. Proposal: flag rungs smaller than twice the robot
+  repeatability (the floor rule, so the truth ratio never exceeds 50%), which keeps the rule meaningful for a
+  different robot.
+- C12-R3 (serious, Step 14, from the ramp code): the row average shows plateaus only when the disparity noise is well
+  below the quantum; at the indicative noise (about 0.6 q) the frames dither the quantizer and the time-averaged row
+  curve is smooth at 400 and 800 mm, with plateaus resolved only at 1600 mm. The code classifies each curve as
+  stepped or smooth (RAMP_MAX_INTERMEDIATE_FRACTION, RAMP_INTERMEDIATE_BAND) and, when the average is smooth, takes
+  the quantum from the spacing of the populated depth levels of the pooled readings (Section 10, Step 8's method on
+  the ramp data), reporting which method gave it. Proposal: state this in Step 14, with the names, so that a smooth
+  ramp curve is read as a finding (dithering) rather than a failure, and the quantum still comes out.
+- C12-R4 (plain style): Steps 1, 4, 7, 9, 10, 12, 13 carry names without values or values without names: 8 px band,
+  0.25 px bins, 15 and 60 mm gaps, 0.1 in h (ESF_LINEARITY_TOLERANCE_H, unnamed in the text), 2000 resamples,
+  0.05 mm repeatability, 1% false-alarm target, patch sizes 1, 5 × 5 and 20 × 20 px (ZSTEP_PATCH_SIZES_PX, unnamed).
+- C12-R5 (outputs): Section 11 has no Outputs step while Sections 10 and 13 have one. Proposal: add Step 15 listing
+  B_resolution_summary.csv (one row per edge, Z, orientation, polarity, gap), the Z-step summary and rungs CSVs,
+  Z_ramp_rows.csv, the figures (ESF curves, LSF and MTF, rise vs Z, s_50 vs Z, Z-step detection curves, ramp,
+  quantum vs Z), and the forward-model terms (rise H, rise V, s_50) that go to forward_model_parameters.json.
+- C12-R6 (sign convention, Step 8): say what the sign of s_50 means (negative: the measured edge lies on the
+  back-surface side, that is the front surface is fattened), and that Section 14 reports s_50 beside the near/far
+  preference index rather than "uses it as" that index.
+- C12-R7 (low, Step 5): "once aligned" leaves the alignment undefined; the code aligns the two ESFs by their s_50
+  and reports the residual as an equivalent shift. Say so.
+Neil's comments: (pending)
+
