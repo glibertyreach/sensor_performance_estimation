@@ -730,17 +730,23 @@ class StereoGeometry:
     camera: PinholeCamera
     right_center_mm: tuple[float, float, float]
     projector_center_mm: tuple[float, float, float]
+    camera_2d_center_mm: tuple[float, float, float] | None = None
+    """Center of the 2-D image sensor and its collocated illumination (CAMERA_2D_OFFSET_MM), or None when the sensor
+    configuration does not give it."""
 
     @classmethod
     def from_sensor_geometry(cls, geometry: SensorGeometry) -> "StereoGeometry":
         """Left camera from the intrinsics; right camera at (+B, 0, 0); projector at
-        PROJECTOR_OFFSET_MM. Raises MissingSensorValue for unfilled † values."""
+        PROJECTOR_OFFSET_MM; the 2-D sensor at CAMERA_2D_OFFSET_MM when the configuration has it (it is optional).
+        Raises MissingSensorValue for the unfilled † values the depth sense needs."""
         camera = PinholeCamera(int(geometry.require("image_width_px")), int(geometry.require("image_height_px")),
                                float(geometry.require("sensor_fx_px")), float(geometry.require("sensor_fy_px")),
                                float(geometry.require("sensor_cx_px")), float(geometry.require("sensor_cy_px")))
         baseline = float(geometry.require("sensor_baseline_mm"))
         projector = tuple(float(v) for v in geometry.require("projector_offset_mm"))
-        return cls(camera, (baseline, 0.0, 0.0), projector)  # type: ignore[arg-type]
+        offset_2d = geometry.camera_2d_offset_mm
+        camera_2d = None if offset_2d is None else tuple(float(v) for v in offset_2d)
+        return cls(camera, (baseline, 0.0, 0.0), projector, camera_2d)  # type: ignore[arg-type]
 
     def viewpoints(self, require_projector: bool) -> list[np.ndarray]:
         """Left camera, right camera and (optionally) projector centers, camera frame."""
@@ -748,6 +754,13 @@ class StereoGeometry:
         if require_projector:
             points.append(np.asarray(self.projector_center_mm, dtype=np.float64))
         return points
+
+    def viewpoints_2d(self) -> list[np.ndarray]:
+        """The single viewpoint of the 2-D image (Section 12, Step 7): the 2-D sensor, whose illumination is collocated,
+        so that a point is seen and lit along the same ray. Empty when the 2-D position is not known."""
+        if self.camera_2d_center_mm is None:
+            return []
+        return [np.asarray(self.camera_2d_center_mm, dtype=np.float64)]
 
 
 def geometric_visibility(target: TwoPlaneTarget, pose_camera: RigidTransform, points_camera, stereo: StereoGeometry,

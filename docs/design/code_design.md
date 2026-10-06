@@ -147,6 +147,8 @@ docs/procedures/performance_test_procedure.md (+ figures/, build/, Review/)
   needs them calls `geometry.require(name)` and lets `MissingSensorValue`
   propagate with its message. Simulations and tests use
   `SensorGeometry.indicative()`.
+  `camera_2d_offset_mm` (the 2-D image sensor, Section 12 Step 7) is the exception: it is optional, and while it is None the 2-D
+  visible area is NaN instead of an error.
 
 ## 5. Interfaces of the modules still to be written
 
@@ -546,7 +548,15 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
   Step 7, A_geo: both versions are reported (`a_geo_cameras_mm2`, `a_geo_projector_mm2`); the projector center is the as-built
   `PROJECTOR_OFFSET_MM` of `sensor_config.json` (`StereoGeometry.from_sensor_geometry`), recorded in the details (`projector`, with
   whether it is midway between the cameras); with a midway projector the two coincide for a convex outline (tested for the circular
-  cutouts), and `geo_version_comparison` says which tracks the data better.
+  cutouts), and `geo_version_comparison` says which tracks the data better. `a_geo_2d_mm2` (beside them) is A_geo_2D, the visibility
+  of the 2-D image: the ONE-center projection of the as-built outline from the 2-D sensor, whose illumination is collocated with it
+  (a point is seen and lit along the same ray), on the same cell grid (`area.visible_fraction_from`,
+  `area.geometric_visible_area_2d_mm2`; `TwoPlaneTarget.visible_from` already takes one viewpoint, so the ray-cast helper is
+  unchanged). The position is `camera_2d_offset_mm` (H, V, Z relative to the left IR camera, "from datasheet") of the `sensor_config.json`
+  geometry, carried by `SensorGeometry` and `StereoGeometry.camera_2d_center_mm`; it is OPTIONAL (older configurations lack it): without
+  it the column is NaN and the details (`camera_2d`) say so, where a missing projector offset stops the analysis. The indicative
+  placeholder is midway between the cameras (`INDICATIVE_CAMERA_2D_OFFSET_MM`). For a disk A_geo_2D = A_true; for a cutout with the
+  2-D sensor midway it is at least the two-camera overlap, and A_true for a 2-D center on the hole's axis at a large distance (both tested).
   Step 10, the edge bias: `b` is fitted against Z for the LARGEST feature of each plate at the stations where its D_px is at least
   `CharacterizationParameters.area_bias_fit_min_d_px` (`AREA_BIAS_FIT_MIN_D_PX` = `AREA_BIAS_FIT_D0_FACTOR` (2) x
   `EXPECTED_D0_PX_DEFAULT` (7) = 14 px; the default is tied to `expected_d0_px` through the two module constants only, so an override
@@ -665,7 +675,18 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
   the figures `Z_ramp` (row average and single pixels against true depth with the plateau edges) and `Z_quantum_vs_z` (ramp and
   staircase quanta with q Z^2 / k) in PNG and SVG, and the ramp quantum in the forward-model terms (the staircase's where a station
   has no ramp). The staircase analysis is unchanged and runs only when staircase poses exist.
-- E unchanged except that the feature-scale profiles are against D_px, pooled over the features and stations of a plate.
+- E unchanged except that the feature-scale profiles are against D_px, pooled over the features and stations of a plate, and
+  (review chunk C15, Section 14): (Step 1) V comes from the as-built projector position (`PROJECTOR_OFFSET_MM`), both rules are
+  reported and the projector rule is the primary one (`PRIMARY_VISIBILITY_RULE`; the `is_primary_rule` column; the forward-model
+  terms use it); for a convex outline the two give the same V with a midway projector (tested on a circular cutout). (Step 4)
+  W_fab = sum over bins of (reads at V = 0 in the bin / all pixels in the bin) x bin width, W_drop the same with the no-reads at
+  V = 1 (`count_statistics`). (Step 5) `details["sign_consistency"]` states the expected signs (pi_near > 0, s_50 < 0, b > 0 for
+  disks, b < 0 for cutouts) and, per available quantity (own pi_near and s_50 per source, B's edge offset, C's b for disks and for
+  cutouts), the value, the expected sign and `agrees_with_fattening`, with an overall `direction` and `all_agree`; it replaces the
+  former `cross_checks`. (Step 7) the bootstrap over poses gives percentile intervals for beta_read, pi_near, W_fab and W_drop from ONE
+  set of resamples (`w_fab_lower_px`, `w_fab_upper_px`, `w_drop_lower_px`, `w_drop_upper_px` beside the existing `beta_*` and
+  `pi_*`); a statistic that is undefined in a resample is left out of its own interval only; the resample count
+  (BOOTSTRAP_RESAMPLES) is in `details["bootstrap"]`.
 
 **Simulator.** The synthetic scene generator renders the standard target set. The imitation matcher gets a named
 parameter, `SyntheticSensorModel.min_feature_diameter_px` (indicative 10 px of the full-size sensor, inside the 8-12 px

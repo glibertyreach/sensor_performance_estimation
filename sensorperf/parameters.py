@@ -93,6 +93,15 @@ AREA_BIAS_FIT_D0_FACTOR = 2.0
 times the expected minimum detectable diameter ``EXPECTED_D0_PX_DEFAULT``, so that the bias does not depend on the diameter
 (``CharacterizationParameters.area_bias_fit_min_d_px``)."""
 
+# Indicative sensor layout (simulation and tests only; none of these is a datasheet value).
+INDICATIVE_BASELINE_MM = 75.0
+"""Indicative stereo baseline B, mm."""
+INDICATIVE_PROJECTOR_OFFSET_MM = (40.0, 0.0, 0.0)
+"""Indicative projector center relative to the left camera, (H, V, Z) in mm: 40 mm beside the lens."""
+INDICATIVE_CAMERA_2D_OFFSET_MM = (INDICATIVE_BASELINE_MM / 2.0, 0.0, 0.0)
+"""Indicative center of the 2-D image sensor, (H, V, Z) in mm: PLACEHOLDER, midway on the axis between the two IR
+cameras, as the VSX3000's layout places it, until the datasheet value replaces it."""
+
 # Numerical guards.
 MIN_POSITIVE_DEPTH_MM = 1.0e-6
 """A depth smaller than this is treated as zero in the relations below."""
@@ -127,6 +136,10 @@ class SensorGeometry:
     camera frame (H along the baseline; Step 4.5 confirms the direction). †"""
     projector_offset_mm: tuple[float, float, float] | None = None
     """Projector center relative to the left camera, (H, V, Z) in mm. †"""
+    camera_2d_offset_mm: tuple[float, float, float] | None = None
+    """Center of the 2-D image sensor, which carries its own collocated illumination, relative to the left IR camera,
+    (H, V, Z) in mm; "from datasheet" (CAMERA_2D_OFFSET_MM of Section 12, Step 7). Optional: while it is None the 2-D
+    visible area A_geo_2D is not computed (NaN), where a missing projector offset stops the analyses. †"""
     depth_lsb_mm: float | None = None
     """Least significant bit of the depth output, mm. †"""
     frame_rate_hz: float | None = None
@@ -143,7 +156,9 @@ class SensorGeometry:
         return cls(sensor_fx_px=688.1552734375, sensor_fy_px=688.083251953125,
                    sensor_cx_px=292.3155517578125, sensor_cy_px=256.7590026855469,
                    image_width_px=640, image_height_px=480,
-                   sensor_baseline_mm=75.0, projector_offset_mm=(40.0, 0.0, 0.0),
+                   sensor_baseline_mm=INDICATIVE_BASELINE_MM,
+                   projector_offset_mm=INDICATIVE_PROJECTOR_OFFSET_MM,
+                   camera_2d_offset_mm=INDICATIVE_CAMERA_2D_OFFSET_MM,
                    depth_lsb_mm=0.1, frame_rate_hz=10.0)
 
     @classmethod
@@ -154,7 +169,9 @@ class SensorGeometry:
         indicative(). Not confirmed datasheet values."""
         return cls(sensor_fx_px=1043.956, sensor_fy_px=1043.956, sensor_cx_px=639.494, sensor_cy_px=477.306,
                    image_width_px=1280, image_height_px=960,
-                   sensor_baseline_mm=75.0, projector_offset_mm=(40.0, 0.0, 0.0),
+                   sensor_baseline_mm=INDICATIVE_BASELINE_MM,
+                   projector_offset_mm=INDICATIVE_PROJECTOR_OFFSET_MM,
+                   camera_2d_offset_mm=INDICATIVE_CAMERA_2D_OFFSET_MM,
                    depth_lsb_mm=0.1, frame_rate_hz=10.0)
 
     def require(self, name: str) -> Any:

@@ -46,7 +46,9 @@ from sensorperf.geometry.targets import (
 )
 from sensorperf.io.manifest import SUBSERIES_FIELD, SUBSERIES_JITTER, SUBSERIES_OPEN
 from sensorperf.io.session import FORWARD_MODEL_FILE_NAME, Session
-from sensorperf.parameters import AREA_BIAS_FIT_D0_FACTOR, CharacterizationParameters, TARGET_CUTOUTS
+from sensorperf.parameters import (
+    AREA_BIAS_FIT_D0_FACTOR, CharacterizationParameters, TARGET_CUTOUTS, TARGET_DISKS,
+)
 from sensorperf.stats.intervals import clopper_pearson
 from sensorperf.stats.psychometric import PsychometricFitParameters, best_fit, fit_all_curves
 
@@ -413,8 +415,87 @@ def test_c_step7_the_as_built_projector_position_is_used_and_reported(area_resul
     projector = area_result.details["projector"]
     assert projector["projector_offset_mm"] == list(cde_session.geometry.projector_offset_mm)
     assert projector["projector_midway"] is False                                    # 40 mm against 37.5 mm
-    columns = {"a_geo_cameras_mm2", "a_geo_projector_mm2"}
+    columns = {"a_geo_cameras_mm2", "a_geo_projector_mm2", "a_geo_2d_mm2"}
     assert columns <= set(area.SUMMARY_COLUMNS)
+
+
+def _stereo_with_2d_center(session, center_2d_mm):
+    """The session's as-built stereo geometry with the 2-D sensor moved to ``center_2d_mm`` (camera frame, mm)."""
+    return dataclasses.replace(StereoGeometry.from_sensor_geometry(session.geometry), camera_2d_center_mm=center_2d_mm)
+
+
+def test_c_step7_a_geo_2d_is_at_least_the_two_camera_overlap_with_the_2d_sensor_midway(cde_session):
+    """Section 12, Step 7: the 2-D image is seen and lit from ONE center. With the 2-D sensor midway between the cameras on
+    their axis, a point that both cameras see through a circular hole is also seen from the midpoint (the crossing of its
+    ray with the front plane is the midpoint of the two cameras' crossings, inside the circle), so A_geo_2D is at least
+    the two-camera overlap and at most A_true; a disk face has A_geo_2D = A_true."""
+    baseline = cde_session.geometry.sensor_baseline_mm
+    stereo = _stereo_with_2d_center(cde_session, (baseline / 2.0, 0.0, 0.0))
+    target = cde_session.targets.get(TARGET_CUTOUTS, PARAMS.gap_small_mm)
+    pose = fronto_parallel_pose(0.0, 0.0, STATION_MID_MM)
+    cutouts = [f for f in target.features if f.kind == FEATURE_CUTOUT]
+    assert cutouts
+    for feature in cutouts:
+        overlap = area.geometric_visible_area_mm2(target, pose, feature, stereo, False)
+        one_center = area.geometric_visible_area_2d_mm2(target, pose, feature, stereo)
+        assert overlap * (1.0 - 1e-9) <= one_center <= feature.true_area_mm2() * (1.0 + 1e-9)
+        assert one_center > overlap                       # the shadow of the two-camera overlap is not in the 2-D image
+    disks = cde_session.targets.get(TARGET_DISKS, PARAMS.gap_small_mm)
+    for disk in (f for f in disks.features if f.kind == FEATURE_DISK):
+        assert area.geometric_visible_area_2d_mm2(disks, pose, disk, stereo) == disk.true_area_mm2()
+
+
+def test_c_step7_a_geo_2d_equals_a_true_for_a_2d_center_on_the_hole_axis_at_a_large_distance(cde_session):
+    """Step 7: seen along (almost) its own axis from far away, a circular hole shows the whole back-plate disk behind it:
+    A_geo_2D = A_true, for every cutout. A 2-D position that is not known gives NaN, not a guess."""
+    target = cde_session.targets.get(TARGET_CUTOUTS, PARAMS.gap_small_mm)
+    far_mm = 1.0e6                                        # distance of the camera from the plate: effectively infinite
+    on_axis_2d_center = (0.0, 0.0, 0.0)                   # the camera frame's own axis
+    stereo = _stereo_with_2d_center(cde_session, on_axis_2d_center)
+    for feature in (f for f in target.features if f.kind == FEATURE_CUTOUT):
+        pose = fronto_parallel_pose(-feature.x_mm, -feature.y_mm, far_mm)       # the hole's axis is the camera axis
+        assert area.geometric_visible_area_2d_mm2(target, pose, feature, stereo) == pytest.approx(
+            feature.true_area_mm2(), rel=1e-9)
+    unknown = _stereo_with_2d_center(cde_session, None)
+    feature = next(f for f in target.features if f.kind == FEATURE_CUTOUT)
+    assert math.isnan(area.geometric_visible_area_2d_mm2(target, fronto_parallel_pose(0.0, 0.0, STATION_MID_MM),
+                                                         feature, unknown))
+
+
+def test_c_step7_the_summary_reports_a_geo_2d_beside_a_geo_and_the_details_record_the_2d_position(area_result,
+                                                                                                  cde_session):
+    """Step 7: a_geo_2d_mm2 is a column of C_area_summary.csv; for the cutouts of the test session (2-D sensor midway,
+    as the indicative layout places it) it is at least the two-camera area and at most A_true, for the disks it is
+    A_true; the details name the 2-D position that was used, which sensor_config.json carries as a tuple."""
+    assert cde_session.geometry.camera_2d_offset_mm == (cde_session.geometry.sensor_baseline_mm / 2.0, 0.0, 0.0)
+    cutouts = [r for r in area_result.rows if r["kind"] == FEATURE_CUTOUT and math.isfinite(r["a_geo_cameras_mm2"])]
+    assert cutouts                                        # (the open-background variant has no back plate: NaN)
+    for r in cutouts:
+        assert r["a_geo_cameras_mm2"] * (1.0 - 1e-9) <= r["a_geo_2d_mm2"] <= r["a_true_mm2"] * (1.0 + 1e-9)
+    for r in (r for r in area_result.rows if r["kind"] == FEATURE_DISK):
+        assert r["a_geo_2d_mm2"] == pytest.approx(r["a_true_mm2"])
+    assert area_result.details["camera_2d"]["camera_2d_offset_mm"] == list(cde_session.geometry.camera_2d_offset_mm)
+    written = _read_csv(area_result.out_dir / area.SUMMARY_FILE_NAME)
+    assert "a_geo_2d_mm2" in written[0] and list(written[0]).index("a_geo_2d_mm2") == list(written[0]).index(
+        "a_geo_projector_mm2") + 1
+
+
+def test_c_step7_a_sensor_config_without_the_2d_position_still_loads_and_leaves_the_column_empty(tmp_path):
+    """Older sensor_config.json files have no camera_2d_offset_mm: they load with None (the 2-D area is then NaN)."""
+    from sensorperf.io.session import SensorConfig
+    from sensorperf.parameters import SensorGeometry
+    geometry = SensorGeometry.indicative()
+    config = SensorConfig(geometry=dataclasses.replace(geometry, camera_2d_offset_mm=None))
+    path = config.save(tmp_path / "sensor_config.json")
+    document = json.loads(path.read_text())
+    document["geometry"].pop("camera_2d_offset_mm")
+    path.write_text(json.dumps(document))
+    loaded = SensorConfig.load(path)
+    assert loaded.geometry.camera_2d_offset_mm is None
+    assert loaded.geometry.projector_offset_mm == geometry.projector_offset_mm
+    assert StereoGeometry.from_sensor_geometry(loaded.geometry).viewpoints_2d() == []
+    with_2d = SensorConfig(geometry=geometry).save(tmp_path / "with_2d.json")
+    assert SensorConfig.load(with_2d).geometry.camera_2d_offset_mm == geometry.camera_2d_offset_mm
 
 
 def test_c_step12_field_comparison_carries_the_achieved_field_fraction_per_pose(area_result, cde_session):
@@ -1277,8 +1358,152 @@ def test_e_step5_near_surface_preference(boundary_result):
     terms = boundary_result.forward_model_terms()
     assert set(terms) == {"w_fab_px", "w_drop_px", "pi_near", "beta_read"}
     assert terms["pi_near"] > 0.0 and terms["w_fab_px"] > 0.0
-    checks = boundary_result.details["cross_checks"]["own_s50_vs_pi"]
+    checks = boundary_result.details["sign_consistency"]["by_station"]
     assert checks and all(c["signs_consistent"] for c in checks if math.isfinite(c["pi_near"]))
+
+
+def test_e_step1_both_visibility_rules_are_reported_with_the_projector_rule_as_primary(boundary_result):
+    """Step 1: every group has one row per visibility rule; the projector rule (the depth-read rule) is the primary one,
+    marked in ``is_primary_rule``, and the forward-model terms come from it."""
+    assert {r["visibility_rule"] for r in boundary_result.rows if r["is_primary_rule"]} == {boundary.RULE_PROJECTOR}
+    assert {r["visibility_rule"] for r in boundary_result.rows if not r["is_primary_rule"]} == {boundary.RULE_CAMERAS}
+    assert boundary.PRIMARY_VISIBILITY_RULE == boundary.RULE_PROJECTOR
+    primary = [r for r in boundary_result.rows if r["source"] == "B" and r["target_id"] == "all" and r["is_primary_rule"]]
+    terms = boundary_result.forward_model_terms()
+    station = min({r["station_z_mm"] for r in primary}, key=lambda z: abs(z - PARAMS.z_reference_mm))
+    row = next(r for r in primary if r["station_z_mm"] == station)
+    assert terms["w_fab_px"] == row["w_fab_px"] and terms["pi_near"] == row["pi_near"]
+
+
+def _cutout_visibility(session, projector_offset_mm):
+    """V under both rules over the whole image for the first cutout pose of the session, with the projector placed at
+    ``projector_offset_mm`` instead of its configured position."""
+    from sensorperf.analysis.common import pose_geometry
+    from sensorperf.io.capture_set import load_stack
+    from sensorperf.io.session import SensorConfig
+    geometry = dataclasses.replace(session.geometry, projector_offset_mm=projector_offset_mm)
+    moved = dataclasses.replace(session, sensor=SensorConfig(config_id=session.sensor.config_id, geometry=geometry))
+    record = next(r for r in session.records if r.procedure == "C" and r.target_id == TARGET_CUTOUTS
+                  and r.gap_mm is not None)
+    pose = pose_geometry(moved, record, load_stack([record]).camera)
+    return pose.visibility_with_projector, pose.visibility_cameras_only
+
+
+def test_e_step1_the_two_visibility_rules_give_the_same_v_for_a_circular_cutout_with_a_midway_projector(cde_session):
+    """Step 1: with the projector midway between the cameras, every back-plate point of a circular cutout that both cameras
+    see is also lit, so V of the projector rule equals V of the two-camera rule at every pixel; a shadow exists (some
+    pixels have V = 0), and V is computed from the projector position of sensor_config (a projector moved to the far side
+    of the left camera, outside the pair, removes readable pixels, so the as-built position is what V responds to)."""
+    baseline = cde_session.geometry.sensor_baseline_mm
+    with_projector, cameras_only = _cutout_visibility(cde_session, (baseline / 2.0, 0.0, 0.0))
+    assert np.array_equal(with_projector, cameras_only)
+    assert not cameras_only.all()                                         # the sliver hidden from the right camera
+    outside_pair, cameras_again = _cutout_visibility(cde_session, (-baseline, 0.0, 0.0))
+    assert np.array_equal(cameras_again, cameras_only)                    # the two-camera rule ignores the projector
+    assert np.count_nonzero(outside_pair) < np.count_nonzero(cameras_only)
+    assert not (outside_pair & ~cameras_only).any()                       # the projector can only remove pixels
+
+
+def test_e_step4_widths_follow_their_definition_on_a_hand_built_count_vector():
+    """Step 4: W_fab = sum over bins of (reads at V = 0 in the bin / pixels in the bin) x bin width; W_drop the same with
+    the no-reads at V = 1. Two bins are filled by hand: bin 0 has 10 pixels at V = 0 of which 4 are read (W_fab gets
+    0.4 bins), bin 1 has 8 pixels at V = 1 of which 2 are no-reads (W_drop gets 0.25 bins)."""
+    bins = boundary.BinSpec.from_params(PARAMS)
+    vector = boundary._CountVector(bins)
+    counts = vector._views()[0]
+    rule = 0
+    counts[rule, 0, boundary.OUT_BACK, 0] = 4.0
+    counts[rule, 0, boundary.OUT_NONE, 0] = 6.0
+    counts[rule, 1, boundary.OUT_FRONT, 1] = 6.0
+    counts[rule, 1, boundary.OUT_NONE, 1] = 2.0
+    stats = boundary.count_statistics(vector.vec, bins, rule, PARAMS.esf_half_height)
+    assert stats["w_fab_px"] == pytest.approx(0.4 * bins.width)
+    assert stats["w_drop_px"] == pytest.approx(0.25 * bins.width)
+
+
+def test_e_step7_widths_carry_bootstrap_intervals_from_the_same_resamples(boundary_result):
+    """Step 7: W_fab and W_drop get percentile intervals beside beta_read and pi_near, in the CSV columns named after the
+    existing ones, and the details record the resample count."""
+    for column in ("w_fab_lower_px", "w_fab_upper_px", "w_drop_lower_px", "w_drop_upper_px"):
+        assert column in boundary.SUMMARY_COLUMNS
+    csv_rows = _read_csv(boundary_result.out_dir / boundary.SUMMARY_FILE_NAME)
+    assert {"w_fab_lower_px", "w_drop_upper_px"} <= set(csv_rows[0])
+    pooled = _e_rows(boundary_result, source="B", target_id="all")
+    assert pooled
+    for row in pooled:
+        assert row["poses"] >= 2
+        for name in ("w_fab", "w_drop"):
+            lower, value, upper = row[f"{name}_lower_px"], row[f"{name}_px"], row[f"{name}_upper_px"]
+            assert math.isfinite(lower) and math.isfinite(upper) and lower <= upper
+            assert lower - 1e-9 <= value <= upper + 1e-9
+    assert boundary_result.details["bootstrap"]["resamples"] == BOUNDARY_BOOTSTRAP_RESAMPLES
+    assert boundary_result.details["bootstrap"]["statistics"] == ["beta_read", "pi_near", "w_fab_px", "w_drop_px"]
+
+
+def test_e_step7_an_undefined_pi_near_does_not_remove_the_width_intervals():
+    """Step 7: a resample in which one statistic is undefined is left out of that statistic's interval only. Every pose
+    here has reads at V = 0 on the back side (W_fab > 0) and no wrong-surface read (pi_near undefined)."""
+    bins = boundary.BinSpec.from_params(PARAMS)
+    rng = np.random.default_rng(3)
+    vectors = []
+    for _ in range(6):
+        vector = boundary._CountVector(bins)
+        reads = int(rng.integers(5, 15))
+        s = np.full(reads + 5, -1.0)                                       # the back side of the edge
+        outcome = np.array([boundary.OUT_BACK] * reads + [boundary.OUT_NONE] * 5)
+        v = np.zeros(s.size, dtype=bool)                                   # all geometrically unreadable
+        vector.add(s, outcome, v, v, np.full(s.size, 0.0))
+        vectors.append(vector.vec)
+    (lower, upper), _cameras = boundary._bootstrap_group(vectors, bins, PARAMS.esf_half_height, 100,
+                                                         PARAMS.confidence_level, rng)
+    assert math.isnan(lower["pi_near"]) and math.isnan(upper["pi_near"])
+    assert 0.0 < lower["w_fab_px"] <= upper["w_fab_px"]
+    assert lower["w_drop_px"] == upper["w_drop_px"] == 0.0
+
+
+def test_e_step5_sign_consistency_names_the_expected_signs_and_whether_the_measured_signs_agree(boundary_result,
+                                                                                                cde_session, tmp_path):
+    """Step 5: details["sign_consistency"] states the expected signs of foreground fattening and, for each available
+    quantity, its value, its expected sign and whether it agrees; with Analysis B's edge offset and Analysis C's b present
+    they are included. The synthetic matcher fattens the foreground, so everything agrees."""
+    sign = boundary_result.details["sign_consistency"]
+    assert sign["expected"] == {"pi_near": "> 0", "s50_px": "< 0", "b_disk_px": "> 0", "b_cutout_px": "< 0"}
+    assert {c["quantity"] for c in sign["checks"]} == {"pi_near", "s50_px"}
+    assert sign["direction"] == boundary.DIRECTION_FATTENING and sign["all_agree"] is True and not sign["disagreeing"]
+
+    class FakeB:
+        def forward_model_terms(self):
+            return {"edge_offset_px": -0.4}
+
+    class FakeC:
+        def edge_bias_terms(self):
+            return {"edge_bias_disk_px": 0.8, "edge_bias_cutout_px": -0.7}
+
+    options = boundary.BoundaryOptions(bootstrap_resamples=2, feature_scale=False)
+    full = boundary.run_boundary_bias(cde_session, tmp_path, {"B": FakeB(), "C": FakeC()}, options)
+    checks = full.details["sign_consistency"]["checks"]
+    assert {c["source"] for c in checks} >= {"Analysis B, edge offset", "Analysis C, edge bias b"}
+    assert {c["quantity"] for c in checks} == {"pi_near", "s50_px", "b_disk_px", "b_cutout_px"}
+    assert all(c["agrees_with_fattening"] for c in checks)
+
+
+def test_e_step5_sign_consistency_reports_a_disagreement():
+    """Step 5: a quantity whose sign is the opposite of foreground fattening is listed, and the direction is mixed; when
+    nothing has a sign the direction is undetermined."""
+    row = {"source": "B", "target_id": "all", "visibility_rule": "projector", "station_z_mm": 800.0, "pi_near": 0.6,
+           "s50_px": -0.3}
+
+    class FakeC:
+        def edge_bias_terms(self):
+            return {"edge_bias_disk_px": -0.8, "edge_bias_cutout_px": -0.5}      # disk b < 0 disagrees
+
+    sign = boundary._sign_consistency([row], {"C": FakeC()})
+    assert sign["direction"] == boundary.DIRECTION_MIXED and sign["all_agree"] is False
+    assert sign["disagreeing"] == ["b_disk_px (Analysis C, edge bias b)"]
+    thinning = boundary._sign_consistency([dict(row, pi_near=-0.6, s50_px=0.3)], None)
+    assert thinning["direction"] == boundary.DIRECTION_THINNING
+    assert thinning["by_station"][0]["signs_consistent"] is True            # both quantities say thinning
+    assert boundary._sign_consistency([], None)["direction"] == boundary.DIRECTION_UNDETERMINED
 
 
 def test_e_step3_profiles_sum_to_one(boundary_result):

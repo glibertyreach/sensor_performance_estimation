@@ -40,6 +40,13 @@ How the steps are implemented (the step numbers are cited in the code)
        projector midway between the cameras, the three-center overlap equals the two-camera one for a convex
        outline (every point both cameras see through the hole is also lit); the details record the as-built
        offset, whether it is midway, and which version tracks the data better (``geo_version_comparison``).
+       A_geo_2D (column a_geo_2d_mm2, beside the two): the visibility of the 2-D image, the ONE-center projection of
+       the as-built outline from the 2-D sensor's as-built position (CAMERA_2D_OFFSET_MM, ``StereoGeometry.
+       camera_2d_center_mm``) on the same cell grid. The 2-D sensor's illumination is collocated with it, so a point is
+       seen and lit along the same ray and one viewpoint is enough. It is at least the two-camera overlap when the 2-D
+       sensor lies between the cameras on their axis, and equals A_true for a disk. NaN when sensor_config.json has no
+       camera_2d_offset_mm; the details (``camera_2d``) record the position used. Whether a visible point is also
+       bright enough to read is not modeled here.
     8  Transfer curves: ratio_true = A_sensed / A_true and ratio_geo = A_sensed / A_geo against D_px = D f_x / Z, with
        the mean over all frames, the standard deviation of the pose means (phase effect) and the root-mean-square
        within-pose standard deviation (temporal effect). The curves are POOLED over the features of a plate and over
@@ -159,11 +166,12 @@ OVERLAP_QUANTITIES = (("ratio_true", "A_sensed / A_true", "a_true_mm2"),
 overlap test."""
 SUMMARY_COLUMNS = (
     "target_id", "kind", "gap_mm", "station_z_mm", "field", "subseries", "site_id", "level_index", "diameter_mm",
-    "d_px", "a_true_mm2", "a_geo_cameras_mm2", "a_geo_projector_mm2", "a_sensed_mean_mm2",
+    "d_px", "a_true_mm2", "a_geo_cameras_mm2", "a_geo_projector_mm2", "a_geo_2d_mm2", "a_sensed_mean_mm2",
     "a_sensed_phase_std_mm2", "a_sensed_temporal_std_mm2", "a_noread_mean_mm2", "a_upper_mean_mm2",
     "a_contour_mean_mm2", "ratio_true", "ratio_geo_cameras", "ratio_geo_projector", "b_mm", "b_px", "poses",
     "frames", "ratio_noread_true", "ratio_contour_pixelcount", "field_fraction_achieved")
-"""Columns of C_area_summary.csv: the specification's list (Step 13) followed by three extra columns
+"""Columns of C_area_summary.csv: the specification's list (Step 13, with ``a_geo_2d_mm2``, the one-center visible area of the
+2-D image of Step 7, beside the two depth-sense versions of A_geo) followed by three extra columns
 (A_noread / A_true, used by the open-background comparison, the contour-to-pixel-count area ratio of Step 5, and the mean
 achieved field fraction of the configuration's poses, NaN where the manifest does not carry it)."""
 
@@ -317,11 +325,13 @@ def _grid_spacing_mm(diameter_mm: float, options: AreaOptions) -> float:
     return min(fine, diameter_mm / options.geo_cells_across_min)
 
 
-def visible_fraction(target: TwoPlaneTarget, pose_camera: RigidTransform, feature: Feature,
-                     stereo: StereoGeometry, with_projector: bool, spacing_mm: float) -> float:
-    """Step 7: the fraction of the cells of a regular grid over the circular outline, taken on the back plane,
-    whose centers are visible from the left camera, the right camera and (when ``with_projector``) the projector.
-    NaN when the target has no back plate. Cells centered outside the outline are not counted."""
+def visible_fraction_from(target: TwoPlaneTarget, pose_camera: RigidTransform, feature: Feature,
+                          viewpoints: list[np.ndarray], spacing_mm: float) -> float:
+    """Step 7: the fraction of the cells of a regular grid over the circular outline, taken on the back plane, whose
+    centers are visible from EVERY one of the ``viewpoints`` (camera frame; each a ray cast through the outline to the
+    back plane, ``TwoPlaneTarget.visible_from``). NaN when the target has no back plate. Cells centered outside the
+    outline are not counted. The same grid serves every set of viewpoints, so the areas of different sets compare
+    cell for cell."""
     if target.gap_mm is None:
         return math.nan
     radius = feature.diameter_mm / 2.0
@@ -337,9 +347,16 @@ def visible_fraction(target: TwoPlaneTarget, pose_camera: RigidTransform, featur
     points_target = np.column_stack([x, y, np.full(x.shape, float(target.gap_mm))])
     points_camera = pose_camera.apply_points(points_target)
     visible = target.inside_back_extent(x, y)
-    for viewpoint in stereo.viewpoints(with_projector):
+    for viewpoint in viewpoints:
         visible = visible & target.visible_from(pose_camera, points_camera, viewpoint)
     return float(np.count_nonzero(visible)) / float(x.size)
+
+
+def visible_fraction(target: TwoPlaneTarget, pose_camera: RigidTransform, feature: Feature,
+                     stereo: StereoGeometry, with_projector: bool, spacing_mm: float) -> float:
+    """The depth-sense visible fraction (Step 7): the viewpoints are the left camera, the right camera and (when
+    ``with_projector``) the projector. See :func:`visible_fraction_from`."""
+    return visible_fraction_from(target, pose_camera, feature, stereo.viewpoints(with_projector), spacing_mm)
 
 
 def geometric_visible_area_mm2(target: TwoPlaneTarget, pose_camera: RigidTransform, feature: Feature,
@@ -352,6 +369,23 @@ def geometric_visible_area_mm2(target: TwoPlaneTarget, pose_camera: RigidTransfo
         return feature.true_area_mm2()
     fraction = visible_fraction(target, pose_camera, feature, stereo, with_projector,
                                 _grid_spacing_mm(feature.diameter_mm, options))
+    return feature.true_area_mm2() * fraction if math.isfinite(fraction) else math.nan
+
+
+def geometric_visible_area_2d_mm2(target: TwoPlaneTarget, pose_camera: RigidTransform, feature: Feature,
+                                  stereo: StereoGeometry, options: AreaOptions = AreaOptions()) -> float:
+    """A_geo_2D of a cutout (Section 12, Step 7): the part of the as-built outline on the back plate that the 2-D image
+    sensor sees through the hole, in mm^2. The 2-D sensor's illumination is collocated with it, so a point is seen and
+    lit along the same ray and the area is the ONE-center projection of the outline from ``stereo.camera_2d_center_mm``
+    (on the same cell grid as A_geo). NaN without a back plate or without a known 2-D position. For a disk face it is
+    A_true (returned directly)."""
+    if feature.kind == FEATURE_DISK:
+        return feature.true_area_mm2()
+    viewpoints = stereo.viewpoints_2d()
+    if not viewpoints:
+        return math.nan
+    fraction = visible_fraction_from(target, pose_camera, feature, viewpoints,
+                                     _grid_spacing_mm(feature.diameter_mm, options))
     return feature.true_area_mm2() * fraction if math.isfinite(fraction) else math.nan
 
 
@@ -500,6 +534,8 @@ class _PoseMeasure:
     contour: float
     geo_cameras: float
     geo_projector: float
+    geo_2d: float = math.nan
+    """A_geo_2D: the one-center visible area of the 2-D image (NaN when the 2-D position is not known)."""
     pose_index: int = -1
     """Pose index of the pose within its configuration (manifest ``pose_index``)."""
     field_fraction_achieved: float = math.nan
@@ -610,7 +646,7 @@ def _process_pose(session: Session, pose_records: list[FrameRecord], options: Ar
             component = component_at_center(wanted, center)       # Step 4
             sensed[index] = float(area_image[component].sum())
         contour = math.nan
-        geo_c = geo_p = math.nan
+        geo_c = geo_p = geo_2d = math.nan
         if has_back:
             contour = subpixel_contour_area_mm2(mean_height, geometry, feature, plane_point, plane_normal,
                                                 params.esf_half_height, options, band)      # Step 5
@@ -619,7 +655,10 @@ def _process_pose(session: Session, pose_records: list[FrameRecord], options: Ar
                                                    options)                                  # Step 7
                 geo_p = geometric_visible_area_mm2(target, geometry.pose_camera, feature, geometry.stereo, True,
                                                    options)
-        measures[feature.site_id] = _PoseMeasure(sensed, noread, contour, geo_c, geo_p, pose_index=first.pose_index,
+                geo_2d = geometric_visible_area_2d_mm2(target, geometry.pose_camera, feature, geometry.stereo,
+                                                       options)
+        measures[feature.site_id] = _PoseMeasure(sensed, noread, contour, geo_c, geo_p, geo_2d,
+                                                 pose_index=first.pose_index,
                                                  field_fraction_achieved=_field_fraction(first))
 
         # Step 11 fallback kernel: radial ESF of the large features of this pose (mean frame).
@@ -994,6 +1033,7 @@ def _row_for_feature(record: FrameRecord, feature: Feature, measures: list[_Pose
     a_noread = float(np.mean(all_noread))
     geo_c = _nanmean_or_nan([m.geo_cameras for m in measures])
     geo_p = _nanmean_or_nan([m.geo_projector for m in measures])
+    geo_2d = _nanmean_or_nan([m.geo_2d for m in measures])
     contour = _nanmean_or_nan([m.contour for m in measures])
     field_fraction = _nanmean_or_nan([m.field_fraction_achieved for m in measures])
     d_s = SQUARE_ROOT_PI_FACTOR * math.sqrt(a_sensed / math.pi) if sensed_valid else math.nan
@@ -1008,7 +1048,8 @@ def _row_for_feature(record: FrameRecord, feature: Feature, measures: list[_Pose
         "station_z_mm": record.station_z_mm, "field": record.field, "subseries": record.subseries,
         "site_id": feature.site_id, "level_index": feature.level_index, "diameter_mm": feature.diameter_mm,
         "d_px": feature.diameter_mm * fx / record.station_z_mm, "a_true_mm2": a_true,
-        "a_geo_cameras_mm2": geo_c, "a_geo_projector_mm2": geo_p, "a_sensed_mean_mm2": a_sensed,
+        "a_geo_cameras_mm2": geo_c, "a_geo_projector_mm2": geo_p, "a_geo_2d_mm2": geo_2d,
+        "a_sensed_mean_mm2": a_sensed,
         "a_sensed_phase_std_mm2": _std(pose_means) if sensed_valid else math.nan,
         "a_sensed_temporal_std_mm2": float(math.sqrt(np.mean(within))) if within and sensed_valid else math.nan,
         "a_noread_mean_mm2": a_noread,
@@ -1188,6 +1229,7 @@ def run_area(session: Session, out_dir: Path, previous: Mapping[str, Any] | None
                                 "it needs the left camera, the right camera and the projector, without it the two "
                                 "cameras; which version tracks the data better is in 'geo_version_comparison'."),
         "projector": _projector_description(session),
+        "camera_2d": _camera_2d_description(session),
         "geo_version_comparison": _geo_version_comparison(rows, options, min_d_px),
         "overlap_tests": _overlap_section(rows, params, previous, overlap_options),
         "notes": notes,
@@ -1337,6 +1379,20 @@ def _projector_description(session: Session) -> dict[str, Any]:
             "note": ("the projector is midway between the cameras: the three-center and the two-camera A_geo coincide "
                      "for a convex outline" if midway else
                      "the projector is not midway between the cameras: the two A_geo versions can differ")}
+
+
+def _camera_2d_description(session: Session) -> dict[str, Any]:
+    """Step 7: the as-built position of the 2-D image sensor the A_geo_2D values used (CAMERA_2D_OFFSET_MM of
+    sensor_config.json), or the statement that it is not configured and the column is empty. One viewpoint is used (the
+    2-D illumination is collocated with the sensor), so a point is seen and lit along the same ray."""
+    offset = session.geometry.camera_2d_offset_mm
+    if offset is None:
+        return {"camera_2d_offset_mm": None,
+                "note": "camera_2d_offset_mm is not in sensor_config.json: a_geo_2d_mm2 is empty (NaN) for cutouts"}
+    return {"camera_2d_offset_mm": [float(v) for v in offset], "viewpoints": 1,
+            "note": ("A_geo_2D is the one-center projection of the as-built outline from the 2-D sensor (its "
+                     "illumination is collocated, so a point is seen and lit along the same ray); for a disk it equals "
+                     "A_true. Whether a visible point is bright enough to read is not modeled.")}
 
 
 def _contour_check(rows: list[dict[str, Any]]) -> dict[str, Any]:

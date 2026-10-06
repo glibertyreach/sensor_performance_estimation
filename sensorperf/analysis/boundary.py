@@ -15,8 +15,13 @@ Conventions (docs/design/code_design.md, Section 4)
 
 How the steps are implemented
     1  Visibility V per pixel of the band |s| <= BOUNDARY_BAND_HALF_WIDTH_PX, from the registered pose
-       (PoseGeometry.visibility_with_projector and visibility_cameras_only); every statistic is reported for both
-       rules (the "visibility_rule" column: projector, cameras).
+       (PoseGeometry.visibility_with_projector and visibility_cameras_only). A point is visible when the left camera
+       and the right camera see it and, under the primary rule, the projector lights it; the projector is at its
+       AS-BUILT position, PROJECTOR_OFFSET_MM of sensor_config.json (StereoGeometry.from_sensor_geometry), never an
+       assumed midpoint. Every statistic is reported for both rules (the "visibility_rule" column): the projector
+       rule is the PRIMARY one (the depth-read rule; column "is_primary_rule", the forward-model terms), the
+       two-camera rule the check. For a convex outline (a circle, a square) the two coincide when the projector is
+       midway between the cameras.
     2  Outcome per pixel-frame: front read (|Z - Z_front| <= SURFACE_ASSIGNMENT_SIGMA_MULTIPLE sigma_tot), back
        read (the same against Z_back), intermediate (valid, neither), no-read. The reference planes are fitted to
        the pose-mean depth away from the edges (common.reference_planes, registered planes as fallback). sigma_tot:
@@ -34,14 +39,18 @@ How the steps are implemented
        top/bottom edges are near-horizontal ("across"). Disks and cutouts: the signed distance from the circle (r - D/2), one feature
        per pixel (the nearest).
     4  R_fab = P(read | V = 0); R_drop = P(no-read | V = 1); beta_read = (R_fab - R_drop) / (R_fab + R_drop), NaN
-       when both are 0. W_fab = sum over bins of (reads at V = 0 in the bin / pixels in the bin) x bin width, the
-       width in px over which reads extend into the geometrically unreadable region; W_drop the same for no-reads
-       at V = 1 (the width over which no-reads intrude into the readable region). Both are in px and lie between
-       0 and the band width.
+       when both are 0. W_fab = the sum over the bins with V = 0 of (reads in the bin / pixels in the bin) x bin
+       width, the width in px over which reads extend into the geometrically unreadable region. W_drop = the same
+       sum over the bins with V = 1 with the no-reads in place of the reads, the width over which no-reads intrude
+       into the readable region. A bin's V = 0 pixels count for W_fab and its V = 1 pixels for W_drop, each against
+       ALL the pixels of the bin, so a bin that holds both kinds contributes to each width in proportion to its
+       share. Both widths are in px and lie between 0 and the band width.
     5  pi_near = (N_fb - N_bf) / (N_fb + N_bf), N_fb the front reads at s < 0, N_bf the back reads at s > 0; the mean
        normalized height of the intermediate reads; s_50 from the mean-h profile (the edge spread function of the
-       band). Cross-checks against Analysis B's edge offset and Analysis C's edge bias are reported, not enforced:
-       foreground fattening means pi_near > 0, s_50 < 0, b > 0 for disks and b < 0 for cutouts.
+       band). The sign relation is reported as ``details["sign_consistency"]``, not enforced: the expected signs
+       for foreground fattening (pi_near > 0, s_50 < 0, b > 0 for disks and b < 0 for cutouts), the measured value
+       and sign of each quantity that is available (this analysis' pi_near and s_50 per source, Analysis B's edge
+       offset, Analysis C's b for disks and cutouts) and whether each agrees, with an overall verdict.
     6  Feature scale (C arrays): per feature and frame the majority outcome of the pixels inside the true outline
        (the C classes: back read h < 0.5, front read, no-read). For a cutout, back = correct and front = fill-in; for
        a disk, front = correct and back = erased. Fractions over the poses against D_px, with the spread across
@@ -51,7 +60,9 @@ How the steps are implemented
        are evaluated per feature and station and their difference is reported.
     7  Breakdowns: every group of the CSV is one cell of the breakdown by source (B straight edges or C circular
        features), target (polarity: raised T3a/T4 or window T3b/T5), orientation, Z and G. Confidence intervals
-       by bootstrap over poses of the per-pose bin counts (BOOTSTRAP_RESAMPLES). Rows with target_id "all" pool
+       by bootstrap over poses of the per-pose bin counts (BOOTSTRAP_RESAMPLES): percentile intervals for beta_read,
+       pi_near, W_fab and W_drop from the same resamples (columns beta_*, pi_*, w_fab_*_px, w_drop_*_px); the resample
+       count is recorded in the details (``bootstrap``). Rows with target_id "all" pool
        every target and gap of a source at a station; the forward-model terms are the pooled B row at the station
        nearest Z_REFERENCE_MM under the projector rule.
     8  E_boundary_bias.csv, E_boundary_details.json, figures (stacked outcome profiles, beta_read and pi_near
@@ -90,7 +101,7 @@ from sensorperf.io.manifest import (
 )
 from sensorperf.io.session import Session
 from sensorperf.parameters import CharacterizationParameters, FIELD_POSITION_CENTER, PROCEDURE_AREA, PROCEDURE_EDGES
-from sensorperf.stats.intervals import bootstrap_statistic
+from sensorperf.stats.intervals import TAIL_COUNT_TWO_SIDED
 
 # ---------------------------------------------------------------------------
 # Names and constants
@@ -99,9 +110,11 @@ SUMMARY_FILE_NAME = "E_boundary_bias.csv"
 DETAILS_FILE_NAME = "E_boundary_details.json"
 SUMMARY_COLUMNS = (
     "source", "target_id", "kind", "gap_mm", "station_z_mm", "orientation", "polarity", "visibility_rule",
-    "r_fab", "r_drop", "beta_read", "beta_lower", "beta_upper", "w_fab_px", "w_drop_px", "pi_near", "pi_lower",
-    "pi_upper", "h_mid_mean", "s50_px", "pixels", "poses")
-"""Columns of E_boundary_bias.csv (Step 8): the group columns, then the values."""
+    "is_primary_rule", "r_fab", "r_drop", "beta_read", "beta_lower", "beta_upper", "w_fab_px", "w_fab_lower_px",
+    "w_fab_upper_px", "w_drop_px", "w_drop_lower_px", "w_drop_upper_px", "pi_near", "pi_lower", "pi_upper",
+    "h_mid_mean", "s50_px", "pixels", "poses")
+"""Columns of E_boundary_bias.csv (Step 8): the group columns, then the values. Each of beta_read, W_fab, W_drop and
+pi_near has its bootstrap interval beside it (``*_lower``, ``*_upper``; W in px)."""
 
 SOURCE_B = "B"
 SOURCE_C_ARRAYS = "C"
@@ -123,7 +136,10 @@ TARGET_ALL = "all"
 RULE_PROJECTOR = "projector"
 RULE_CAMERAS = "cameras"
 VISIBILITY_RULES = (RULE_PROJECTOR, RULE_CAMERAS)
-"""V with the projector condition and with the cameras only (Step 1)."""
+"""V with the projector condition and with the cameras only (Step 1); the index order of the rule axis of the counts."""
+PRIMARY_VISIBILITY_RULE = RULE_PROJECTOR
+"""The depth-read rule (left camera, right camera and the projector at its as-built position) is the primary one; the
+two-camera rule is the check. The forward-model terms and the sign relation use the primary rule."""
 EDGE_ORIENTATION = {SQUARE_EDGE_LEFT: ORIENTATION_ALONG, SQUARE_EDGE_RIGHT: ORIENTATION_ALONG,
                     SQUARE_EDGE_TOP: ORIENTATION_ACROSS, SQUARE_EDGE_BOTTOM: ORIENTATION_ACROSS}
 """Left and right edges are near-vertical (normal along the baseline); top and bottom near-horizontal."""
@@ -240,7 +256,12 @@ class _CountVector:
 def count_statistics(vec: np.ndarray, bins: BinSpec, rule_index: int, esf_level: float) -> dict[str, float]:
     """Steps 4 and 5 from a (pooled) count vector for one visibility rule: R_fab, R_drop, beta_read, W_fab, W_drop
     (px), pi_near, the mean h of intermediate reads, s_50 (the mean-h crossing of ``esf_level``) and the pixel
-    count."""
+    count.
+
+    W_fab = sum over the bins with V = 0 of (reads in the bin / pixels in the bin) x bin width: in each bin, the
+    reads among its V = 0 pixels over ALL the pixels of the bin. W_drop = the same with the no-reads among the V = 1
+    pixels of the bin. A bin that holds only V = 0 pixels gives exactly the specification's term for W_fab (and none
+    for W_drop); a bin that holds both kinds contributes to each width in proportion to its share."""
     nb = bins.count
     holder = _CountVector(bins)
     holder.vec = np.asarray(vec, dtype=float)
@@ -253,10 +274,10 @@ def count_statistics(vec: np.ndarray, bins: BinSpec, rule_index: int, esf_level:
     r_drop = none_v1.sum() / total_v1 if total_v1 > 0 else math.nan
     denominator = r_fab + r_drop
     beta = (r_fab - r_drop) / denominator if (math.isfinite(denominator) and denominator > 0) else math.nan
-    per_bin_total = c.sum(axis=(0, 1))
+    per_bin_total = c.sum(axis=(0, 1))                    # all pixels of the bin, V = 0 and V = 1
     with np.errstate(invalid="ignore", divide="ignore"):
-        fab_fraction = np.where(per_bin_total > 0, c[0, :OUT_NONE].sum(axis=0) / per_bin_total, 0.0)
-        drop_fraction = np.where(per_bin_total > 0, none_v1 / per_bin_total, 0.0)
+        fab_fraction = np.where(per_bin_total > 0, c[0, :OUT_NONE].sum(axis=0) / per_bin_total, 0.0)   # reads, V = 0
+        drop_fraction = np.where(per_bin_total > 0, none_v1 / per_bin_total, 0.0)                      # no-reads, V = 1
     w_fab = float(fab_fraction.sum() * bins.width)
     w_drop = float(drop_fraction.sum() * bins.width)
     negative = bins.centers < 0.0
@@ -485,10 +506,10 @@ class BoundaryBiasResult:
     def forward_model_terms(self) -> dict[str, Any]:
         """Terms for forward_model_parameters.json: ``w_fab_px``, ``w_drop_px``, ``pi_near`` and ``beta_read``,
         pooled over the straight edges (every target and gap) at the station nearest the mid station Z_REFERENCE_MM,
-        projector rule; the pooled C row stands in when there are no B frames. Values that are NaN are omitted."""
+        primary (projector) visibility rule; the pooled C row stands in when there are no B frames. Values that are NaN are omitted."""
         for source in (SOURCE_B, SOURCE_C_ARRAYS):
             rows = [r for r in self.rows if r["source"] == source and r["target_id"] == TARGET_ALL
-                    and r["visibility_rule"] == RULE_PROJECTOR]
+                    and r["visibility_rule"] == PRIMARY_VISIBILITY_RULE]
             if not rows:
                 continue
             station = min({r["station_z_mm"] for r in rows}, key=lambda z: abs(z - self.z_reference_mm))
@@ -556,11 +577,21 @@ def run_boundary_bias(session: Session, out_dir: Path, previous: Mapping[str, An
     details: dict[str, Any] = {
         "bins": {"band_px": bins.band, "width_px": bins.width, "centers_px": bins.centers},
         "sigma_tot": sigma_sources, "profiles": profiles, "groups": groups_details,
-        "cross_checks": _cross_checks(rows, previous), "notes": notes,
+        "sign_consistency": _sign_consistency(rows, previous), "notes": notes,
+        "bootstrap": _bootstrap_record(params, options),
     }
     if options.feature_scale:
         details["feature_scale"] = _feature_scale(session, pose_data, c_records)
     return BoundaryBiasResult(rows=rows, details=details, notes=notes, z_reference_mm=params.z_reference_mm)
+
+
+def _bootstrap_record(params: CharacterizationParameters, options: BoundaryOptions) -> dict[str, Any]:
+    """Step 7: how the intervals were made, for the details: the resample count (BOOTSTRAP_RESAMPLES unless the options
+    override it), the confidence level, the unit of replication and the statistics that carry an interval."""
+    resamples = params.bootstrap_resamples if options.bootstrap_resamples is None else options.bootstrap_resamples
+    return {"resamples": int(resamples), "confidence_level": params.confidence_level, "unit_of_replication": "pose",
+            "method": "percentile", "seed": options.bootstrap_seed, "statistics": list(BOOTSTRAPPED_STATISTICS),
+            "visibility_rules": list(VISIBILITY_RULES)}
 
 
 def _pose_vector(pose: _PoseResult, bins: BinSpec, orientation: str | None) -> np.ndarray:
@@ -614,10 +645,13 @@ def _build_rows(session: Session, pose_data: dict[tuple, list[tuple[tuple, _Pose
             rows.append({
                 "source": source, "target_id": target_id, "kind": kind, "gap_mm": gap, "station_z_mm": station,
                 "orientation": orientation, "polarity": polarity, "visibility_rule": rule,
+                "is_primary_rule": rule == PRIMARY_VISIBILITY_RULE,
                 "r_fab": stats["r_fab"], "r_drop": stats["r_drop"], "beta_read": stats["beta_read"],
-                "beta_lower": lower[0], "beta_upper": upper[0], "w_fab_px": stats["w_fab_px"],
-                "w_drop_px": stats["w_drop_px"], "pi_near": stats["pi_near"], "pi_lower": lower[1],
-                "pi_upper": upper[1], "h_mid_mean": stats["h_mid_mean"], "s50_px": stats["s50_px"],
+                "beta_lower": lower["beta_read"], "beta_upper": upper["beta_read"],
+                "w_fab_px": stats["w_fab_px"], "w_fab_lower_px": lower["w_fab_px"], "w_fab_upper_px": upper["w_fab_px"],
+                "w_drop_px": stats["w_drop_px"], "w_drop_lower_px": lower["w_drop_px"],
+                "w_drop_upper_px": upper["w_drop_px"], "pi_near": stats["pi_near"], "pi_lower": lower["pi_near"],
+                "pi_upper": upper["pi_near"], "h_mid_mean": stats["h_mid_mean"], "s50_px": stats["s50_px"],
                 "pixels": int(stats["pixels"]), "poses": len(vectors)})
         profile = outcome_profiles(total, bins)
         profiles.append({"source": source, "target_id": target_id, "kind": kind, "gap_mm": gap,
@@ -627,68 +661,142 @@ def _build_rows(session: Session, pose_data: dict[tuple, list[tuple[tuple, _Pose
     return rows, profiles, details
 
 
+BOOTSTRAPPED_STATISTICS = ("beta_read", "pi_near", "w_fab_px", "w_drop_px")
+"""Step 7: the statistics that get a percentile interval, in the order they are stacked in the bootstrap."""
+
+
 def _bootstrap_group(vectors: list[np.ndarray], bins: BinSpec, esf_level: float, resamples: int,
-                     confidence: float, rng: np.random.Generator) -> list[tuple[tuple[float, float],
-                                                                                tuple[float, float]]]:
-    """Step 7: percentile intervals of beta_read and pi_near by bootstrap over poses (the per-pose count vectors
-    are resampled with replacement and summed; one set of resamples serves both visibility rules, since pi_near does
-    not depend on V). Returns, per visibility rule, ((beta_lower, pi_lower), (beta_upper, pi_upper)); NaN when there
-    are fewer than two poses or no resample gave a value."""
-    nan_pair = (math.nan, math.nan)
+                     confidence: float, rng: np.random.Generator) -> list[tuple[dict[str, float], dict[str, float]]]:
+    """Step 7: percentile intervals of beta_read, pi_near, W_fab and W_drop by bootstrap over poses. The per-pose count
+    vectors are resampled with replacement and summed (the pose is the unit of replication, as everywhere in the
+    package); ONE set of ``resamples`` resamples serves all four statistics and both visibility rules, since pi_near
+    does not depend on V. A statistic that is undefined in a resample (beta_read when nothing is read at V = 0 and
+    nothing is dropped at V = 1; pi_near when there are no wrong-surface reads) is left out of ITS OWN interval only,
+    so that an undefined beta_read never costs the widths their resamples. Returns, per visibility rule, (lower, upper)
+    dicts keyed by BOOTSTRAPPED_STATISTICS; NaN for a statistic with no defined resample, and for every statistic when
+    there are fewer than two poses or fewer than one resample."""
+    nan_bounds = {name: math.nan for name in BOOTSTRAPPED_STATISTICS}
     if len(vectors) < 2 or resamples < 1:
-        return [(nan_pair, nan_pair)] * N_RULES
-
-    def statistic(drawn):
-        total = np.sum(drawn, axis=0)
-        projector = count_statistics(total, bins, 0, esf_level)
-        cameras = count_statistics(total, bins, 1, esf_level)
-        return np.array([projector["beta_read"], projector["pi_near"], cameras["beta_read"]])
-
-    try:
-        boot = bootstrap_statistic(vectors, statistic, resamples, confidence, rng)
-    except ValueError:
-        return [(nan_pair, nan_pair)] * N_RULES
-    lower, upper = np.atleast_1d(boot.lower), np.atleast_1d(boot.upper)
-    return [((float(lower[0]), float(lower[1])), (float(upper[0]), float(upper[1]))),
-            ((float(lower[2]), float(lower[1])), (float(upper[2]), float(upper[1])))]
-
-
-def _cross_checks(rows: list[dict[str, Any]], previous: Mapping[str, Any] | None) -> dict[str, Any]:
-    """Step 5: the sign relations between pi_near, s_50 (own, and Analysis B's edge offset when present) and the
-    edge bias b of Analysis C when present. Reported, not enforced."""
-    out: dict[str, Any] = {"expected": "pi_near > 0 goes with s_50 < 0, b > 0 for disks and b < 0 for cutouts"}
-    pooled = [r for r in rows if r["target_id"] == TARGET_ALL and r["visibility_rule"] == RULE_PROJECTOR]
-    checks = []
-    for row in pooled:
-        checks.append({"source": row["source"], "station_z_mm": row["station_z_mm"], "pi_near": row["pi_near"],
-                       "s50_px": row["s50_px"],
-                       "signs_consistent": bool(math.isfinite(row["pi_near"]) and math.isfinite(row["s50_px"])
-                                                and (row["pi_near"] > 0) == (row["s50_px"] < 0))})
-    out["own_s50_vs_pi"] = checks
-    b_result = None if previous is None else previous.get("B")
-    terms = None
-    if b_result is not None and hasattr(b_result, "forward_model_terms"):
-        try:
-            terms = b_result.forward_model_terms()
-        except Exception:                                # another analysis' failure must not stop E
-            terms = None
-    if terms and terms.get("edge_offset_px") is not None:
-        offset = terms["edge_offset_px"]
-        offset = float(np.mean([v for v in (offset.values() if isinstance(offset, Mapping) else np.atleast_1d(offset))
-                                if v is not None and math.isfinite(float(v))] or [math.nan]))
-        out["analysis_b_edge_offset_px"] = offset
-        out["pi_near_pooled_mean"] = float(np.nanmean([r["pi_near"] for r in pooled])) if pooled else math.nan
-        out["b_offset_sign_consistent"] = bool(math.isfinite(offset) and pooled and
-                                               ((np.nanmean([r["pi_near"] for r in pooled]) > 0) == (offset < 0)))
-    c_result = None if previous is None else previous.get("C")
-    if c_result is not None and hasattr(c_result, "edge_bias_terms"):      # C's bias is no forward-model term
-        try:
-            c_terms = c_result.edge_bias_terms()
-        except Exception:
-            c_terms = {}
-        out["analysis_c_edge_bias"] = {k: v for k, v in c_terms.items() if k.startswith("edge_bias")
-                                       and isinstance(v, (int, float))}
+        return [(dict(nan_bounds), dict(nan_bounds)) for _ in range(N_RULES)]
+    pose_count = len(vectors)
+    samples = np.full((resamples, N_RULES * len(BOOTSTRAPPED_STATISTICS)), math.nan)
+    for resample in range(resamples):
+        drawn = rng.integers(0, pose_count, size=pose_count)
+        total = np.sum([vectors[index] for index in drawn], axis=0)
+        values = []
+        for rule_index in range(N_RULES):
+            stats = count_statistics(total, bins, rule_index, esf_level)
+            values.extend(stats[name] for name in BOOTSTRAPPED_STATISTICS)
+        samples[resample] = values
+    tail_percent = 100.0 * (1.0 - confidence) / TAIL_COUNT_TWO_SIDED
+    out = []
+    for rule_index in range(N_RULES):
+        lower, upper = {}, {}
+        for position, name in enumerate(BOOTSTRAPPED_STATISTICS):
+            column = samples[:, rule_index * len(BOOTSTRAPPED_STATISTICS) + position]
+            defined = column[np.isfinite(column)]
+            lower[name] = float(np.percentile(defined, tail_percent)) if defined.size else math.nan
+            upper[name] = float(np.percentile(defined, 100.0 - tail_percent)) if defined.size else math.nan
+        out.append((lower, upper))
     return out
+
+
+# Step 5: the signs that go with foreground fattening (the near surface claims pixels beyond its true edge).
+EXPECTED_SIGNS = {"pi_near": "> 0", "s50_px": "< 0", "b_disk_px": "> 0", "b_cutout_px": "< 0"}
+"""Foreground fattening: pi_near > 0, s_50 < 0, b > 0 for disks and b < 0 for cutouts (Section 14, Step 5)."""
+EXPECTED_POSITIVE = {"pi_near": True, "s50_px": False, "b_disk_px": True, "b_cutout_px": False}
+"""For each quantity of EXPECTED_SIGNS, whether foreground fattening makes it positive (True) or negative (False)."""
+DIRECTION_FATTENING = "foreground fattening"
+DIRECTION_THINNING = "foreground thinning"
+DIRECTION_MIXED = "mixed"
+DIRECTION_UNDETERMINED = "undetermined"
+"""Values of ``sign_consistency["direction"]``."""
+
+
+def _fattening_vote(name: str, value: Any) -> int | None:
+    """+1 when the sign of ``value`` is the one foreground fattening gives for the quantity ``name`` (EXPECTED_SIGNS),
+    -1 when it is the opposite, None when the value is missing, not finite or exactly zero (no sign to compare)."""
+    if value is None:
+        return None
+    value = float(value)
+    if not math.isfinite(value) or value == 0.0:
+        return None
+    return 1 if (value > 0.0) == EXPECTED_POSITIVE[name] else -1
+
+
+def _sign_entry(name: str, value: Any, source: str) -> dict[str, Any]:
+    """One line of the sign relation: the quantity, where it came from, its value, the sign expected for foreground
+    fattening, and whether the measured sign agrees (None when there is no sign to compare)."""
+    vote = _fattening_vote(name, value)
+    return {"quantity": name, "source": source, "value": None if value is None else float(value),
+            "expected_sign": EXPECTED_SIGNS[name], "agrees_with_fattening": None if vote is None else vote > 0}
+
+
+def _sign_consistency(rows: list[dict[str, Any]], previous: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Step 5: the expected signs and whether the measured signs agree, as ``details["sign_consistency"]``. Reported,
+    not enforced.
+
+    ``expected``: foreground fattening means pi_near > 0, s_50 < 0, b > 0 for disks and b < 0 for cutouts.
+    ``by_station``: for each pooled row of the primary visibility rule (source and station), this analysis' own pi_near
+    and s_50 and whether they agree with each other (``signs_consistent``).
+    ``checks``: one entry per quantity that is available, each with its value, expected sign and whether it agrees:
+    pi_near and s_50 pooled over the stations of each source (B straight edges, C circular features); Analysis B's
+    edge offset (a stand-in for s_50) and Analysis C's edge bias b for disks and for cutouts, when those analyses ran.
+    ``direction``: foreground fattening when every available sign agrees, foreground thinning when every one is
+    opposite, mixed otherwise, undetermined when none is available; ``all_agree`` is True, False or None (undetermined),
+    and ``disagreeing`` lists the quantities that do not agree with fattening."""
+    pooled = [r for r in rows if r["target_id"] == TARGET_ALL and r["visibility_rule"] == PRIMARY_VISIBILITY_RULE]
+    by_station = []
+    for row in pooled:
+        pi_vote, s50_vote = _fattening_vote("pi_near", row["pi_near"]), _fattening_vote("s50_px", row["s50_px"])
+        by_station.append({"source": row["source"], "station_z_mm": row["station_z_mm"], "pi_near": row["pi_near"],
+                           "s50_px": row["s50_px"],
+                           "signs_consistent": bool(pi_vote is not None and pi_vote == s50_vote)})
+    checks: list[dict[str, Any]] = []
+    for source in (SOURCE_B, SOURCE_C_ARRAYS):
+        members = [r for r in pooled if r["source"] == source]
+        for name, key in (("pi_near", "pi_near"), ("s50_px", "s50_px")):
+            values = [r[key] for r in members if math.isfinite(r[key])]
+            if values:
+                checks.append(_sign_entry(name, float(np.mean(values)), f"this analysis, source {source}, "
+                                          "mean over stations"))
+    b_terms = _previous_terms(previous, "B", "forward_model_terms")
+    offset = b_terms.get("edge_offset_px")
+    if offset is not None:
+        values = [float(v) for v in (offset.values() if isinstance(offset, Mapping) else np.atleast_1d(offset))
+                  if v is not None and math.isfinite(float(v))]
+        if values:
+            checks.append(_sign_entry("s50_px", float(np.mean(values)), "Analysis B, edge offset"))
+    c_terms = _previous_terms(previous, "C", "edge_bias_terms")
+    for name, key in (("b_disk_px", "edge_bias_disk_px"), ("b_cutout_px", "edge_bias_cutout_px")):
+        if isinstance(c_terms.get(key), (int, float)):
+            checks.append(_sign_entry(name, c_terms[key], "Analysis C, edge bias b"))
+    votes = [c["agrees_with_fattening"] for c in checks if c["agrees_with_fattening"] is not None]
+    if not votes:
+        direction, all_agree = DIRECTION_UNDETERMINED, None
+    elif all(votes):
+        direction, all_agree = DIRECTION_FATTENING, True
+    elif not any(votes):
+        direction, all_agree = DIRECTION_THINNING, True
+    else:
+        direction, all_agree = DIRECTION_MIXED, False
+    return {"expected": dict(EXPECTED_SIGNS),
+            "convention": ("foreground fattening: the front material is read beyond its true edge; the front material "
+                           "grows by -s_50, so b > 0 for a disk and b < 0 for a cutout (a hole shrinks)"),
+            "by_station": by_station, "checks": checks, "direction": direction, "all_agree": all_agree,
+            "disagreeing": [f"{c['quantity']} ({c['source']})" for c in checks if c["agrees_with_fattening"] is False]}
+
+
+def _previous_terms(previous: Mapping[str, Any] | None, key: str, method: str) -> dict[str, Any]:
+    """The terms another analysis offers through ``method`` (forward_model_terms of B, edge_bias_terms of C), or {} when
+    it did not run or fails: another analysis' failure must not stop E."""
+    result = None if previous is None else previous.get(key)
+    if result is None or not hasattr(result, method):
+        return {}
+    try:
+        return dict(getattr(result, method)() or {})
+    except Exception:                                    # noqa: BLE001
+        return {}
 
 
 def _feature_scale(session: Session, pose_data: dict[tuple, list[tuple[tuple, _PoseResult]]],

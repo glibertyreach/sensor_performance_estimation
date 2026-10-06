@@ -38,6 +38,8 @@ SESSION_LOG_FILE_NAME = "session_log.md"
 ENVIRONMENT_LOG_FILE_NAME = "environment_log.csv"
 ANALYSIS_DIR_NAME = "analysis"
 FORWARD_MODEL_FILE_NAME = "forward_model_parameters.json"
+VECTOR_GEOMETRY_FIELDS = ("projector_offset_mm", "camera_2d_offset_mm")
+"""SensorGeometry fields that are (H, V, Z) vectors: stored as JSON arrays, loaded as tuples."""
 """File names of Section 9 (and the analysis output folder)."""
 
 SERIES_DIRS = {
@@ -80,8 +82,9 @@ class SensorConfig:
     def load(cls, path: str | Path) -> "SensorConfig":
         document = json.loads(Path(path).read_text(encoding="utf-8"))
         geometry = document.pop("geometry", {}) or {}
-        if geometry.get("projector_offset_mm") is not None:
-            geometry["projector_offset_mm"] = tuple(geometry["projector_offset_mm"])
+        for name in VECTOR_GEOMETRY_FIELDS:               # JSON arrays come back as lists; the dataclass holds tuples
+            if geometry.get(name) is not None:
+                geometry[name] = tuple(geometry[name])
         return cls(geometry=SensorGeometry(**geometry), **document)
 
 
