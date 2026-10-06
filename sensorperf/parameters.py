@@ -73,6 +73,18 @@ TIER_A_DISPARITY_QUANTUM_PX = 0.125
 depth quantum dZ_q = q Z^2 / k of the B-Z series until Analysis A (or the ramp) measures one (Section 6.2, Step 3: "using
 the Tier-A q"). The value (1/8 px) is the indicative one of the synthetic sensor model and is NOT a datasheet value."""
 
+ROBOT_REPEATABILITY_DEFAULT_MM = 0.05
+"""Default of ``CharacterizationParameters.robot_repeatability_mm``: the position repeatability required of the robot
+(ISO 9283, Section 3.1 equipment list; the value is the document's requirement, not a measurement)."""
+TRUTH_RELIABLE_RUNG_TO_REPEATABILITY_RATIO = 2.0
+"""A Z-step rung must be at least this many times the robot repeatability for its step truth to count as reliable. It is
+the ONE number behind two rules that must not diverge: the floor the step ladder applies (Section 6.2, Step 2: a rung
+below the smallest Z move the robot is trusted to make, ``robot_min_resolvable_move_mm``, is raised to it; its default is
+this ratio times ``ROBOT_REPEATABILITY_DEFAULT_MM``, 0.1 mm) and the truth rule of Analysis B-Z (Section 11.2, Step 10:
+a rung smaller than this ratio times ``robot_repeatability_mm`` is flagged ``truth_reliable = False`` and left out of the
+gain regression; see ``CharacterizationParameters.truth_reliable_rung_floor_mm``). At the indicative values no rung is
+flagged; the rule matters for a robot less repeatable than the requirement."""
+
 # Numerical guards.
 MIN_POSITIVE_DEPTH_MM = 1.0e-6
 """A depth smaller than this is treated as zero in the relations below."""
@@ -277,12 +289,14 @@ class CharacterizationParameters:
     dZ_q(Z0) = q Z0^2 / k with the Tier-A q until Analysis A has measured one (Section 6.2). Each rung is raised to at
     least ``robot_min_resolvable_move_mm``. At the indicative geometry the rungs run from 0.1 to 3.1 mm at 400 mm, 0.39 to
     12.4 mm at 800 mm and 1.55 to 50 mm at 1600 mm; the planner lists them per station in plan_summary.txt."""
-    robot_min_resolvable_move_mm: float = 0.1
-    """The smallest Z move the robot is trusted to execute (Neil's figure, mm). A ladder rung or a staircase step smaller
-    than this is raised to it; the analysis takes the read-back displacement as the truth in any case."""
-    robot_repeatability_mm: float = 0.05
-    """Position repeatability of the robot (ISO 9283), the equipment requirement of Section 3.1; a commanded Z step
-    smaller than this has a step truth no better than the robot itself, so such ladder rungs are reported but flagged."""
+    robot_min_resolvable_move_mm: float = TRUTH_RELIABLE_RUNG_TO_REPEATABILITY_RATIO * ROBOT_REPEATABILITY_DEFAULT_MM
+    """The smallest Z move the robot is trusted to execute (Neil's figure, mm; the default is
+    ``TRUTH_RELIABLE_RUNG_TO_REPEATABILITY_RATIO`` times the required repeatability, 0.1 mm). A ladder rung or a staircase
+    step smaller than this is raised to it; the analysis takes the read-back displacement as the truth in any case."""
+    robot_repeatability_mm: float = ROBOT_REPEATABILITY_DEFAULT_MM
+    """Position repeatability of the robot (ISO 9283), the equipment requirement of Section 3.1. A ladder rung smaller than
+    ``TRUTH_RELIABLE_RUNG_TO_REPEATABILITY_RATIO`` (2) times this has a step truth too close to the robot's own scatter, so
+    Analysis B-Z reports it but flags it ``truth_reliable = False`` (Section 11.2, Step 10)."""
     z_step_approach_overshoot_mm: float = 2.0
     """Every visit of series Z is approached from the same direction so that the backlash and compliance of the robot
     joints (a different elastic and frictional state after a move in the opposite direction) do not enter the A / B
@@ -293,6 +307,17 @@ class CharacterizationParameters:
     ramp_quanta: float = 4.0
     """The B-Z ramp tilts the plate about H so that the true depth across the plate's VISIBLE height (the smaller of the
     plate height and the field height at that Z) spans this many expected depth quanta (Section 6.2)."""
+    ramp_max_intermediate_fraction: float = 0.5
+    """Classification of a B-Z ramp curve as stepped or smooth (Section 11.2, Step 14): the curve counts as stepped when
+    fewer than this fraction of its changes over a half-quantum window are intermediate (fall inside
+    ``ramp_intermediate_band``), and as smooth otherwise. Chosen by argument, not from data: a staircase has about 0 of
+    its window changes in the band (a window lies on a plateau or spans one step) and a smooth ramp has all of them, so
+    the midpoint 0.5 separates the two with the same margin on each side."""
+    ramp_intermediate_band: tuple[float, float] = (0.25, 0.75)
+    """Window changes of a B-Z ramp curve, as fractions of the quantum, that count as intermediate (Section 11.2,
+    Step 14): a change over a half-quantum window is about 0 (on a plateau) or about 1 quantum (across a step) for a
+    staircase and about 0.5 quantum for a smooth ramp, so the band is the central half of the interval between 0 and 1.
+    Chosen by argument, not from data."""
     z_staircase_subdivision: int = 10
     """OPTIONAL second pass (staircase): fine-sweep points per expected depth quantum; the step is
     max(dZ_q / this, ``robot_min_resolvable_move_mm``)."""
@@ -517,6 +542,13 @@ class CharacterizationParameters:
         times the expected D_0 (EXPECTED_D0_PX) at the nearest station, where a pixel is smallest and the post
         therefore subtends the most pixels, D = fraction x D_0,px x p(Z_MIN) (about 2 mm at the indicative geometry)."""
         return self.post_diameter_fraction_of_d0 * self.expected_d0_px * geometry.pixel_footprint_mm(self.z_min_mm)
+
+    @property
+    def truth_reliable_rung_floor_mm(self) -> float:
+        """The smallest Z-step rung whose step truth is reliable, mm: ``TRUTH_RELIABLE_RUNG_TO_REPEATABILITY_RATIO`` times
+        ``robot_repeatability_mm`` (Section 11.2, Step 10; the same ratio defines the default of the ladder floor
+        ``robot_min_resolvable_move_mm``, Section 6.2, Step 2)."""
+        return TRUTH_RELIABLE_RUNG_TO_REPEATABILITY_RATIO * self.robot_repeatability_mm
 
     def lateral_sweep_positions_px(self) -> tuple[float, ...]:
         """The positions of the optional lateral sweep along one axis, in pixels from the nominal position:
