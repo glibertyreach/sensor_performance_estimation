@@ -534,11 +534,35 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
   `A_sentinel_drift.csv` the drift of each mount predicted from its logged temperatures, observed minus predicted, and `attribution`
   ("sensor" within `DRIFT_ATTRIBUTION_NOISE_FACTOR` x sigma_t / sqrt(sentinel_frames), else "robot or mount"); the columns are
   empty without a drift run. The simulator does not log a sensor temperature, so the tests build the run from synthetic frames.
-- C: transfer curves A_sensed/A_true and A_sensed/A_geo against D_px pooled over features and stations (the summary rows
+- C (the step numbers of `analysis/area.py` follow the specification's thirteen steps of Section 12: 9 scaling test, 10 edge bias, 11 consistency
+  with B, 12 field and open-background variants, 13 outputs): transfer curves A_sensed/A_true and A_sensed/A_geo against D_px pooled over features and stations (the summary rows
   keep `site_id` / `level_index`; figures draw one curve per feature). The overlap (scaling) test of `analysis/overlap.py`
   compares neighboring features over their shared D_px range: per (kind, gap, ratio) and pair the mean difference of the two
   curves (interpolated linearly in ln D_px), a parametric bootstrap interval of it, and whether zero lies inside; a
-  disagreement is attributed to sigma_tot(Z) (A's per-station values are reported with the pair). `C_overlap_test.csv`.
+  disagreement is attributed to sigma_tot(Z) (A's per-station values are reported with the pair). `C_overlap_test.csv` has the
+  columns `kind`, `gap_mm`, `ratio` (A_sensed / A_true, or A_sensed / A_geo of the projector version for cutouts), the pair
+  (`feature_small`, `feature_large`), the shared range, `mean_difference`, `interval_lower` / `interval_upper` and `agrees`
+  (zero inside the interval).
+  Step 7, A_geo: both versions are reported (`a_geo_cameras_mm2`, `a_geo_projector_mm2`); the projector center is the as-built
+  `PROJECTOR_OFFSET_MM` of `sensor_config.json` (`StereoGeometry.from_sensor_geometry`), recorded in the details (`projector`, with
+  whether it is midway between the cameras); with a midway projector the two coincide for a convex outline (tested for the circular
+  cutouts), and `geo_version_comparison` says which tracks the data better.
+  Step 10, the edge bias: `b` is fitted against Z for the LARGEST feature of each plate at the stations where its D_px is at least
+  `CharacterizationParameters.area_bias_fit_min_d_px` (`AREA_BIAS_FIT_MIN_D_PX` = `AREA_BIAS_FIT_D0_FACTOR` (2) x
+  `EXPECTED_D0_PX_DEFAULT` (7) = 14 px; the default is tied to `expected_d0_px` through the two module constants only, so an override
+  of `expected_d0_px` needs an override of this one). It replaces the former `AreaOptions.bias_fit_min_d_px` (4 px) and the largest-third
+  rule; the sign check and the A_geo version comparison use the same threshold.
+  Step 11, the blur kernel: `area._choose_kernel` takes the measured H and V line spread functions of B (`previous["B"].lsf_rows()`,
+  else `B_lsf.csv` in the output folder), pools them per B station (the one nearest in Z; the plate's gap where B has it) over edges and
+  polarities, and builds the separable 2-D kernel (`MeasuredKernel`, `line_spread_from_lsf`: negative tail values set to zero, centered
+  at the median, symmetrized because s points toward the front material, unit sum). The blur alone must not move the half-height
+  crossing, so the median (= s_50 of the function) is removed and applied separately: two predictions per feature, with the blur alone
+  and with the growth -s_50 of the front material, and the sign check b_disk ~ -s_50, b_cutout ~ +s_50. Only without line spread
+  functions is the Gaussian of equal 10-90 percent rise used (`GaussianKernel`: B's `rise_h_px` / `rise_v_px`, or the own radial ESF);
+  `details["kernel"]["kind"]` (`measured_line_spread` or `gaussian_equal_rise`) and the notes say which.
+  Step 12, the field comparison
+  (`details["field_comparison"]`) has one entry per field pose with its `field_fraction_achieved` (manifest column; the summary row
+  carries the mean per configuration), and the open-background comparison holds the reference station only.
 - D: per configuration (station) tau per feature from the blank sites, gamma per station, the outcomes, independence and
   the geometric limit; pooled per (kind, gap, field, rule) over the (feature, station) pairs: the psychometric fit on
   ln D_px with gamma fixed from the pooled blank sites (pairs whose D_px coincide are merged), D_50 / D_10 from the best
@@ -585,7 +609,9 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
   `sweep_pixel_lock_amplitude_px`, `sweep_dot_pitch_amplitude_px` (NaN where not available); the details JSON keeps every pose's point,
   both fits (with the intercept) and the skipped counts; the figure `B_transfer` (PNG and SVG) has, per station, the sensed edge
   position against the offset with the fitted line per edge series and the residual against the offset modulo 1 px. The bootstrap
-  is now Step 10. The forward-model terms (rise H and V at the reference station, mean s_50) are unchanged.
+  is now Step 10. The forward-model terms (rise H and V at the reference station, mean s_50) are unchanged. Step 16 adds `B_lsf.csv`
+  (`LSF_CSV_NAME`, `LSF_COLUMNS`, `LateralResolutionResult.lsf_rows`): one row per edge, Z, orientation, polarity, gap and
+  signed-distance bin with `s_px`, the Hann-smoothed `lsf_per_px` (dESF/ds) and `count_read`; Analysis C builds its blur kernel from it.
 - B-Z (`analysis/resolution_depth.py`, Section 11.2). The step-ladder analysis works per station: the rungs differ from station
   to station, and it uses the read-back displacement as the truth, so only the reporting changed: `truth_reliable` and
   `delta_50_is_bound` are evaluated against each station's own rung set (a delta_50 below the station's smallest reliable rung is

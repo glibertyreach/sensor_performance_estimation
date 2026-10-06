@@ -1,5 +1,5 @@
 """
-Analysis C: true versus sensed area (procedure document, Section 12), Steps 1 to 12.
+Analysis C: true versus sensed area (procedure document, Section 12), Steps 1 to 13.
 
 What it computes
     For every configuration of the C frames (target, gap, station, field position, sub-series) and for
@@ -44,16 +44,18 @@ How the steps are implemented (the step numbers are cited in the code)
        the mean over all frames, the standard deviation of the pose means (phase effect) and the root-mean-square
        within-pose standard deviation (temporal effect). The curves are POOLED over the features of a plate and over
        all stations (the summary rows carry the feature identity in ``site_id`` and ``level_index``; the figures
-       draw one curve per feature). SCALING (OVERLAP) TEST (redesign note, Section 5): where two neighboring
-       features overlap in D_px, their curves are compared (analysis.overlap): the mean difference of the curves over
-       the shared D_px range and whether zero lies inside its bootstrap interval, per (kind, gap) and per ratio
-       (A_sensed / A_true, and A_sensed / A_geo of the projector version for cutouts). Agreement supports D_px as the
-       governing variable; disagreement is attributed to sigma_tot(Z) (from ``previous["A"]``) and reported.
-    9  Edge bias b = (D_s - D) / 2 with D_s = 2 sqrt(A_sensed / pi), in mm and px. b is fitted against Z
+       draw one curve per feature).
+    9  SCALING (OVERLAP) TEST (redesign note, Section 5): where two neighboring features overlap in D_px, their
+       curves are compared (analysis.overlap): the mean difference of the curves over the shared D_px range and
+       whether zero lies inside its bootstrap interval, per (kind, gap) and per ratio (A_sensed / A_true, and
+       A_sensed / A_geo of the projector version for cutouts). One row per feature pair, kind, gap and ratio goes to
+       C_overlap_test.csv (OVERLAP_COLUMNS). Agreement supports D_px as the governing variable; disagreement is
+       attributed to sigma_tot(Z) (from ``previous["A"]``) and reported as the difference between the two curves.
+    10 Edge bias b = (D_s - D) / 2 with D_s = 2 sqrt(A_sensed / pi), in mm and px. b is fitted against Z
        (b = c0 + c1 Z) using the LARGEST feature of each plate at the stations where its D_px is at least
        CharacterizationParameters.area_bias_fit_min_d_px (AREA_BIAS_FIT_MIN_D_PX: twice the 7 px expected minimum
        detectable diameter, so that b does not depend on D).
-    10 Consistency with B: an ideal disk of the as-built diameter (rasterized at AreaOptions.kernel_subsample
+    11 Consistency with B: an ideal disk of the as-built diameter (rasterized at AreaOptions.kernel_subsample
        samples per pixel) is blurred with a 2-D kernel and thresholded at 0.5. The kernel is built, in this order of
        preference, from
          (a) the MEASURED H and V line spread functions of Analysis B (``B_lsf.csv``, Section 11, Step 16), taken
@@ -71,12 +73,12 @@ How the steps are implemented (the step numbers are cited in the code)
        a growth of the front material, since a symmetric blur cannot shift the 0.5 crossing by itself. The sign of
        b is compared with the sign expected from s_50: front material grows by -s_50, so b_disk ~ -s_50 and
        b_cutout ~ +s_50 (a hole shrinks).
-    11 Field sub-series (subseries "field") against the on-axis transfer curves of the same plate and gap, one
+    12 Field sub-series (subseries "field") against the on-axis transfer curves of the same plate and gap, one
        entry PER POSE with the achieved field fraction of that pose (manifest column ``field_fraction_achieved``)
        as a factor; open-background cutouts (subseries "open", no back plate) at the reference station only: no
        back plane exists, so only A_noread is defined, compared with A_true (fill-in by front-plate values shows
        as A_noread < A_true).
-    12 Outputs: C_area_summary.csv, C_area_details.json, C_overlap_test.csv, figures (transfer curves with the
+    13 Outputs: C_area_summary.csv, C_area_details.json, C_overlap_test.csv, figures (transfer curves with the
        overlap ranges shaded, b versus Z, phase spread versus D_px, predicted versus measured).
 
 Shared helpers other modules import from here: the geometric visible area and the geometric limit diameter
@@ -161,7 +163,7 @@ SUMMARY_COLUMNS = (
     "a_sensed_phase_std_mm2", "a_sensed_temporal_std_mm2", "a_noread_mean_mm2", "a_upper_mean_mm2",
     "a_contour_mean_mm2", "ratio_true", "ratio_geo_cameras", "ratio_geo_projector", "b_mm", "b_px", "poses",
     "frames", "ratio_noread_true", "ratio_contour_pixelcount", "field_fraction_achieved")
-"""Columns of C_area_summary.csv: the specification's list (Step 12) followed by three extra columns
+"""Columns of C_area_summary.csv: the specification's list (Step 13) followed by three extra columns
 (A_noread / A_true, used by the open-background comparison, the contour-to-pixel-count area ratio of Step 5, and the mean
 achieved field fraction of the configuration's poses, NaN where the manifest does not carry it)."""
 
@@ -187,13 +189,13 @@ MIN_STATIONS_FOR_FIT = 2
 SQUARE_ROOT_PI_FACTOR = 2.0
 """D_s = 2 sqrt(A / pi): the diameter of the circle of the same area."""
 KERNEL_SIGMA_EXTENT = 5.0
-"""Step 10: the rasterized disk is padded by this many kernel sigmas on every side."""
+"""Step 11: the rasterized disk is padded by this many kernel sigmas on every side."""
 KERNEL_THRESHOLD = 0.5
-"""Step 10: the blurred ideal disk is thresholded at this value."""
+"""Step 11: the blurred ideal disk is thresholded at this value."""
 GEO_LIMIT_CELLS_ACROSS = 64
 """Grid cells across the diameter when the geometric limit (D 0, Analysis D Step 8) is bisected."""
 MIN_LSF_BINS = 5
-"""Step 10: a line spread function with fewer bins than this is not turned into a kernel."""
+"""Step 11: a line spread function with fewer bins than this is not turned into a kernel."""
 KERNEL_KIND_MEASURED = "measured_line_spread"
 KERNEL_KIND_GAUSSIAN = "gaussian_equal_rise"
 """Values of ``details["kernel"]["kind"]``: the kernel of the measured line spread functions of Analysis B, or the
@@ -238,14 +240,14 @@ class AreaOptions:
     contour_pad_px: int = 2
     """Step 5: the interpolation region extends this many pixels beyond the feature window."""
     bias_fit_min_ratio: float = 0.25
-    """Step 9: a feature enters the b-versus-Z fit (besides being the plate's largest feature at a station where D_px
+    """Step 10: a feature enters the b-versus-Z fit (besides being the plate's largest feature at a station where D_px
     is at least ``CharacterizationParameters.area_bias_fit_min_d_px``) only when the sensor resolves it at all, that is
     when its mean sensed area is at least this fraction of A_true (a feature the sensor erases or fills in has no
     meaningful b; b is then about -D/2)."""
     kernel_subsample: int = 8
-    """Step 10: samples per pixel of the rasterized ideal disk."""
+    """Step 11: samples per pixel of the rasterized ideal disk."""
     esf_min_d_px: float = 4.0
-    """Step 10 fallback: the own radial ESF uses features at least this many pixels in diameter."""
+    """Step 11 fallback: the own radial ESF uses features at least this many pixels in diameter."""
     geo_limit_min_diameter_mm: float = 0.01
     """Geometric limit search: lower end of the bisection bracket, mm."""
     geo_limit_bisection_steps: int = 40
@@ -500,7 +502,7 @@ class _PoseMeasure:
 
 @dataclass
 class _EsfAccumulator:
-    """Running sums of h in bins of signed distance (Step 10 fallback kernel), one per feature kind."""
+    """Running sums of h in bins of signed distance (Step 11 fallback kernel), one per feature kind."""
 
     sums: np.ndarray
     counts: np.ndarray
@@ -613,7 +615,7 @@ def _process_pose(session: Session, pose_records: list[FrameRecord], options: Ar
         measures[feature.site_id] = _PoseMeasure(sensed, noread, contour, geo_c, geo_p, pose_index=first.pose_index,
                                                  field_fraction_achieved=_field_fraction(first))
 
-        # Step 10 fallback kernel: radial ESF of the large features of this pose (mean frame).
+        # Step 11 fallback kernel: radial ESF of the large features of this pose (mean frame).
         if (esf is not None and mean_height is not None
                 and feature.diameter_mm / geometry.pixel_footprint_mm >= options.esf_min_d_px):
             s = geometry.signed_distance_px(feature)
@@ -627,7 +629,7 @@ def _process_pose(session: Session, pose_records: list[FrameRecord], options: Ar
 
 
 # ---------------------------------------------------------------------------
-# Step 10 helpers
+# Step 11 helpers
 # ---------------------------------------------------------------------------
 @dataclass(frozen=True)
 class GaussianLineSpread:
@@ -677,7 +679,7 @@ class MeasuredLineSpread:
 
 def predicted_area_from_line_spreads_px2(diameter_px: float, spread_h, spread_v, growth_px: float, subsample: int,
                                          kind: str) -> float:
-    """Step 10: the area, in square pixels, of the region where an ideal disk (or hole) of the given diameter stays at or
+    """Step 11: the area, in square pixels, of the region where an ideal disk (or hole) of the given diameter stays at or
     above KERNEL_THRESHOLD after a SEPARABLE blur: the disk is blurred along H (image columns) with ``spread_h`` and along
     V (image rows) with ``spread_v``, each a :class:`GaussianLineSpread` or :class:`MeasuredLineSpread`. The disk of
     radius R + growth (disk) or R - growth (cutout; ``growth`` is the growth of the FRONT material) is rasterized at
@@ -698,7 +700,7 @@ def predicted_area_from_line_spreads_px2(diameter_px: float, spread_h, spread_v,
 
 def predicted_area_px2(diameter_px: float, sigma_h_px: float, sigma_v_px: float, growth_px: float,
                        subsample: int, kind: str) -> float:
-    """Step 10 with the Gaussian fallback kernel: :func:`predicted_area_from_line_spreads_px2` with a Gaussian of
+    """Step 11 with the Gaussian fallback kernel: :func:`predicted_area_from_line_spreads_px2` with a Gaussian of
     standard deviation ``sigma_h_px`` along H and ``sigma_v_px`` along V."""
     return predicted_area_from_line_spreads_px2(diameter_px, GaussianLineSpread(sigma_h_px),
                                                 GaussianLineSpread(sigma_v_px), growth_px, subsample, kind)
@@ -706,7 +708,7 @@ def predicted_area_px2(diameter_px: float, sigma_h_px: float, sigma_v_px: float,
 
 def line_spread_from_lsf(s_px: np.ndarray, lsf: np.ndarray, rise_low: float, rise_high: float
                          ) -> tuple[MeasuredLineSpread, dict[str, float]] | None:
-    """Step 10: the blur kernel along one axis from a measured line spread function (B_lsf.csv: ``lsf`` at the bin centers
+    """Step 11: the blur kernel along one axis from a measured line spread function (B_lsf.csv: ``lsf`` at the bin centers
     ``s_px``, in the true-edge frame, s positive on the front side). Returns the kernel and its description (``median_px``
     = s_50 of the function, ``rise_px`` = its ``rise_low`` to ``rise_high`` distance), or None when the function has no
     positive weight.
@@ -888,7 +890,7 @@ def _lsf_rows_from_previous(previous: Mapping[str, Any] | None, out_dir: Path | 
 
 
 def _kernel_from_b_lsf(previous: Mapping[str, Any] | None, out_dir: Path | None, params) -> MeasuredKernel | None:
-    """Step 10: the kernel from the measured line spread functions of Analysis B (see :func:`_lsf_rows_from_previous`),
+    """Step 11: the kernel from the measured line spread functions of Analysis B (see :func:`_lsf_rows_from_previous`),
     or None when B did not provide any."""
     found = _lsf_rows_from_previous(previous, out_dir)
     if found is None:
@@ -960,7 +962,7 @@ def _kernel_from_own_esf(esf: dict[str, _EsfAccumulator], params, rise_factor: f
 
 
 # ---------------------------------------------------------------------------
-# Summary rows (Steps 6, 8, 9)
+# Summary rows (Steps 6, 8, 10)
 # ---------------------------------------------------------------------------
 def _std(values: np.ndarray) -> float:
     return float(np.std(values, ddof=1)) if values.size >= MIN_POSES_FOR_STD else math.nan
@@ -1016,7 +1018,7 @@ def _row_for_feature(record: FrameRecord, feature: Feature, measures: list[_Pose
 
 def _bias_fits(rows: list[dict[str, Any]], options: AreaOptions, min_d_px: float, geometry_fx: float,
                z_reference_mm: float) -> list[dict[str, Any]]:
-    """Step 9: b against Z per (kind, gap) from the main configurations, using the LARGEST feature of each plate at the
+    """Step 10: b against Z per (kind, gap) from the main configurations, using the LARGEST feature of each plate at the
     stations where its D_px is at least ``min_d_px`` (AREA_BIAS_FIT_MIN_D_PX), so that b does not depend on D. A station
     where the sensor does not resolve that feature (A_sensed / A_true below options.bias_fit_min_ratio) is left out. Returns
     one dict per kind and gap with the points used, the linear fit b_mm = intercept + slope Z (when at least two
@@ -1115,8 +1117,8 @@ def _group(rows: list[dict[str, Any]], keys: tuple[str, ...]) -> dict[Any, list[
 def run_area(session: Session, out_dir: Path, previous: Mapping[str, Any] | None,
              options: AreaOptions | None = None, overlap_options: OverlapOptions = OverlapOptions()
              ) -> AreaResult | None:
-    """Analysis C (Section 12, Steps 1 to 11) on the procedure-"C" frames of the session. Returns None when there
-    are none. ``previous`` maps the letters of analyses already run to their results. Step 10 builds its blur kernel
+    """Analysis C (Section 12, Steps 1 to 12) on the procedure-"C" frames of the session. Returns None when there
+    are none. ``previous`` maps the letters of analyses already run to their results. Step 11 builds its blur kernel
     from the line spread functions of Analysis B (``previous["B"].lsf_rows()``, or ``B_lsf.csv`` in ``out_dir`` when B
     did not run in this process) and falls back to a Gaussian of equal 10-90 percent rise only without them. Nothing is
     written here; see ``write_outputs``."""
@@ -1184,7 +1186,7 @@ def run_area(session: Session, out_dir: Path, previous: Mapping[str, Any] | None
         "notes": notes,
     }
     if kernel is None:
-        notes.append("no kernel for Step 10: neither Analysis B nor the own ESF gave line spread functions or "
+        notes.append("no kernel for Step 11: neither Analysis B nor the own ESF gave line spread functions or "
                      "rise distances")
     return AreaResult(rows=rows, details=details, options=options, notes=notes, z_reference_mm=z_reference)
 
@@ -1196,7 +1198,7 @@ def _esf_bins(params) -> int:
 
 def _choose_kernel(previous: Mapping[str, Any] | None, out_dir: Path | None, esf: dict[str, _EsfAccumulator],
                    params, notes: list[str]):
-    """Step 10: the blur kernel, in order of preference (1) the measured line spread functions of Analysis B,
+    """Step 11: the blur kernel, in order of preference (1) the measured line spread functions of Analysis B,
     (2) a Gaussian of equal 10-90 percent rise from B's rise distances, (3) a Gaussian from the own radial ESF of this
     analysis. Choices (2) and (3) are the fallback: the notes say that the line spread functions were absent."""
     measured = _kernel_from_b_lsf(previous, out_dir, params)
@@ -1207,13 +1209,13 @@ def _choose_kernel(previous: Mapping[str, Any] | None, out_dir: Path | None, esf
         esf, params, rise_factor, params.boundary_band_half_width_px)
     if gaussian is None:
         return None
-    notes.append("Step 10: " + LSF_FALLBACK_NOTE + f" (source: {gaussian['source']})")
+    notes.append("Step 11: " + LSF_FALLBACK_NOTE + f" (source: {gaussian['source']})")
     return GaussianKernel(gaussian)
 
 
 def _consistency_with_b(rows: list[dict[str, Any]], kernel_model, options: AreaOptions, fx: float,
                         min_d_px: float) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Step 10: predicted versus measured sensed area per main row, and the sign check of b against s_50. Two
+    """Step 11: predicted versus measured sensed area per main row, and the sign check of b against s_50. Two
     predictions are made for every row: with the blur alone and with the edge offset s_50 applied as a growth of
     the front material. ``kernel_model`` is a :class:`MeasuredKernel` or :class:`GaussianKernel` (None: nothing is
     predicted); the kernel of the row's own station is used (the nearest B station for the measured one). The sign
@@ -1265,7 +1267,7 @@ def _consistency_with_b(rows: list[dict[str, Any]], kernel_model, options: AreaO
 
 
 def _pose_entry(record: FrameRecord, feature: Feature, measure: _PoseMeasure, p_mm: float) -> dict[str, Any]:
-    """One pose's own sensed-area ratio and edge bias for one feature (the unit of the field comparison, Step 11),
+    """One pose's own sensed-area ratio and edge bias for one feature (the unit of the field comparison, Step 12),
     with the pose's achieved field fraction."""
     a_true = feature.true_area_mm2()
     sensed = float(np.mean(measure.sensed))
@@ -1280,7 +1282,7 @@ def _pose_entry(record: FrameRecord, feature: Feature, measure: _PoseMeasure, p_
 
 
 def _field_comparison(rows: list[dict[str, Any]], field_poses: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Step 11: the field sub-series against the on-axis transfer curves of the same plate, gap, station and site, ONE
+    """Step 12: the field sub-series against the on-axis transfer curves of the same plate, gap, station and site, ONE
     ENTRY PER POSE. ``field_fraction_achieved`` (the fraction of the requested off-axis offset the pose reached, the
     manifest column of the same name; NaN where absent) is carried per pose as the factor of the comparison:
     ``difference`` is the pose's A_sensed / A_true minus the on-axis one."""
@@ -1304,7 +1306,7 @@ def _field_comparison(rows: list[dict[str, Any]], field_poses: list[dict[str, An
 
 def _open_background(open_rows: list[dict[str, Any]], reference_station_mm: float,
                      notes: list[str]) -> list[dict[str, Any]]:
-    """Step 11: open-background cutouts at the REFERENCE station only (Z_REFERENCE_MM): A_noread against A_true
+    """Step 12: open-background cutouts at the REFERENCE station only (Z_REFERENCE_MM): A_noread against A_true
     (fill-in by front values: ratio < 1). Rows at other stations are not compared; the notes count them."""
     at_reference = [r for r in open_rows if abs(r["station_z_mm"] - reference_station_mm) < STATION_MATCH_TOLERANCE_MM]
     if len(at_reference) < len(open_rows):
@@ -1363,7 +1365,7 @@ def _geo_version_comparison(rows: list[dict[str, Any]], options: AreaOptions, mi
 
 
 # ---------------------------------------------------------------------------
-# Outputs (Step 12)
+# Outputs (Step 13)
 # ---------------------------------------------------------------------------
 def write_outputs(result: AreaResult, out_dir: Path) -> list[Path]:
     """Write C_area_summary.csv, C_area_details.json and the figures into ``out_dir``; returns the paths."""
@@ -1450,7 +1452,7 @@ def _figure_transfer(result: AreaResult, out_dir: Path, key: str, label: str, st
 
 
 def _figure_bias(result: AreaResult, out_dir: Path) -> list[Path]:
-    """Step 9: edge bias b (mm) against Z for the features that enter the fit, with the fitted lines."""
+    """Step 10: edge bias b (mm) against Z for the features that enter the fit, with the fitted lines."""
     fits = [f for f in result.details.get("bias_fits", []) if f.get("points")]
     if not fits:
         return []
@@ -1500,7 +1502,7 @@ def _figure_phase_spread(result: AreaResult, out_dir: Path) -> list[Path]:
 
 
 def _figure_predicted(result: AreaResult, out_dir: Path) -> list[Path]:
-    """Step 10: measured A_sensed / A_true against the blur-and-threshold prediction (pure and with the edge offset)."""
+    """Step 11: measured A_sensed / A_true against the blur-and-threshold prediction (pure and with the edge offset)."""
     comparison = result.details.get("consistency_with_b", [])
     if not comparison:
         return []

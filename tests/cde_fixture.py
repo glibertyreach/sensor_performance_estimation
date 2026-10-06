@@ -29,7 +29,7 @@ from pathlib import Path
 import numpy as np
 
 from sensorperf.geometry.targets import fronto_parallel_pose, make_standard_target_set
-from sensorperf.io.manifest import SUBSERIES_FIELD, SUBSERIES_OPEN
+from sensorperf.io.manifest import FIELD_FRACTION_ACHIEVED_KEY, SUBSERIES_FIELD, SUBSERIES_OPEN
 from sensorperf.parameters import (
     CharacterizationParameters, PROCEDURE_AREA, PROCEDURE_DETECTION, PROCEDURE_EDGES, SensorGeometry,
     TARGET_CUTOUTS, TARGET_DISKS, TARGET_RAISED_SQUARE, TARGET_SQUARE_WINDOW,
@@ -49,6 +49,9 @@ AREA_FRAMES = 2
 FIELD_POSES = 4
 FIELD_CODE = 2
 FIELD_FRACTION_OF_HALF_FIELD = 0.3
+FIELD_FRACTIONS_ACHIEVED = (1.0, 0.9, 0.8, 1.0)
+"""The achieved field fraction recorded for each field pose in turn (the planner stores one per pose when it has to pull a
+pose inward; the manifest carries it as ``field_fraction_achieved``). Metadata only: the rendered pose is unchanged."""
 OPEN_POSES = 4
 DETECTION_POSES = 60
 """Single-frame poses per plate and station."""
@@ -98,10 +101,12 @@ def build_plan(params: CharacterizationParameters, geometry: SensorGeometry, rng
             station = params.z_reference_mm
             half_h, half_v = geometry.half_field_mm(station)
             h0, v0 = FIELD_FRACTION_OF_HALF_FIELD * half_h, -FIELD_FRACTION_OF_HALF_FIELD * half_v
-            for _ in range(FIELD_POSES):
+            for pose_number in range(FIELD_POSES):
                 dh, dv = builder.jitter_offsets_mm(station)
+                fraction = FIELD_FRACTIONS_ACHIEVED[pose_number % len(FIELD_FRACTIONS_ACHIEVED)]
                 builder.add(PROCEDURE_AREA, target_id, gap, station, FIELD_CODE, AREA_FRAMES, SUBSERIES_FIELD,
-                            fronto_parallel_pose(h0 + dh, v0 + dv, station), offset_h_mm=dh, offset_v_mm=dv)
+                            fronto_parallel_pose(h0 + dh, v0 + dv, station), offset_h_mm=dh, offset_v_mm=dv,
+                            notes={FIELD_FRACTION_ACHIEVED_KEY: fraction})
         # Open-background variant of the cutouts (Section 7, Step 4): no back plate.
         station = params.z_reference_mm
         for _ in range(OPEN_POSES):

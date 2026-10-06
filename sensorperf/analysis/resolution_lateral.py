@@ -22,7 +22,9 @@ the square carries the slant, so every edge is slanted against the pixel grid):
             the distance to that line; the alignment offset between the fitted line and the true edge and
             whether the two ESFs agree within ESF_AGREEMENT_BINS bins
   Step 6    the 10-90 percent rise distance (px, and mm via p(Z)), the LSF = dESF/ds (smoothed with a Hann
-            window), the MTF = |FFT(LSF)| normalized at zero frequency and MTF50 in cycles per pixel
+            window), the MTF = |FFT(LSF)| normalized at zero frequency and MTF50 in cycles per pixel. The smoothed LSF
+            of every edge is handed on to Analysis C (Section 12, Step 11: its blur kernel) as ``lsf_rows()`` of the
+            result and as the file B_lsf.csv (``LSF_CSV_NAME``)
   Step 7    the linearity test: small-gap against large-gap ESF of the same edge, Z and polarity
   Step 8    the edge offset s_50 = s(h = 0.5): positive means the measured edge lies on the front-material side of
             the true edge; a matcher that fattens the front surface gives a NEGATIVE s_50
@@ -79,6 +81,14 @@ from sensorperf.stats.psychometric import pool_adjacent_violators
 # ---------------------------------------------------------------------------
 SUMMARY_CSV_NAME = "B_resolution_summary.csv"
 DETAILS_JSON_NAME = "B_resolution_details.json"
+LSF_CSV_NAME = "B_lsf.csv"
+LSF_COLUMNS = ("target_id", "polarity", "gap_mm", "station_z_mm", "edge", "orientation", "bin_index", "s_px",
+               "lsf_per_px", "count_read")
+"""Columns of B_lsf.csv (Section 11.1, Step 16), one row per edge, Z, orientation, polarity, gap and signed-distance bin:
+the bin's center ``s_px`` (true-edge frame, positive on the front side), the smoothed line spread function
+``lsf_per_px`` (dESF/ds, Hann smoothed, per pixel; empty in the file and NaN in memory where the edge has too few valid
+bins) and the number of read pixels of the bin (``count_read``; the LSF of a bin without reads is interpolated).
+Analysis C reads it to build its blur kernel."""
 FIGURE_STEMS = {"esf": "B_esf_curves", "lsf_mtf": "B_lsf_mtf", "rise": "B_rise_vs_z", "s50": "B_s50_vs_z",
                 "transfer": "B_transfer"}
 SUMMARY_COLUMNS = (
@@ -402,6 +412,20 @@ class LateralResolutionResult:
         """The edge results of a station, optionally of one orientation."""
         return [e for e in self.edges if e.station_z_mm == station_z_mm
                 and (orientation is None or e.orientation == orientation)]
+
+    def lsf_rows(self) -> list[dict[str, Any]]:
+        """The rows of B_lsf.csv (``LSF_COLUMNS``): for every edge, one row per signed-distance bin with the bin center
+        s (px), the smoothed line spread function there (NaN where the edge has none) and the read count of the bin.
+        Edges are in the order of ``edges`` (configuration by configuration), bins in increasing s; ``bin_index`` counts
+        the bins of the edge from 0."""
+        rows: list[dict[str, Any]] = []
+        for e in self.edges:
+            for index, (s, value, count) in enumerate(zip(e.bin_centers_px, e.lsf, e.count_read)):
+                rows.append({"target_id": e.target_id, "polarity": e.polarity, "gap_mm": e.gap_mm,
+                             "station_z_mm": e.station_z_mm, "edge": e.edge, "orientation": e.orientation,
+                             "bin_index": index, "s_px": float(s), "lsf_per_px": float(value),
+                             "count_read": int(count)})
+        return rows
 
     def forward_model_terms(self) -> dict[str, Any]:
         """Mean rise distance (px) along H and V at the mid station (the station nearest Z_REFERENCE_MM) and the mean
@@ -1238,11 +1262,13 @@ def _figure_transfer(result: LateralResolutionResult, out_dir: Path) -> list[Pat
 
 
 def write_outputs(result: LateralResolutionResult, out_dir: str | Path) -> list[Path]:
-    """B_resolution_summary.csv (one row per configuration and edge), B_resolution_details.json (the ESF arrays with
-    the per-bin no-read counts and the per-pose points of the edge position transfer) and the figures (ESF curves, LSF and
-    MTF, rise distance and s_50 against Z, the edge position transfer)."""
+    """B_resolution_summary.csv (one row per configuration and edge), B_lsf.csv (the line spread functions, one row per
+    edge and bin: see ``LSF_COLUMNS``), B_resolution_details.json (the ESF arrays with the per-bin no-read counts and the
+    per-pose points of the edge position transfer) and the figures (ESF curves, LSF and MTF, rise distance and s_50
+    against Z, the edge position transfer)."""
     out_dir = Path(out_dir)
-    written = [write_csv_rows(out_dir / SUMMARY_CSV_NAME, [e.csv_row() for e in result.edges], SUMMARY_COLUMNS)]
+    written = [write_csv_rows(out_dir / SUMMARY_CSV_NAME, [e.csv_row() for e in result.edges], SUMMARY_COLUMNS),
+               write_csv_rows(out_dir / LSF_CSV_NAME, result.lsf_rows(), LSF_COLUMNS)]
     details = {
         "bin_width_px": result.bin_width_px, "band_px": result.band_px, "reference_station_mm": result.reference_station_mm,
         "sign_convention": "s is positive on the front-material side; s_50 < 0 means the measured edge lies on the "

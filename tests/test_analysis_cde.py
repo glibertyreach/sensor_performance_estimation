@@ -34,14 +34,17 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from sensorperf.analysis import area, boundary, detection
+from sensorperf.analysis import area, boundary, detection, resolution_lateral
 from sensorperf.analysis.detection import (
     RULE_INCLUSIVE, RULE_PRIMARY, calibrate_tau, detected_at, outcomes, window_statistic,
 )
-from sensorperf.geometry.targets import FEATURE_CUTOUT, FEATURE_DISK
+from sensorperf.geometry.camera import PinholeCamera
+from sensorperf.geometry.targets import (
+    FEATURE_CUTOUT, FEATURE_DISK, StereoGeometry, fronto_parallel_pose,
+)
 from sensorperf.io.manifest import SUBSERIES_FIELD, SUBSERIES_JITTER, SUBSERIES_OPEN
 from sensorperf.io.session import FORWARD_MODEL_FILE_NAME, Session
-from sensorperf.parameters import CharacterizationParameters
+from sensorperf.parameters import AREA_BIAS_FIT_D0_FACTOR, CharacterizationParameters, TARGET_CUTOUTS
 from sensorperf.stats.intervals import clopper_pearson
 from sensorperf.stats.psychometric import PsychometricFitParameters, best_fit, fit_all_curves
 
@@ -126,6 +129,22 @@ def boundary_result(cde_session, tmp_path_factory):
     return result
 
 
+@pytest.fixture(scope="module")
+def b_result(cde_session, tmp_path_factory):
+    """Analysis B (lateral resolution) on the custom session, with its outputs (B_lsf.csv among them) written."""
+    out = tmp_path_factory.mktemp("b_files")
+    result = resolution_lateral.run_lateral_resolution(cde_session, out, {})
+    resolution_lateral.write_outputs(result, out)
+    result.out_dir = out
+    return result
+
+
+@pytest.fixture(scope="module")
+def area_with_b_result(cde_session, b_result, tmp_path_factory):
+    """Analysis C on the custom session with Analysis B's result in ``previous`` (its line spread functions)."""
+    return area.run_area(cde_session, tmp_path_factory.mktemp("c_with_b_out"), {"B": b_result})
+
+
 def _read_csv(path: Path) -> list[dict[str, str]]:
     with path.open(newline="", encoding="utf-8") as handle:
         return list(csv.DictReader(handle))
@@ -160,13 +179,13 @@ def test_c_step8_cutout_transfer_curve_is_pooled_over_stations_and_falls_toward_
     assert np.mean(near[-third:]) > np.mean(near[:third])
 
 
-def test_c_step8_overlap_test_compares_neighboring_features(area_result):
-    """Redesign note Section 5, Step 8: for each (kind, gap, ratio) the scaling test compares the curves of neighboring
+def test_c_step9_overlap_test_compares_neighboring_features(area_result):
+    """Section 12, Step 9: for each (kind, gap, ratio) the scaling test compares the curves of neighboring
     features over their shared D_px range (2 to 3 points of each curve there) and reports the mean difference, its
     bootstrap interval and whether zero lies inside; the curves can differ where the depth noise of the far stations
     matters, and a disagreement carries the sigma_tot(Z) attribution note."""
     tests = area_result.details["overlap_tests"]
-    assert {(t["kind"], t["quantity"]) for t in tests} == {
+    assert {(t["kind"], t["ratio"]) for t in tests} == {
         (FEATURE_DISK, "A_sensed / A_true"), (FEATURE_CUTOUT, "A_sensed / A_true"),
         (FEATURE_CUTOUT, "A_sensed / A_geo (cameras + projector)")}
     assert len(tests) == 3 * 2                                                       # 3 curves of 2 neighbor pairs
@@ -193,10 +212,10 @@ def test_c_step4_small_cutouts_read_as_front(area_result):
     assert all(abs(r["b_mm"] + r["diameter_mm"] / 2.0) < 0.1 * r["diameter_mm"] for r in small)
 
 
-def test_c_step9_edge_bias_signs(area_result):
-    """Step 9: front_preference > 1 grows the front material (a window pixel reads front when only a third of its
+def test_c_step10_edge_bias_signs(area_result):
+    """Step 10: front_preference > 1 grows the front material (a window pixel reads front when only a third of its
     window is front), so large disks are bigger than their outline (b > 0) and large cutouts smaller (b < 0). The
-    fit is made on the largest third of the ladder (selection stated in the details)."""
+    fit is made on the largest feature of the plate (selection stated in the details)."""
     fits = {f["kind"]: f for f in area_result.details["bias_fits"] if f.get("points")}
     assert fits[FEATURE_DISK]["b_px_mean"] > 0.0
     assert fits[FEATURE_CUTOUT]["b_px_mean"] < 0.0
@@ -231,8 +250,8 @@ def test_c_step7_geometric_areas_are_ordered(area_result):
     assert comparison["cameras_only"]["n"] > 0
 
 
-def test_c_step12_csv_has_one_row_per_configuration_and_feature(area_result, cde_session):
-    """Step 12: C_area_summary.csv has exactly one row per configuration x measured feature (all features of the
+def test_c_step13_csv_has_one_row_per_configuration_and_feature(area_result, cde_session):
+    """Step 13: C_area_summary.csv has exactly one row per configuration x measured feature (all features of the
     on-axis configurations), the documented columns, and the figures and the details exist."""
     rows = _read_csv(area_result.out_dir / area.SUMMARY_FILE_NAME)
     assert len(rows) == len(area_result.rows)
@@ -254,8 +273,8 @@ def test_c_step12_csv_has_one_row_per_configuration_and_feature(area_result, cde
         assert (area_result.out_dir / name).exists(), name
 
 
-def test_c_step11_field_and_open_background(area_result):
-    """Step 11: the field sub-series is compared with the on-axis transfer curves, and for the open-background
+def test_c_step12_field_and_open_background(area_result):
+    """Step 12: the field sub-series is compared with the on-axis transfer curves, and for the open-background
     cutouts the no-read area is compared with A_true (no back plane exists there, so nothing else is defined)."""
     field_rows = [r for r in area_result.rows if r["subseries"] == SUBSERIES_FIELD]
     assert field_rows and area_result.details["field_comparison"]
@@ -268,8 +287,8 @@ def test_c_step11_field_and_open_background(area_result):
     assert area_result.details["open_background"]
 
 
-def test_c_step10_consistency_with_blur_prediction(area_result):
-    """Step 10: without Analysis B the kernel comes from the own radial ESF (stated in the details); the prediction
+def test_c_step11_consistency_with_blur_prediction(area_result):
+    """Step 11: without Analysis B the kernel comes from the own radial ESF (stated in the details); the prediction
     including the edge offset reproduces the area of the large disks within 15 percent, and the sign of b agrees with
     the sign expected from s_50 (front grows by -s_50: b_disk ~ -s_50, b_cutout ~ +s_50)."""
     kernel = area_result.details["kernel"]
@@ -287,7 +306,7 @@ def test_c_step10_consistency_with_blur_prediction(area_result):
 
 
 def test_c_kernel_uses_previous_b_when_present(area_result, cde_session):
-    """Step 10: rise distances of Analysis B (rise_h_px, rise_v_px, edge_offset_px) define a Gaussian kernel with the
+    """Step 11, Gaussian fallback: rise distances of Analysis B (rise_h_px, rise_v_px, edge_offset_px) define a Gaussian kernel with the
     10-90 percent rise (stated assumption)."""
     class FakeB:
         def forward_model_terms(self):
@@ -298,6 +317,197 @@ def test_c_kernel_uses_previous_b_when_present(area_result, cde_session):
     assert kernel["sigma_h_px"] == pytest.approx(5.0 / factor) and kernel["sigma_v_px"] == pytest.approx(4.0 / factor)
     assert kernel["edge_offset_px"] == -1.0
     assert area._kernel_from_b({}, factor) is None
+
+
+def test_c_step10_bias_fit_threshold_is_a_parameter_tied_to_the_expected_d0():
+    """Section 12, Step 10: the threshold of the b fit is CharacterizationParameters.area_bias_fit_min_d_px, twice the 7 px
+    expected minimum detectable diameter, and no longer an option of the analysis."""
+    params = CharacterizationParameters()
+    assert params.area_bias_fit_min_d_px == pytest.approx(AREA_BIAS_FIT_D0_FACTOR * params.expected_d0_px)
+    assert params.area_bias_fit_min_d_px == pytest.approx(14.0)
+    assert not hasattr(area.AreaOptions(), "bias_fit_min_d_px")
+
+
+def test_c_step10_bias_fit_uses_the_largest_feature_where_it_is_at_least_the_threshold(area_result):
+    """Step 10: per plate, only the largest feature enters the fit, and only at the stations where its D_px is at least
+    AREA_BIAS_FIT_MIN_D_PX (14 px); the details state the threshold."""
+    threshold = PARAMS.area_bias_fit_min_d_px
+    assert area_result.details["bias_fit_min_d_px"] == threshold
+    fits = [f for f in area_result.details["bias_fits"] if f.get("points")]
+    assert {f["kind"] for f in fits} == {FEATURE_DISK, FEATURE_CUTOUT}
+    for fit in fits:
+        assert len(fit["sites"]) == 1 and fit["sites"][0][1].endswith("_02")        # the largest feature of the plate
+        features = [r for r in area_result.rows if r["kind"] == fit["kind"] and r["site_id"] == fit["sites"][0][1]
+                    and r["subseries"] == SUBSERIES_JITTER and r["field"] == 0]
+        expected_stations = sorted(r["station_z_mm"] for r in features if r["d_px"] >= threshold)
+        assert fit["stations_mm"] == expected_stations and 0 < len(expected_stations) < len(features)
+        assert "AREA_BIAS_FIT_MIN_D_PX" in fit["selection"]
+
+
+def test_c_step9_overlap_file_carries_pair_kind_gap_ratio_difference_and_zero_test(area_result):
+    """Step 9: C_overlap_test.csv has one row per feature pair, kind, gap and ratio, with the mean difference over the shared
+    range, its bootstrap interval and whether zero lies inside it."""
+    rows = _read_csv(area_result.out_dir / area.OVERLAP_FILE_NAME)
+    assert list(rows[0].keys()) == list(area.OVERLAP_COLUMNS)
+    assert {"kind", "gap_mm", "ratio", "feature_small", "feature_large", "mean_difference", "interval_lower",
+            "interval_upper", "agrees"} <= set(rows[0])
+    keys = [(r["kind"], r["gap_mm"], r["ratio"], r["feature_small"], r["feature_large"]) for r in rows]
+    assert len(keys) == len(set(keys)) == len(area_result.details["overlap_tests"])
+    for r in rows:
+        inside = float(r["interval_lower"]) <= 0.0 <= float(r["interval_upper"])
+        assert (r["agrees"] == "True") == inside
+
+
+def test_c_step7_both_a_geo_versions_are_equal_for_a_circular_cutout_with_a_midway_projector(cde_session):
+    """Step 7: with the projector midway between the cameras the three-center overlap equals the two-camera one for a convex
+    outline (a circle), for every cutout of the plate; with the as-built offset of the test sensor (40 mm against the 37.5 mm
+    midpoint) the projector version can only be smaller."""
+    camera = PinholeCamera(cde_session.geometry.image_width_px, cde_session.geometry.image_height_px,
+                           cde_session.geometry.sensor_fx_px, cde_session.geometry.sensor_fy_px,
+                           cde_session.geometry.sensor_cx_px, cde_session.geometry.sensor_cy_px)
+    baseline = cde_session.geometry.sensor_baseline_mm
+    midway = StereoGeometry(camera, (baseline, 0.0, 0.0), (baseline / 2.0, 0.0, 0.0))
+    as_built = StereoGeometry.from_sensor_geometry(cde_session.geometry)
+    target = cde_session.targets.get(TARGET_CUTOUTS, PARAMS.gap_small_mm)
+    pose = fronto_parallel_pose(0.0, 0.0, STATION_MID_MM)
+    cutouts = [f for f in target.features if f.kind == FEATURE_CUTOUT]
+    assert cutouts
+    for feature in cutouts:
+        cameras = area.geometric_visible_area_mm2(target, pose, feature, midway, False)
+        projector = area.geometric_visible_area_mm2(target, pose, feature, midway, True)
+        assert 0.0 < cameras < feature.true_area_mm2()                              # the shadow is real
+        assert projector == pytest.approx(cameras, rel=1e-9)
+        assert area.geometric_visible_area_mm2(target, pose, feature, as_built, True) <= cameras * (1.0 + 1e-9)
+
+
+def test_c_step7_the_as_built_projector_position_is_used_and_reported(area_result, cde_session):
+    """Step 7: the A_geo rays start at PROJECTOR_OFFSET_MM of the sensor configuration (not an assumed midpoint), and the
+    details record it with the midway test."""
+    from sensorperf.analysis.common import pose_geometry
+    from sensorperf.io.capture_set import load_stack
+    record = next(r for r in cde_session.records if r.procedure == "C" and r.target_id == TARGET_CUTOUTS)
+    stereo = pose_geometry(cde_session, record, load_stack([record]).camera).stereo
+    assert tuple(stereo.projector_center_mm) == tuple(cde_session.geometry.projector_offset_mm)
+    projector = area_result.details["projector"]
+    assert projector["projector_offset_mm"] == list(cde_session.geometry.projector_offset_mm)
+    assert projector["projector_midway"] is False                                    # 40 mm against 37.5 mm
+    columns = {"a_geo_cameras_mm2", "a_geo_projector_mm2"}
+    assert columns <= set(area.SUMMARY_COLUMNS)
+
+
+def test_c_step12_field_comparison_carries_the_achieved_field_fraction_per_pose(area_result, cde_session):
+    """Step 12: the field comparison has one entry per field pose and feature, each with the pose's achieved field fraction
+    (the manifest column) as a factor; the open-background comparison holds the reference station only."""
+    comparison = area_result.details["field_comparison"]
+    poses = [r for r in cde_session.records if r.procedure == "C" and r.subseries == SUBSERIES_FIELD
+             and r.frame_index == 0]
+    features = sum(1 for r in comparison if r["pose_index"] == 0) // len({r["target_id"] for r in comparison})
+    assert len(comparison) == len(poses) * features
+    assert {c["field_fraction_achieved"] for c in comparison} == set(cde_fixture.FIELD_FRACTIONS_ACHIEVED)
+    for c in comparison:
+        assert c["field_fraction_achieved"] == cde_fixture.FIELD_FRACTIONS_ACHIEVED[
+            c["pose_index"] % len(cde_fixture.FIELD_FRACTIONS_ACHIEVED)]
+    assert all(r["station_z_mm"] == PARAMS.z_reference_mm for r in area_result.details["open_background"])
+    # A summary row of the field sub-series reports the mean achieved fraction of its poses.
+    field_rows = [r for r in area_result.rows if r["subseries"] == SUBSERIES_FIELD]
+    assert all(math.isfinite(r["field_fraction_achieved"]) for r in field_rows)
+    assert all(math.isnan(r["field_fraction_achieved"]) for r in area_result.rows if r["subseries"] != SUBSERIES_FIELD)
+
+
+def test_c_step12_open_background_leaves_out_other_stations():
+    """Step 12: an open-background row away from the reference station is not compared, and the notes say so."""
+    def row(station):
+        return {"target_id": "T5", "station_z_mm": station, "site_id": "cutout_00", "d_px": 10.0, "a_true_mm2": 100.0,
+                "a_noread_mean_mm2": 95.0, "ratio_noread_true": 0.95}
+    notes: list[str] = []
+    kept = area._open_background([row(800.0), row(1131.0)], 800.0, notes)
+    assert [k["station_z_mm"] for k in kept] == [800.0] and len(notes) == 1
+
+
+def test_b_step16_lsf_file_has_one_row_per_edge_and_bin(b_result):
+    """Section 11, Step 16: B_lsf.csv has one row per edge, Z, orientation, polarity, gap and signed-distance bin, with the
+    smoothed LSF and its s."""
+    rows = _read_csv(b_result.out_dir / resolution_lateral.LSF_CSV_NAME)
+    assert resolution_lateral.LSF_CSV_NAME == "B_lsf.csv"
+    assert list(rows[0].keys()) == list(resolution_lateral.LSF_COLUMNS)
+    bins = len(b_result.edges[0].bin_centers_px)
+    assert len(rows) == len(b_result.edges) * bins == len(b_result.lsf_rows())
+    keys = {(r["target_id"], r["polarity"], r["gap_mm"], r["station_z_mm"], r["edge"], r["orientation"], r["bin_index"])
+            for r in rows}
+    assert len(keys) == len(rows)
+    edge = b_result.edges[0]
+    first = [r for r in rows if (r["target_id"], r["edge"], r["station_z_mm"]) == (
+        edge.target_id, edge.edge, repr(edge.station_z_mm)) and r["polarity"] == edge.polarity
+        and float(r["gap_mm"]) == edge.gap_mm]
+    assert [float(r["s_px"]) for r in first] == pytest.approx(list(edge.bin_centers_px))
+    assert np.all(np.isfinite(edge.lsf))                                            # a well-sampled edge has an LSF
+    assert [float(r["lsf_per_px"]) for r in first] == pytest.approx(list(edge.lsf), abs=1e-9)
+    assert {r["orientation"] for r in rows} == {resolution_lateral.ORIENTATION_H, resolution_lateral.ORIENTATION_V}
+
+
+def test_c_step11_line_spread_from_lsf_centers_symmetrizes_and_normalizes():
+    """Step 11: a skewed, noisy LSF with a negative tail and an offset median becomes a nonnegative, symmetric kernel of unit
+    sum centered on its median; the offset and the rise are reported."""
+    s = np.arange(-8.0, 8.0 + 1e-9, 0.25)
+    offset, sigma = -0.8, 1.2
+    lsf = np.exp(-0.5 * ((s - offset) / sigma) ** 2) / (sigma * math.sqrt(2.0 * math.pi))
+    lsf[:4] = -0.002                                                                # ringing in the tail
+    made = area.line_spread_from_lsf(s, lsf, 0.1, 0.9)
+    assert made is not None
+    spread, info = made
+    assert info["median_px"] == pytest.approx(offset, abs=0.05)
+    assert info["rise_px"] == pytest.approx(sigma * area._gaussian_rise_factor(0.1, 0.9), rel=0.03)
+    assert np.all(spread.weights >= 0.0) and spread.weights.sum() == pytest.approx(1.0)
+    assert spread.weights == pytest.approx(spread.weights[::-1])
+    assert float(np.sum(spread.s_px * spread.weights)) == pytest.approx(0.0, abs=1e-9)
+    # A kernel measured as a Gaussian predicts the same area as the Gaussian itself.
+    for kind in (FEATURE_DISK, FEATURE_CUTOUT):
+        measured = area.predicted_area_from_line_spreads_px2(12.0, spread, spread, 0.0, 8, kind)
+        gaussian = area.predicted_area_px2(12.0, sigma, sigma, 0.0, 8, kind)
+        assert measured == pytest.approx(gaussian, rel=0.03)
+    assert area.line_spread_from_lsf(s, np.zeros_like(s), 0.1, 0.9) is None
+
+
+def test_c_step11_kernel_is_built_from_the_measured_line_spread_functions_of_b(area_with_b_result, b_result):
+    """Step 11: with Analysis B's line spread functions the kernel is the measured, separable one; the details say so; both
+    predictions (blur alone, blur plus the s_50 growth) are made, the growth reproduces the large disks, and the sign of b
+    agrees with s_50 (b_disk ~ -s_50, b_cutout ~ +s_50)."""
+    details = area_with_b_result.details
+    kernel = details["kernel"]
+    assert kernel["kind"] == area.KERNEL_KIND_MEASURED and "separable" in kernel["source"]
+    assert {e["b_station_z_mm"] for e in kernel["stations"]} == set(cde_fixture.EDGE_STATIONS_MM)
+    assert not any("Gaussian" in note for note in area_with_b_result.notes)
+    comparison = details["consistency_with_b"]
+    assert comparison and all(math.isfinite(c["a_predicted_blur_mm2"]) and math.isfinite(c["a_predicted_blur_offset_mm2"])
+                              for c in comparison)
+    large = [c for c in comparison if c["kind"] == FEATURE_DISK and c["d_px"] > 10.0]
+    assert large
+    for c in large:
+        assert abs(c["ratio_measured_over_blur_offset"] - 1.0) < 0.15
+        assert c["a_predicted_blur_offset_mm2"] > c["a_predicted_blur_mm2"]        # the growth enlarges a disk
+    sign = details["sign_check"]
+    assert sign[FEATURE_DISK]["agrees"] is True and sign[FEATURE_CUTOUT]["agrees"] is True
+    assert sign["s50_px"] < 0.0                                                      # the front material is fattened
+
+
+def test_c_step11_kernel_falls_back_to_a_gaussian_and_says_so_when_there_are_no_line_spread_functions(area_result):
+    """Step 11: without B_lsf.csv (no B result, nothing in the output folder) the kernel is the Gaussian of equal 10-90
+    percent rise, and the details and notes record that."""
+    kernel = area_result.details["kernel"]
+    assert kernel["kind"] == area.KERNEL_KIND_GAUSSIAN and "10-90" in kernel["note"]
+    assert any("Gaussian" in note for note in area_result.notes)
+
+
+def test_c_step11_kernel_is_read_from_the_b_output_folder(cde_session, b_result, tmp_path):
+    """Step 11: when Analysis B did not run in this process, B_lsf.csv in the output folder provides the kernel."""
+    out = tmp_path / "analysis"
+    out.mkdir()
+    (out / resolution_lateral.LSF_CSV_NAME).write_bytes(
+        (b_result.out_dir / resolution_lateral.LSF_CSV_NAME).read_bytes())
+    options = area.AreaOptions(make_geo_areas=False)
+    result = area.run_area(cde_session, out, {}, options)
+    kernel = result.details["kernel"]
+    assert kernel["kind"] == area.KERNEL_KIND_MEASURED and resolution_lateral.LSF_CSV_NAME in kernel["source"]
 
 
 # ---------------------------------------------------------------------------
