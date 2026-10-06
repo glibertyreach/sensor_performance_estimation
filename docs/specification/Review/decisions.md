@@ -629,3 +629,35 @@ the 7 px expected minimum; new Section 2 row; the code's 4 px threshold changes)
 5, 8 and the skip rule; R6 Step 12 field fraction as a factor and the reference station; R7 Step 13 outputs listed.
 Code (area, resolution_lateral) and the technician procedure's Section 14 delegated.
 
+## C14 — Section 13 Analysis D, minimum detectable size (opened 2026-10-06)
+Reviewer findings (proposals; nothing executed until Neil closes the chunk):
+- C14-R1 (serious, Step 3, threshold calibration): at the main stations each blank site has 60 trials, so the 99%
+  quantile that sets τ is in practice the maximum of 60 blank windows (the code's "higher" quantile does exactly
+  that and says so). The maximum of 60 samples lands near the 98.4% point on average with a wide spread, so the
+  realized false-alarm rate at the main stations is poorly controlled; only the 3 extended stations (300 trials)
+  resolve a 1% quantile. Proposal: pool the blank windows of a station over its blank sites (3 × 60 = 180) and,
+  where the pooled count is below a named minimum (DETECTION_MIN_BLANK_WINDOWS, 300 = 3 / target), pool the
+  neighboring stations after dividing the window statistic by σ_tot(Z) of Section 10; state that γ's
+  Clopper–Pearson interval is reported with τ so the reader sees the control achieved. Code change.
+- C14-R2 (Step 4 and 5, which fit gives which minimum): Step 4 fits the logistic; Step 5 fits three shapes and takes
+  D_10 from the best by deviance; Steps 6 and 7 read D_5 and D_0 from "the fitted curve". Say once that D_50,
+  D_10 and D_5 come from the best shape by deviance, with the range across shapes as model uncertainty for each.
+- C14-R3 (Step 8, consistency with Section 12, Step 7 as revised): "all the views a read needs" is now defined
+  there (both IR cameras and the projector); cite it.
+- C14-R4 (Step 10 and 11, scaling test and outputs): the detection scaling test writes D_overlap_test.csv (one row
+  per pair, kind, gap, field and rule); Step 11 should list it, plus D_pooled_summary.csv (the pooled rows) and
+  D_detect_details.json, as the other sections now do, and say that D_50 and D_10 in px go to
+  forward_model_parameters.json.
+- C14-R5 (plain style): the intro and Steps 1, 2, 3, 4, 6, 7, 9 carry names without values (3 px window margin,
+  2 connected pixels, 1% false-alarm target, lapse rate bound 0.05, 95% confidence, the 1% prediction level,
+  2000 resamples, 8 px jitter span, 30 px isolation).
+- C14-R6 (Step 2, the rule versus the sensor's floor): the 2 connected candidate pixels of the detection rule are
+  the analysis's threshold for calling a trial detected, deliberately permissive; the sensor's own floor (the
+  expected minimum of about 7 px from the laser-pencil model of Section 3.2) must come out of the data, not the
+  rule. Add one sentence saying so.
+- C14-R7 (cross-reference, my error at C13): Section 12, Step 10 cites "the 7 px expected minimum detectable
+  diameter of Section 13"; the expectation is stated in Section 3.2. Fix the citation (Section 12, declared as
+  intended) and have Section 13's intro name the Section 3.2 expectation as the prior the fitted D_50 and the
+  predicted D_0 are compared with.
+Neil's comments: (pending)
+
