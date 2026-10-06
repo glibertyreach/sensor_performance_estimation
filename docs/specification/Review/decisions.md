@@ -669,6 +669,11 @@ in the intro and Steps 1, 2, 3, 4, 6, 7, 9; R6 Step 2 says the 2-pixel rule is t
 R7 Section 12, Step 10 now cites Section 3.2, and the intro names the Section 3.2 expectation as the prior. Code
 (detection: τ pooling, best-shape minimums, prior comparison) delegated after the Analysis C agent lands, to avoid
 concurrent edits of the parameters module.
+C14 addendum (rev 111, gate PASS, scope ['13']): the code pass showed that each blank site is sized to one feature
+and hosts only the windows no larger than its own, so a main station pools at most 180 blank windows for the
+smallest window size and fewer for the larger ones; Step 3 now says so. Code landed in commit 66c3f74 (225 tests):
+pooled thresholds per station and window size, best-shape model ranges, ratios to the 7 px expectation; the area
+analysis no longer writes edge-bias terms into forward_model_parameters.json (Section 12, Step 13).
 
 ## C15 — Section 14 Analysis E, boundary detection bias (opened 2026-10-06)
 Reviewer findings (proposals; nothing executed until Neil closes the chunk):
