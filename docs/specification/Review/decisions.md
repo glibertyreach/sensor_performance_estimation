@@ -659,5 +659,14 @@ Reviewer findings (proposals; nothing executed until Neil closes the chunk):
   diameter of Section 13"; the expectation is stated in Section 3.2. Fix the citation (Section 12, declared as
   intended) and have Section 13's intro name the Section 3.2 expectation as the prior the fitted D_50 and the
   predicted D_0 are compared with.
-Neil's comments: (pending)
+Neil's comments (2026-10-06): R1 to R7 approved; closed.
+Executed (document rev 108; gate PASS, scope ['2', '12', '13']): R1 Step 3 pools a station's blank windows over
+its sites, names DETECTION_MIN_BLANK_WINDOWS = 300 (new Section 2 row) below which neighboring stations are pooled
+in units of σ_tot(Z), and reports γ's interval beside τ; R2 the intro and Step 5 say D_50, D_10 and D_5 come from
+the best shape by deviance with the range as model uncertainty; R3 Step 8 cites the depth-read views; R4 Step 10
+names D_overlap_test.csv and Step 11 lists the four files, the figures and the forward-model terms; R5 plain style
+in the intro and Steps 1, 2, 3, 4, 6, 7, 9; R6 Step 2 says the 2-pixel rule is the permissive analysis threshold;
+R7 Section 12, Step 10 now cites Section 3.2, and the intro names the Section 3.2 expectation as the prior. Code
+(detection: τ pooling, best-shape minimums, prior comparison) delegated after the Analysis C agent lands, to avoid
+concurrent edits of the parameters module.
 

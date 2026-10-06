@@ -79,9 +79,9 @@
   },
   "C14": {
     "title": "Analysis D, detectability",
-    "reviewed": null,
-    "tier": null,
-    "note": "not yet reviewed"
+    "reviewed": "2026-10-06",
+    "tier": "fable",
+    "note": "Section 13 executed at rev 108: threshold pooling rule, best-shape minimums, prior expectation, outputs, plain style"
   },
   "C15": {
     "title": "Analysis E, boundary bias",
