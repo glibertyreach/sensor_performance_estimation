@@ -8,23 +8,32 @@ stations, the tilt sub-series poses and any other A pose)
               BOUNDARY_BAND_HALF_WIDTH_PX) and the ground-truth depth Z_GT(u, v) of the registered plate
     Step 3    the temporal noise map sigma_t(u, v) (per-pixel standard deviation over frames, ddof = 1)
               with its ROI median and 95th percentile
-    Step 4    the fixed-pattern noise sigma_fp (standard deviation of the frame-mean depth about a free
-              plane), the bias (mean of Zbar - Z_GT over the ROI) and the angle between the fitted and the
-              registered plane normals
+    Step 4    the bias (mean of Zbar - Z_GT over the ROI) and the fixed-pattern noise sigma_fp, the spread of
+              Zbar - Z_GT - bias about the REGISTERED plane with the temporal noise that survives the frame
+              average removed: sigma_fp^2 = var(Zbar - Z_GT) - sigma_t^2 / N (about 1 percent of sigma_t^2 at
+              100 frames; see :func:`fixed_pattern_sigma_mm`), clamped at zero (noted when the clamp acts); a free
+              plane is fitted to Zbar only to report the angle between it and the registered plane
     Step 5    the total noise sigma_tot (RMS of Z - Z_GT over ROI and frames) and the closure check
-              sigma_tot^2 ~ sigma_t^2 + sigma_fp^2 + bias^2
+              sigma_tot^2 ~ sigma_t^2 + sigma_fp^2 + bias^2, all about the same registered plane, within
+              NOISE_CLOSURE_TOLERANCE (20 percent)
     Step 6    the fill rate
     Step 7    the normalized spatial autocorrelation of the temporal component and of the fixed-pattern
               residual, and the correlation lengths along H and V (first lag at 1/e)
     Step 8    the depth quantum from the central patch (see below)
 over the poses
-    Step 9    the noise model sigma_t(Z) = sqrt(sigma_0^2 + (sigma_d Z^2 / k)^2) and the free power law
+    Step 9    the noise model sigma_t(Z) = sqrt(sigma_0^2 + (sigma_d Z^2 / k)^2), fitted with each station
+              weighted by 1 / sigma_t (relative error; recorded as a string), and the free power law
     Step 10   the tilt sub-series curves (sigma_t, sigma_tot, fill rate against incidence angle)
     Step 11   the sentinel drift of every mounted target (sentinels are captured on the target mounted at that point
-              of the plan, grouped by target and mount, each relative to its first sentinel after the mount) and,
-              if it matters, the time-interpolated bias correction of A from the T2 sentinels of A's mount
+              of the plan, grouped by target and mount, each relative to its first sentinel after the mount): the
+              rate in mm per hour, the largest excursion, a flag when the drift exceeds
+              WARMUP_DRIFT_FRACTION_OF_SIGMA x sigma_t at the reference station and, for a flagged mount of A, the
+              time-interpolated sentinel offset subtracted from the bias of the poses captured on that mount, with
+              its size (``A_sentinel_drift.csv``, one row per mount)
     Step 12   the legacy metrics of testZRepeatabilityBrownBoard.py
-    Step 13   the outputs: ``A_noise_summary.csv``, ``A_noise_details.json`` and the figures.
+    Step 13   the outputs: ``A_noise_summary.csv`` (one row per pose; columns in SUMMARY_COLUMNS, including the
+              achieved field fraction and the drift rate and flag of the pose's mount), ``A_sentinel_drift.csv``,
+              ``A_noise_details.json`` and the figures.
 
 Conventions (docs/design/code_design.md, Section 4): millimeters, pixels, degrees; image arrays are
 (H, W); depth is camera z and a no-read is NaN. ``s`` of Section 11 is not used here.
@@ -84,6 +93,7 @@ from sensorperf.parameters import FIELD_POSITION_CENTER, PROCEDURE_NOISE, PROCED
 # ---------------------------------------------------------------------------
 SUMMARY_CSV_NAME = "A_noise_summary.csv"
 DETAILS_JSON_NAME = "A_noise_details.json"
+SENTINEL_DRIFT_CSV_NAME = "A_sentinel_drift.csv"
 FIGURE_STEMS = {
     "sigma": "A_noise_vs_z", "fill": "A_fill_rate_vs_z", "maps": "A_sigma_t_maps",
     "autocorrelation": "A_autocorrelation", "codes": "A_depth_code_histograms", "tilt": "A_tilt_curves",
@@ -94,11 +104,25 @@ SUMMARY_COLUMNS = (
     "station_z_mm", "field", "field_fraction_achieved", "tilt_axis", "tilt_deg", "subseries", "frames", "sigma_t_median_mm", "sigma_t_p95_mm",
     "sigma_fp_mm", "bias_mm", "bias_corrected_mm", "sigma_tot_mm", "closure_ok", "fill_rate", "corr_len_h_px",
     "corr_len_v_px", "corr_len_fp_h_px", "corr_len_fp_v_px", "depth_quantum_mm", "q_px", "plane_angle_deg",
-    "legacy_minmax_mm", "legacy_std_mm", "legacy_std_median_mm", "closure_ratio", "quantum_code_spacing_mm", "note")
+    "legacy_minmax_mm", "legacy_std_mm", "legacy_std_median_mm", "closure_ratio", "quantum_code_spacing_mm",
+    "drift_rate_mm_per_h", "drift_flagged", "note")
 """Columns of A_noise_summary.csv: the Step 13 list, then the extra columns (legacy median, closure ratio, the
-code-spacing cross-check of Step 8 and a free-text note). ``field_fraction_achieved`` is the achieved fraction of the
-requested field offset of the pose (1 when the plate fit at the requested position, smaller when the planner pulled
-it inward), taken from the manifest column of that name; NaN when the manifest does not provide it."""
+code-spacing cross-check of Step 8, the drift columns and a free-text note). ``field_fraction_achieved`` is the
+achieved fraction of the requested field offset of the pose (1 when the plate fit at the requested position, smaller
+when the planner pulled it inward), taken from the manifest column of that name; NaN when the manifest does not provide
+it. ``drift_rate_mm_per_h`` is the sentinel drift rate of the mount the pose was captured on (Step 11) and
+``drift_flagged`` says whether that mount's drift exceeded WARMUP_DRIFT_FRACTION_OF_SIGMA x sigma_t at the reference
+station, in which case ``bias_corrected_mm`` differs from ``bias_mm``; both are empty when the mount has no usable
+sentinel line. ``sigma_fp_mm`` is about the registered plane with the temporal share removed (Step 4)."""
+SENTINEL_DRIFT_COLUMNS = (
+    "target_id", "mount", "sentinel_poses", "first_sentinel_hours", "last_sentinel_hours", "drift_rate_mm_per_h",
+    "max_excursion_mm", "mount_hours", "drift_over_mount_mm", "threshold_mm", "flagged", "correction_applied_mm",
+    "used_for_a_correction")
+"""Columns of A_sentinel_drift.csv: one row per mounted target (mount epoch). Times are hours since the first A or
+sentinel frame; ``max_excursion_mm`` is the largest |offset| of a sentinel pose from the first sentinel after mounting;
+``correction_applied_mm`` is the largest |correction| subtracted from the bias of a pose captured on that mount."""
+NOISE_FIT_WEIGHTS = "1/sigma_t (relative error)"
+"""How Step 9 weights the stations; recorded in the details JSON and in forward_model_parameters.json."""
 
 # ---------------------------------------------------------------------------
 # Okabe-Ito colors (colorblind-safe palette) for the figures
@@ -258,6 +282,12 @@ class StationNoise:
     legacy_std_mm: float = float("nan")
     legacy_std_median_mm: float = float("nan")
     mean_time_hours: float = float("nan")
+    mount: int = 0
+    """Mount epoch of the pose (:func:`mount_epochs`), the key of its drift line."""
+    drift_rate_mm_per_h: float = float("nan")
+    """Sentinel drift rate of the mount the pose was captured on (Step 11); NaN without a sentinel line."""
+    drift_flagged: bool | None = None
+    """True when that mount's drift exceeded the allowance (the bias is then corrected); None without a sentinel line."""
     note: str = ""
 
     def csv_row(self) -> dict[str, Any]:
@@ -282,8 +312,8 @@ class PoseDiagnostics:
     lsb_mm: float
     legacy_boxes: list[dict[str, Any]] = field(default_factory=list)
     fixed_pattern_mm: np.ndarray | None = None
-    """The fixed-pattern map of the pose (Step 4): the frame-mean depth minus the free plane fitted to it, mm, NaN outside
-    the region of interest. Kept (float32) only for the fronto-parallel center-field main poses, the ones Analysis B-Z
+    """The fixed-pattern map of the pose (Step 4): the frame-mean depth minus the registered ground truth minus the bias, mm
+    (zero mean over the region of interest), NaN outside it. Kept (float32) only for the fronto-parallel center-field main poses, the ones Analysis B-Z
     subtracts from its ramp poses (Section 11.2, Ramp); None for every other pose."""
 
 
@@ -302,6 +332,8 @@ class NoiseModelFit:
     n_near_two: bool
     degrees_of_freedom: int
     note: str = ""
+    weights: str = NOISE_FIT_WEIGHTS
+    """The weighting scheme of the fit, as a string for the output files."""
 
     def predict(self, z_mm) -> np.ndarray:
         """sigma_t(Z) = sqrt(sigma_0^2 + (sigma_d Z^2 / k)^2) in mm."""
@@ -336,6 +368,18 @@ class TargetDrift:
     """|rate| x span: the drift of the target between its first and last sentinel of the mount."""
     used_for_a_correction: bool
     """True for the T2 sentinels of the mount of series A (the ones the A drift correction uses)."""
+    max_excursion_mm: float = float("nan")
+    """Largest |offset| of a sentinel pose from the first sentinel after mounting."""
+    mount_hours: float = 0.0
+    """Time covered by the mount: from its first to its last A or sentinel frame (at least the sentinel span)."""
+    drift_over_mount_mm: float = float("nan")
+    """|rate| x ``mount_hours``: the drift the poses captured on this mount saw."""
+    threshold_mm: float = float("nan")
+    """The allowance: WARMUP_DRIFT_FRACTION_OF_SIGMA x sigma_t at the reference station."""
+    flagged: bool = False
+    """True when ``drift_over_mount_mm`` exceeds ``threshold_mm``."""
+    correction_applied_mm: float = 0.0
+    """Largest |time-interpolated sentinel offset| subtracted from the bias of a pose captured on this mount (0 if none)."""
 
 
 @dataclass
@@ -409,6 +453,7 @@ class NoiseResult:
             "power_law_a": None if model is None else model.power_law_a,
             "power_law_n": None if model is None else model.power_law_n,
             "noise_coefficient_per_mm": None if sigma_d is None else sigma_d / self.k_mm_px,
+            "noise_fit_weights": None if model is None else model.weights,
         }
 
 
@@ -602,6 +647,28 @@ def _metadata_float(record: FrameRecord, key: str) -> float:
         return float("nan")
 
 
+def fixed_pattern_sigma_mm(fixed_pattern_values: np.ndarray, sigma_t_rms_mm: float, frames: int) -> tuple[float, bool]:
+    """(sigma_fp in mm, whether the clamp at zero acted) from the fixed-pattern map values over the ROI (Step 4).
+
+    The fixed-pattern noise is the spread of Zbar - Z_GT - bias about the REGISTERED plane. The frame average Zbar is
+    not free of temporal noise: its per-pixel temporal variance is sigma_t^2 / N after averaging N frames, so the
+    variance of the map is sigma_fp^2 + sigma_t^2 / N and
+
+        sigma_fp^2 = var(Zbar - Z_GT) - sigma_t^2 / N,
+
+    with sigma_t^2 the ROI mean of the per-pixel temporal variance (``sigma_t_rms_mm`` squared). The correction is
+    1 percent of sigma_t^2 at 100 frames; it matters only where the fixed pattern is small, and without it a sensor
+    with NO fixed pattern would still show sigma_fp = sigma_t / sqrt(N). The difference of two estimates can come out
+    negative by sampling error, so the result is clamped at zero; the second value says when that happened.
+    The variance is the population variance (ddof = 0) over the ROI, the same weighting as the ROI mean in
+    sigma_tot, so that the closure sigma_tot^2 = sigma_t^2 + sigma_fp^2 + bias^2 is algebraic when every pixel is read
+    in every frame."""
+    values = np.asarray(fixed_pattern_values, dtype=np.float64)
+    corrected_variance = float(np.var(values)) - sigma_t_rms_mm ** 2 / frames
+    clamped = corrected_variance < 0.0
+    return float(math.sqrt(max(corrected_variance, 0.0))), bool(clamped)
+
+
 def analyze_pose(session: Session, stack: PoseStack, options: NoiseOptions) -> tuple[StationNoise, PoseDiagnostics | None]:
     """Steps 1 to 8 and 12 for one pose; returns its row and the diagnostics arrays (None if the ROI is empty)."""
     params = session.params
@@ -626,20 +693,26 @@ def analyze_pose(session: Session, stack: PoseStack, options: NoiseOptions) -> t
     row.sigma_t_median_mm = float(np.median(sigma_roi))
     row.sigma_t_p95_mm = float(np.percentile(sigma_roi, 95.0))
     row.sigma_t_rms_mm = float(np.sqrt(np.mean(sigma_roi ** 2)))
-    # Step 4: mean frame, free plane, fixed-pattern noise, bias, plane angle.
+    # Step 4: mean frame, bias, fixed-pattern noise about the registered plane, plane angle.
     mean_depth = stats.mean_depth
     usable = roi & np.isfinite(mean_depth)
+    offset_from_truth = mean_depth - z_gt                       # Zbar - Z_GT, NaN where Zbar is
+    row.bias_mm = float(np.mean(offset_from_truth[usable]))
+    row.bias_corrected_mm = row.bias_mm
+    # The fixed-pattern map: Zbar - Z_GT - bias about the REGISTERED plane (zero mean over the ROI). Frame averaging
+    # leaves a share sigma_t^2 / N of the temporal variance in it, so the variance of the map overstates the fixed
+    # pattern by that amount and the correction removes it (see fixed_pattern_sigma_mm).
+    fixed_pattern_map = np.where(usable, offset_from_truth - row.bias_mm, np.nan)
+    row.sigma_fp_mm, fp_clamped = fixed_pattern_sigma_mm(fixed_pattern_map[usable], row.sigma_t_rms_mm,
+                                                         stack.frame_count)
+    # The free plane serves only for the reported angle between it and the registered plane.
     u, v = camera.pixel_grid()
     points = camera.back_project(u, v, mean_depth)
     fit = fit_plane_robust(points[usable])
-    plane_z = plane_depth_image(camera, fit.point, fit.normal)
-    residual = np.where(usable, mean_depth - plane_z, np.nan)
-    row.sigma_fp_mm = float(np.nanstd(residual[usable]))
-    row.bias_mm = float(np.mean((mean_depth - z_gt)[usable]))
-    row.bias_corrected_mm = row.bias_mm
     registered_normal = geometry.target.front_plane_camera(geometry.pose_camera)[1]
     row.plane_angle_deg = _angle_between_deg(fit.normal, registered_normal)
-    # Step 5: total noise and the closure check.
+    # Step 5: total noise and the closure check. All four quantities are about the same registered plane, so
+    # sigma_tot^2 = sigma_t^2 + sigma_fp^2 + bias^2 holds up to sampling error.
     deviation = np.where(roi[None] & stack.valid, depth - z_gt[None], np.nan)
     row.sigma_tot_mm = float(np.sqrt(np.nanmean(deviation ** 2)))
     expected = row.sigma_t_rms_mm ** 2 + row.sigma_fp_mm ** 2 + row.bias_mm ** 2
@@ -650,13 +723,15 @@ def analyze_pose(session: Session, stack: PoseStack, options: NoiseOptions) -> t
     # Step 7: spatial correlation of the temporal component and of the fixed-pattern residual.
     temporal_component = np.where(roi[None] & stack.valid, depth - mean_depth[None], np.nan)
     acf_h, acf_v = masked_autocorrelation(temporal_component, roi, options.maximum_lag_px)
-    acf_fp_h, acf_fp_v = masked_autocorrelation(residual, usable, options.maximum_lag_px)
+    acf_fp_h, acf_fp_v = masked_autocorrelation(fixed_pattern_map, usable, options.maximum_lag_px)
     threshold = params.autocorrelation_threshold
     row.corr_len_h_px = correlation_length_px(acf_h, threshold)
     row.corr_len_v_px = correlation_length_px(acf_v, threshold)
     row.corr_len_fp_h_px = correlation_length_px(acf_fp_h, threshold)
     row.corr_len_fp_v_px = correlation_length_px(acf_fp_v, threshold)
     notes = []
+    if fp_clamped:
+        notes.append("sigma_fp clamped to zero: the variance of Zbar - Z_GT is below the temporal share sigma_t^2 / N")
     if not (params.phase_jitter_span_px > max([x for x in (row.corr_len_h_px, row.corr_len_v_px) if math.isfinite(x)],
                                               default=0.0)):
         notes.append("PHASE_JITTER_SPAN_PX is not larger than the correlation length")
@@ -685,7 +760,7 @@ def analyze_pose(session: Session, stack: PoseStack, options: NoiseOptions) -> t
     diagnostics = PoseDiagnostics(sigma_t_map=sigma_map, roi=roi, acf_h=acf_h, acf_v=acf_v, acf_fp_h=acf_fp_h,
                                   acf_fp_v=acf_fp_v, code_levels=levels, code_counts=counts, lsb_mm=lsb,
                                   legacy_boxes=boxes,
-                                  fixed_pattern_mm=residual.astype(np.float32) if is_center_main else None)
+                                  fixed_pattern_mm=fixed_pattern_map.astype(np.float32) if is_center_main else None)
     stamps = [_parse_time(r.timestamp) for r in stack.records]
     stamps = [s for s in stamps if s is not None]
     if stamps:
@@ -697,9 +772,15 @@ def analyze_pose(session: Session, stack: PoseStack, options: NoiseOptions) -> t
 # Step 9: model fit
 # ---------------------------------------------------------------------------
 def fit_noise_model(stations_mm: np.ndarray, sigma_t_mm: np.ndarray, k_mm_px: float) -> NoiseModelFit | None:
-    """Weighted least squares fit of sigma_t(Z) = sqrt(sigma_0^2 + (sigma_d Z^2 / k)^2) (weights 1 / sigma_t, so the
-    residuals are relative) and the free power law sigma_t = a Z^n (regression of ln sigma_t on ln Z). sigma_0 and
-    sigma_d are constrained to be non-negative. None with fewer than MIN_STATION_COUNT_FOR_FIT stations."""
+    """Weighted least squares fit of sigma_t(Z) = sqrt(sigma_0^2 + (sigma_d Z^2 / k)^2) and the free power law
+    sigma_t = a Z^n (regression of ln sigma_t on ln Z). sigma_0 and sigma_d are constrained to be non-negative.
+
+    Weighting (Section 10, Step 9): each station is weighted by 1 / sigma_t, i.e. the fit is in RELATIVE error, so the
+    near stations, where the noise is small, count as much as the far ones; without it the far stations, whose
+    absolute noise is largest, would dominate. The scheme is recorded as the string ``NOISE_FIT_WEIGHTS`` in the
+    result (``NoiseModelFit.weights``), in A_noise_details.json and in forward_model_parameters.json. The power law is an
+    unweighted regression in the logarithms, which is a relative-error fit already. None with fewer than
+    MIN_STATION_COUNT_FOR_FIT stations."""
     z = np.asarray(stations_mm, dtype=np.float64)
     sigma = np.asarray(sigma_t_mm, dtype=np.float64)
     if z.size < MIN_STATION_COUNT_FOR_FIT or np.ptp(z) == 0.0:
@@ -808,46 +889,93 @@ def _line_rate(hours: np.ndarray, values: np.ndarray, pose_ids: np.ndarray) -> f
 
 
 def target_drifts(frames: list[dict[str, Any]], options: NoiseOptions, time_origin_s: float,
-                  correction_epochs: set[int]) -> list[TargetDrift]:
+                  correction_epochs: set[int], threshold_mm: float = float("nan"),
+                  mount_hours: dict[int, float] | None = None) -> list[TargetDrift]:
     """The drift of every mounted target (Step 11): the sentinel frames are grouped by (target, mount), and each group's
     drift is the sentinel line relative to the reference of that mount, so that a re-mount of the target, whose
     repeatability is ADAPTER_REMOUNT_REPEATABILITY_MM, does not enter. The reference is the sentinel that the manifest
     column ``sentinel_mount_reference`` flags when the manifest has it, and the first sentinel after the mount otherwise.
     A group with one sentinel pose has only its reference (offset 0, no rate). ``correction_epochs`` are the mounts of
-    series A; the T2 groups among them are the ones the A drift correction uses."""
+    series A; the T2 groups among them are the ones the A drift correction uses.
+
+    Each mount is flagged when the drift it saw, |rate| x the time the mount covers, exceeds ``threshold_mm`` (the
+    allowance WARMUP_DRIFT_FRACTION_OF_SIGMA x sigma_t at the reference station; NaN means no allowance, nothing is
+    flagged). ``mount_hours`` gives, by mount number, the time from the first to the last A or sentinel frame captured
+    on the mount, which can be longer than the sentinel span (the A poses lie between the sentinels, and the correction
+    is interpolated over that time); without an entry the sentinel span is used. The correction itself is applied by
+    :func:`analyze_sentinels`, which fills ``correction_applied_mm``."""
     groups: dict[tuple, list[dict[str, Any]]] = {}
     for f in frames:
         groups.setdefault((f["epoch"], f["target_id"]), []).append(f)
+    covered_hours = {} if mount_hours is None else mount_hours
     result = []
     for (epoch, target_id), members in sorted(groups.items(), key=lambda item: min(f["time_s"] for f in item[1])):
         hours = np.array([(f["time_s"] - time_origin_s) / SECONDS_PER_HOUR for f in members])
         key = "registered_mm" if options.sentinel_reference == "registered" else "raw_mm"
         values = np.array([f[key] for f in members])
         # The reference pose is the sentinel the manifest flags as such; without the flag it is the first one in time.
-        flagged = [f["pose_id"] for f in members if f.get("reference")]
+        flagged_poses = [f["pose_id"] for f in members if f.get("reference")]
         pose_hours, pose_offsets = _pose_means(hours, values, np.array([f["pose_id"] for f in members]),
-                                               min(flagged) if flagged else None)
+                                               min(flagged_poses) if flagged_poses else None)
         rate = _line_rate(hours, values, np.array([f["pose_id"] for f in members]))
         span_hours = float(np.ptp(pose_hours)) if len(pose_hours) > 1 else 0.0
+        covered = max(span_hours, float(covered_hours.get(epoch, 0.0)))
+        drift_over_mount = abs(rate) * covered if math.isfinite(rate) else float("nan")
         result.append(TargetDrift(
             target_id=target_id, mount=epoch, gap_mm=members[0]["gap_mm"], sentinel_poses=len(pose_hours),
             pose_hours=pose_hours, pose_offset_mm=pose_offsets, rate_mm_per_hour=rate, span_hours=span_hours,
             drift_over_span_mm=abs(rate) * span_hours if math.isfinite(rate) else float("nan"),
-            used_for_a_correction=(target_id == TARGET_NOISE_PLATE and epoch in correction_epochs)))
+            used_for_a_correction=(target_id == TARGET_NOISE_PLATE and epoch in correction_epochs),
+            max_excursion_mm=float(np.max(np.abs(pose_offsets))), mount_hours=covered,
+            drift_over_mount_mm=drift_over_mount, threshold_mm=threshold_mm,
+            flagged=bool(math.isfinite(drift_over_mount) and math.isfinite(threshold_mm)
+                         and drift_over_mount > threshold_mm)))
     return result
+
+
+def _mount_hours(session: Session, epochs: dict[tuple, int], time_origin_s: float) -> dict[int, float]:
+    """Per mount number, the time from the first to the last frame of procedures A and S captured on the mount, hours.
+    (Registration frames are left out: they do not enter the bias that the correction adjusts.)"""
+    stamps: dict[int, list[float]] = {}
+    for record in session.records:
+        if record.procedure not in (PROCEDURE_NOISE, PROCEDURE_SENTINEL):
+            continue
+        stamp = _parse_time(record.timestamp)
+        if stamp is not None:
+            stamps.setdefault(epochs.get(record.pose_key(), 0), []).append(stamp.timestamp())
+    return {epoch: (max(times) - min(times)) / SECONDS_PER_HOUR for epoch, times in stamps.items()}
+
+
+def _reference_sigma_mm(session: Session, rows: list[StationNoise], model: NoiseModelFit | None) -> float:
+    """sigma_t at the reference station Z_REFERENCE_MM, the scale of the drift allowance (Step 11): the ROI median of
+    the fronto-parallel center-field main pose at that station when A has one, else the fitted model there, else the
+    median over all poses."""
+    reference_z = session.params.z_reference_mm
+    for row in rows:
+        if (row.subseries == SUBSERIES_MAIN and row.field == FIELD_POSITION_CENTER and row.tilt_deg == 0.0
+                and row.station_z_mm == reference_z and math.isfinite(row.sigma_t_median_mm)):
+            return row.sigma_t_median_mm
+    if model is not None:
+        return float(model.predict(reference_z))
+    return float(np.median([r.sigma_t_median_mm for r in rows if math.isfinite(r.sigma_t_median_mm)] or [np.nan]))
 
 
 def analyze_sentinels(session: Session, rows: list[StationNoise], model: NoiseModelFit | None,
                       session_hours: float, options: NoiseOptions, time_origin_s: float,
                       epochs: dict[tuple, int] | None = None) -> DriftResult | None:
-    """Step 11: the sentinel lines per mounted target, the drift of A against the allowance, and the bias correction.
+    """Step 11: the sentinel lines per mounted target, the drift of each mount against the allowance, and the bias
+    correction of the poses captured on each mount.
 
     The sentinels are captured on the target mounted at that point of the plan, so they are grouped by (target, mount)
-    and each group's drift is computed relative to its first sentinel after mounting (:func:`target_drifts`, all of them
-    returned in ``DriftResult.targets``). The A drift correction uses the T2 sentinels of the mount(s) in which series
-    A was captured: their line gives the rate, the drift over ``session_hours`` is compared with the allowance
-    WARMUP_DRIFT_FRACTION_OF_SIGMA x sigma_t at the sentinel Z, and, when it exceeds it, the offsets of the sentinel poses
-    (relative to the first one) interpolated in time are subtracted from the bias of every A pose."""
+    and each group's drift rate (mm per hour) is that of its sentinel line relative to its first sentinel after mounting
+    (:func:`target_drifts`, all of them returned in ``DriftResult.targets``). A mount is flagged when its drift
+    (|rate| x the time it covers) exceeds WARMUP_DRIFT_FRACTION_OF_SIGMA x sigma_t at the reference station
+    (Z_REFERENCE_MM). For every mount of series A, per mount and never pooled across mounts (a re-mount adds its own
+    bias step), the rate and the flag are written to the rows of the poses captured on it, and, when the mount is
+    flagged, the offsets of its sentinel poses (relative to the first one) interpolated in time at the pose's mean time
+    are subtracted from the bias of each of those poses. The size of the correction is kept per pose
+    (``bias_correction_mm``) and per mount (``TargetDrift.correction_applied_mm``). The pooled T2 line of A's mounts
+    (``DriftResult.rate_mm_per_hour``) is kept for the figure and for the time-and-temperature summary."""
     params = session.params
     records = select(session.records, procedure=PROCEDURE_SENTINEL)
     if not records:
@@ -855,7 +983,10 @@ def analyze_sentinels(session: Session, rows: list[StationNoise], model: NoiseMo
     epochs = mount_epochs(session.records) if epochs is None else epochs
     correction_epochs = a_mount_epochs(session.records, epochs)
     all_frames = [f for f in _frame_means(session, records, options, epochs) if f["time_s"] is not None]
-    per_target = target_drifts(all_frames, options, time_origin_s, correction_epochs)
+    sigma_here = _reference_sigma_mm(session, rows, model)
+    threshold = params.warmup_drift_fraction_of_sigma * sigma_here
+    per_target = target_drifts(all_frames, options, time_origin_s, correction_epochs, threshold,
+                               _mount_hours(session, epochs, time_origin_s))
     frames = [f for f in all_frames if f["target_id"] == TARGET_NOISE_PLATE and f["epoch"] in correction_epochs]
     if len(frames) < SENTINEL_MIN_FRAMES:
         return None
@@ -873,26 +1004,31 @@ def analyze_sentinels(session: Session, rows: list[StationNoise], model: NoiseMo
     if known.sum() >= SENTINEL_MIN_FRAMES and np.ptp(np.array([t for t in temperatures if t is not None])) > 0:
         slope_temperature = float(np.polyfit(np.array([t for t in temperatures if t is not None]), chosen[known], 1)[0])
     sentinel_z = float(frames[0]["station_z_mm"])
-    sigma_here = (float(model.predict(sentinel_z)) if model is not None else
-                  float(np.median([r.sigma_t_median_mm for r in rows if math.isfinite(r.sigma_t_median_mm)] or [np.nan])))
     drift_over_session = abs(rate) * session_hours if math.isfinite(rate) else float("nan")
-    threshold = params.warmup_drift_fraction_of_sigma * sigma_here
-    apply = bool(math.isfinite(drift_over_session) and drift_over_session > threshold)
-    # Per-sentinel-pose offsets relative to the first sentinel after the mount, for the time interpolation.
+    # Per-sentinel-pose offsets relative to the first sentinel after the mount (pooled over A's mounts, for the summary).
     pose_hours, pose_offsets = _pose_means(hours, chosen, frame_poses)
-    if apply:
-        for row in rows:
-            if math.isfinite(row.mean_time_hours):
-                t = row.mean_time_hours - time_origin_s / SECONDS_PER_HOUR
-                row.bias_correction_mm = float(np.interp(t, pose_hours, pose_offsets))
-                row.bias_corrected_mm = row.bias_mm - row.bias_correction_mm
+    # The correction, mount by mount: the T2 line of the mount a pose was captured on, and only if that mount is flagged.
+    t2_by_mount = {t.mount: t for t in per_target if t.used_for_a_correction}
+    time_origin_hours = time_origin_s / SECONDS_PER_HOUR
+    for row in rows:
+        mount_drift = t2_by_mount.get(row.mount)
+        if mount_drift is None:
+            continue
+        row.drift_rate_mm_per_h = mount_drift.rate_mm_per_hour
+        row.drift_flagged = mount_drift.flagged
+        if mount_drift.flagged and math.isfinite(row.mean_time_hours):
+            row.bias_correction_mm = float(np.interp(row.mean_time_hours - time_origin_hours, mount_drift.pose_hours,
+                                                     mount_drift.pose_offset_mm))
+            row.bias_corrected_mm = row.bias_mm - row.bias_correction_mm
+            mount_drift.correction_applied_mm = max(mount_drift.correction_applied_mm, abs(row.bias_correction_mm))
     return DriftResult(
         reference=options.sentinel_reference, elapsed_hours=hours.tolist(), mean_z_mm=chosen.tolist(),
         temperature_c=temperatures, sentinel_ids=[f["pose_id"] for f in frames], rate_mm_per_hour=rate,
         rate_raw_mm_per_hour=rate_raw, rate_registered_mm_per_hour=rate_registered,
         temperature_slope_mm_per_c=slope_temperature, session_hours=session_hours,
         drift_over_session_mm=drift_over_session, threshold_mm=threshold, sentinel_station_mm=sentinel_z,
-        correction_applied=apply, pose_hours=pose_hours, pose_offset_mm=pose_offsets, targets=per_target,
+        correction_applied=any(t.flagged for t in t2_by_mount.values()), pose_hours=pose_hours,
+        pose_offset_mm=pose_offsets, targets=per_target,
         note=("sensor temperature not logged: no drift against temperature" if slope_temperature is None else ""))
 
 
@@ -1042,6 +1178,8 @@ def run_noise(session: Session, out_dir: str | Path, previous: dict | None = Non
     stamps = [s for s in (_parse_time(r.timestamp) for r in a_records + a_sentinels) if s is not None]
     origin_s = min(s.timestamp() for s in stamps) if stamps else 0.0
     session_hours = (max(s.timestamp() for s in stamps) - origin_s) / SECONDS_PER_HOUR if stamps else 0.0
+    for row in rows:
+        row.mount = epochs.get(row.pose_key, 0)
     drift = analyze_sentinels(session, rows, model, session_hours, options, origin_s, epochs) if stamps else None
     if drift is None:
         notes.append("no usable T2 sentinel frames in the mount of series A: no drift line, no bias correction")
@@ -1199,7 +1337,8 @@ def _figure_drift(result: NoiseResult, out_dir: Path) -> list[Path] | None:
     # Every mounted target, each relative to its own first sentinel after the mount.
     for index, target in enumerate(drift.targets):
         axes[1].plot(target.pose_hours, target.pose_offset_mm, "o-", color=OKABE_ITO_CYCLE[index % len(OKABE_ITO_CYCLE)],
-                     markersize=3, label=f"{target.target_id} (mount {target.mount})")
+                     markersize=3, label=(f"{target.target_id} (mount {target.mount}): {target.rate_mm_per_hour:.3g} mm/h"
+                                          + (", flagged" if target.flagged else "")))
     axes[1].set_xlabel("time since the first frame (h)")
     axes[1].set_ylabel("sentinel offset from the first of the mount (mm)")
     axes[1].set_title("drift per mounted target", fontsize="small")
@@ -1215,19 +1354,33 @@ def _figure_drift(result: NoiseResult, out_dir: Path) -> list[Path] | None:
     return save_figure(figure, out_dir / FIGURE_STEMS["drift"])
 
 
+def sentinel_drift_row(target: TargetDrift) -> dict[str, Any]:
+    """The row of A_sentinel_drift.csv of one mounted target (SENTINEL_DRIFT_COLUMNS)."""
+    return {"target_id": target.target_id, "mount": target.mount, "sentinel_poses": target.sentinel_poses,
+            "first_sentinel_hours": target.pose_hours[0], "last_sentinel_hours": target.pose_hours[-1],
+            "drift_rate_mm_per_h": target.rate_mm_per_hour, "max_excursion_mm": target.max_excursion_mm,
+            "mount_hours": target.mount_hours, "drift_over_mount_mm": target.drift_over_mount_mm,
+            "threshold_mm": target.threshold_mm, "flagged": target.flagged,
+            "correction_applied_mm": target.correction_applied_mm, "used_for_a_correction": target.used_for_a_correction}
+
+
 def write_outputs(result: NoiseResult, out_dir: str | Path) -> list[Path]:
-    """Step 13: A_noise_summary.csv (one row per pose), A_noise_details.json and the figures (PNG and SVG).
+    """Step 13: A_noise_summary.csv (one row per pose), A_sentinel_drift.csv (one row per mounted target), A_noise_details.json
+    and the figures (PNG and SVG).
     Returns the paths written."""
     out_dir = Path(out_dir)
     written = [write_csv_rows(out_dir / SUMMARY_CSV_NAME, [r.csv_row() for r in result.rows], SUMMARY_COLUMNS)]
     model, drift = result.model, result.drift
+    if drift is not None:
+        written.append(write_csv_rows(out_dir / SENTINEL_DRIFT_CSV_NAME, [sentinel_drift_row(t) for t in drift.targets],
+                                      SENTINEL_DRIFT_COLUMNS))
     details = {
         "model_fit": None if model is None else {
             "form": "sigma_t(Z) = sqrt(sigma_0^2 + (sigma_d Z^2 / k)^2)", "sigma_0_mm": model.sigma_0_mm,
             "sigma_d_px": model.sigma_d_px, "k_mm_px": model.k_mm_px, "stations_mm": model.stations_mm,
             "sigma_t_mm": model.sigma_t_mm, "residual_rms_mm": model.model_residual_rms_mm,
             "power_law": {"a": model.power_law_a, "n": model.power_law_n, "n_near_two": model.n_near_two},
-            "degrees_of_freedom": model.degrees_of_freedom, "note": model.note,
+            "degrees_of_freedom": model.degrees_of_freedom, "note": model.note, "weights": model.weights,
             "noise_coefficient_per_mm": model.sigma_d_px / model.k_mm_px},
         "drift": None if drift is None else {
             "reference": drift.reference, "rate_mm_per_hour": drift.rate_mm_per_hour,
@@ -1241,6 +1394,9 @@ def write_outputs(result: NoiseResult, out_dir: str | Path) -> list[Path]:
                          "sentinel_poses": t.sentinel_poses, "pose_hours": t.pose_hours,
                          "pose_offset_from_first_sentinel_mm": t.pose_offset_mm, "rate_mm_per_hour": t.rate_mm_per_hour,
                          "span_hours": t.span_hours, "drift_over_span_mm": t.drift_over_span_mm,
+                         "max_excursion_mm": t.max_excursion_mm, "mount_hours": t.mount_hours,
+                         "drift_over_mount_mm": t.drift_over_mount_mm, "threshold_mm": t.threshold_mm,
+                         "flagged": t.flagged, "correction_applied_mm": t.correction_applied_mm,
                          "used_for_a_correction": t.used_for_a_correction} for t in drift.targets],
             "correction_per_station_mm": {f"{r.station_z_mm:g}/{r.subseries}/{r.field}/{r.tilt_axis}{r.tilt_deg:g}":
                                           r.bias_correction_mm for r in result.rows}, "note": drift.note},

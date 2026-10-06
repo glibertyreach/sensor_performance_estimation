@@ -266,9 +266,11 @@ def test_a_step11_sentinels_are_grouped_by_mounted_target(result_a, session):
     assert t2_epochs == noise.a_mount_epochs(session.records, epochs) and len(t2_epochs) == 1
 
 
-def _synthetic_frames(rate_mm_per_hour: float, noise_mm: float, mounts: list[tuple[str, int, list[float]]]) -> list[dict]:
+def _synthetic_frames(rate_mm_per_hour: float, noise_mm: float, mounts: list[tuple[str, int, list[float]]],
+                      mount_rates: dict[int, float] | None = None) -> list[dict]:
     """Sentinel frame dictionaries of ``_frame_means`` for a linear drift: ``mounts`` lists (target, mount number, pose
-    times in hours); each pose has ten frames over two minutes. A fixed offset per mount (the mount's own bias) is added."""
+    times in hours); each pose has ten frames over two minutes. A fixed offset per mount (the mount's own bias) is added.
+    ``mount_rates`` gives a different drift rate for chosen mount numbers (the others use ``rate_mm_per_hour``)."""
     rng = np.random.default_rng(SIMULATION_SEED)
     frames, pose_id = [], 0
     for target_id, mount, pose_times in mounts:
@@ -276,7 +278,8 @@ def _synthetic_frames(rate_mm_per_hour: float, noise_mm: float, mounts: list[tup
         for start in pose_times:
             for frame in range(10):
                 hours = start + frame * 12.0 / 3600.0
-                value = bias + rate_mm_per_hour * hours + rng.normal(0.0, noise_mm)
+                rate = (mount_rates or {}).get(mount, rate_mm_per_hour)
+                value = bias + rate * hours + rng.normal(0.0, noise_mm)
                 frames.append({"pose_id": pose_id, "target_id": target_id, "gap_mm": None, "epoch": mount,
                                "time_s": hours * 3600.0, "temperature_c": None, "registered_mm": value,
                                "raw_mm": value, "station_z_mm": 800.0})
@@ -373,6 +376,156 @@ def test_a_summary_carries_the_achieved_field_fraction(result_a, analysis_dir, s
     assert all(math.isnan(row.field_fraction_achieved) for row in result_a.rows)
 
 
+# ---------------------------------------------------------------------------
+# Step 4 and 5 on synthetic stacks: fixed pattern about the registered plane, closure
+# ---------------------------------------------------------------------------
+SYNTHETIC_FRAMES = 100
+"""Frames of the synthetic stacks of the sigma_fp and closure tests (the 1 percent figure of the specification)."""
+SYNTHETIC_SIGMA_T_MM = 0.5
+"""Per-pixel temporal noise of the synthetic stacks, mm."""
+SYNTHETIC_PATTERN_RMS_MM = 0.4
+"""RMS of the static fixed-pattern block map of the synthetic stack with a pattern, mm."""
+SYNTHETIC_TILT_SPAN_MM = 0.3
+"""Peak-to-peak depth ramp across the image of the synthetic stack with a pattern: the actual plate is not exactly where
+the registered pose says, which is the free-plane tilt that no longer enters sigma_fp."""
+SYNTHETIC_BLOCK_PX = 4
+"""Side of the blocks of the synthetic fixed-pattern map, pixels."""
+SYNTHETIC_BIAS_MM = 0.2
+"""Constant depth offset of the synthetic stack with a pattern (the bias), mm."""
+CLOSURE_TOLERANCE = 0.03
+"""Closure ratio sigma_tot^2 / (sigma_t^2 + sigma_fp^2 + bias^2) of the synthetic stacks must be within this of 1: a few
+percent (the specification allows 20 percent; about the same registered plane the closure is nearly algebraic)."""
+SIGMA_FP_TOLERANCE = 0.05
+"""Relative tolerance of sigma_fp against the RMS of the known static map."""
+
+
+def _synthetic_pose(session, pattern_rms_mm: float, tilt_span_mm: float, bias_mm: float, seed: int):
+    """(pose stack, its region of interest, the known static map over the ROI): the 800 mm main A pose of the quick session
+    with its depth replaced by registered ground truth + bias + tilt ramp + block pattern + Gaussian frame noise, every
+    pixel read in every frame. The static part is known exactly, so sigma_fp and the closure can be checked against it."""
+    from sensorperf.analysis.common import pose_geometry, region_of_interest
+    from sensorperf.io.capture_set import load_stack
+    from sensorperf.io.manifest import group_by_pose, select
+    a_poses = group_by_pose(select(session.records, procedure="A"))
+    group = next(g for g in a_poses.values() if g[0].subseries == SUBSERIES_MAIN and g[0].station_z_mm == 800.0)
+    stack = load_stack(group)
+    geometry = pose_geometry(session, stack.record(), stack.camera)
+    roi = region_of_interest(geometry, session.params)
+    rng = np.random.default_rng(SIMULATION_SEED)
+    height, width = geometry.z_front_gt.shape
+    blocks = rng.normal(0.0, pattern_rms_mm, (-(-height // SYNTHETIC_BLOCK_PX), -(-width // SYNTHETIC_BLOCK_PX)))
+    pattern = np.kron(blocks, np.ones((SYNTHETIC_BLOCK_PX, SYNTHETIC_BLOCK_PX)))[:height, :width]
+    ramp = tilt_span_mm * (np.linspace(-0.5, 0.5, width)[None, :] * np.ones((height, 1)))
+    static = bias_mm + ramp + pattern
+    depth = (geometry.z_front_gt + static)[None] + rng.normal(0.0, SYNTHETIC_SIGMA_T_MM, (SYNTHETIC_FRAMES, height, width))
+    synthetic = dataclasses.replace(stack, depth=depth, valid=np.ones(depth.shape, dtype=bool),
+                                    records=[stack.records[0]] * SYNTHETIC_FRAMES)
+    return synthetic, roi, static
+
+
+def test_a_step4_fixed_pattern_correction_removes_the_temporal_share(session):
+    """Section 10, Step 4: with NO fixed pattern the frame average still carries sigma_t / sqrt(N) of temporal noise, so the
+    uncorrected spread of Zbar - Z_GT - bias is clearly positive; sigma_fp = sqrt(var - sigma_t^2 / N) is near zero (a small
+    fraction of that share), and when the clamp at zero acts the note says so."""
+    stack, roi, _ = _synthetic_pose(session, 0.0, 0.0, 0.0, SIMULATION_SEED)
+    row, diagnostics = noise.analyze_pose(session, stack, noise.NoiseOptions())
+    temporal_share = SYNTHETIC_SIGMA_T_MM / math.sqrt(SYNTHETIC_FRAMES)
+    uncorrected = float(np.nanstd(diagnostics.fixed_pattern_mm.astype(np.float64)))
+    assert uncorrected == pytest.approx(temporal_share, rel=0.1)                     # clearly positive without the correction
+    assert row.sigma_fp_mm < 0.3 * uncorrected                                       # near zero with it
+    assert ("clamped" in row.note) == (row.sigma_fp_mm == 0.0)
+    assert row.sigma_t_rms_mm == pytest.approx(SYNTHETIC_SIGMA_T_MM, rel=0.02)
+
+
+def test_a_step4_fixed_pattern_clamp_and_formula():
+    """Section 10, Step 4: sigma_fp^2 = var - sigma_t^2 / N exactly, and a variance below the temporal share is clamped to
+    zero and reported as clamped."""
+    values = np.array([-1.0, 1.0, -1.0, 1.0])                                        # variance 1
+    sigma_fp, clamped = noise.fixed_pattern_sigma_mm(values, sigma_t_rms_mm=2.0, frames=16)     # 1 - 4 / 16 = 0.75
+    assert sigma_fp == pytest.approx(math.sqrt(0.75)) and not clamped
+    sigma_fp, clamped = noise.fixed_pattern_sigma_mm(values, sigma_t_rms_mm=2.0, frames=2)      # 1 - 2 < 0
+    assert sigma_fp == 0.0 and clamped
+
+
+def test_a_step5_closure_holds_for_a_known_static_map(session):
+    """Section 10, Step 5: on simulated data whose fixed pattern is a known static map (block pattern, a bias and a tilt
+    ramp of the true plate against the registered plane) sigma_fp equals the RMS of the map about its mean over the ROI
+    (within SIGMA_FP_TOLERANCE), the bias equals its mean, and the closure sigma_tot^2 / (sigma_t^2 + sigma_fp^2 + bias^2)
+    is 1 within CLOSURE_TOLERANCE, much closer than the 20 percent allowed: the tilt against a free plane no longer enters."""
+    stack, roi, static = _synthetic_pose(session, SYNTHETIC_PATTERN_RMS_MM, SYNTHETIC_TILT_SPAN_MM, SYNTHETIC_BIAS_MM,
+                                         SIMULATION_SEED)
+    row, _ = noise.analyze_pose(session, stack, noise.NoiseOptions())
+    assert row.bias_mm == pytest.approx(float(static[roi].mean()), abs=0.02)
+    assert row.sigma_fp_mm == pytest.approx(float(static[roi].std()), rel=SIGMA_FP_TOLERANCE)
+    assert abs(row.closure_ratio - 1.0) < CLOSURE_TOLERANCE, row.closure_ratio
+    assert row.closure_ok and "clamped" not in row.note
+    assert row.plane_angle_deg > 0.0                                                 # the free plane still gives the angle
+
+
+def _mount_session_rows(mount_rates: dict[int, float], flagged_threshold_sigma_mm: float):
+    """Hand-made A rows, one pose per mount at hours 1 of the mount, and the reference-station row that sets the allowance."""
+    options = dict(field=0, tilt_axis="", tilt_deg=0.0, subseries=SUBSERIES_MAIN, frames=10)
+    reference = noise.StationNoise(pose_key=("ref",), station_z_mm=800.0, sigma_t_median_mm=flagged_threshold_sigma_mm,
+                                   mount=0, **options)
+    rows = [reference]
+    for mount in mount_rates:
+        row = noise.StationNoise(pose_key=("pose", mount), station_z_mm=1000.0, mount=mount, **options)
+        row.bias_mm = row.bias_corrected_mm = 0.5
+        row.mean_time_hours = 10.0 * mount + 1.0                      # one hour into the mount that starts at 10 h x mount
+        rows.append(row)
+    return rows
+
+
+def test_a_step11_drift_rate_and_flag_per_mount(session, monkeypatch):
+    """Section 10, Step 11: two mounts of T2 with different synthetic drifts give each its own rate in mm per hour, its own
+    flag against WARMUP_DRIFT_FRACTION_OF_SIGMA x sigma_t at the reference station (here 0.1 x 1 mm), and its own correction:
+    the fast mount is flagged and its pose's bias loses the sentinel offset interpolated at the pose's time, the slow one is
+    not flagged and keeps its bias; the rate and flag reach the pose rows and A_sentinel_drift.csv has one row per mount."""
+    fast, slow = 0.8, 0.01
+    frames = _synthetic_frames(0.0, 0.001, [("T2", 0, [0.0, 0.5, 2.0]), ("T2", 1, [10.0, 10.5, 12.0])],
+                               mount_rates={0: fast, 1: slow})
+    rows = _mount_session_rows({0: fast, 1: slow}, flagged_threshold_sigma_mm=1.0)
+    mount_hours = {0: 2.0, 1: 2.0}
+    monkeypatch.setattr(noise, "_frame_means", lambda *args, **kwargs: frames)
+    monkeypatch.setattr(noise, "a_mount_epochs", lambda *args, **kwargs: {0, 1})
+    monkeypatch.setattr(noise, "_mount_hours", lambda *args, **kwargs: mount_hours)
+    drift = noise.analyze_sentinels(session, rows, None, 12.0, noise.NoiseOptions(), 0.0,
+                                    epochs=noise.mount_epochs(session.records))
+    threshold = session.params.warmup_drift_fraction_of_sigma * 1.0
+    first, second = drift.targets
+    assert (first.mount, second.mount) == (0, 1)
+    assert first.rate_mm_per_hour == pytest.approx(fast, rel=DRIFT_RECOVERY_TOLERANCE)
+    assert second.rate_mm_per_hour == pytest.approx(slow, rel=0.2)
+    assert first.threshold_mm == pytest.approx(threshold)
+    assert first.flagged and not second.flagged and drift.correction_applied
+    assert first.max_excursion_mm == pytest.approx(fast * 2.0, rel=DRIFT_RECOVERY_TOLERANCE)
+    # The flagged mount's pose, one hour in, loses the offset of the sentinel line at that time; the other is untouched.
+    fast_row, slow_row = rows[1], rows[2]
+    assert (fast_row.drift_rate_mm_per_h, fast_row.drift_flagged) == (first.rate_mm_per_hour, True)
+    assert (slow_row.drift_rate_mm_per_h, slow_row.drift_flagged) == (second.rate_mm_per_hour, False)
+    assert fast_row.bias_correction_mm == pytest.approx(fast * 1.0, rel=0.1)
+    assert fast_row.bias_corrected_mm == pytest.approx(0.5 - fast_row.bias_correction_mm)
+    assert first.correction_applied_mm == pytest.approx(abs(fast_row.bias_correction_mm))
+    assert slow_row.bias_correction_mm == 0.0 and slow_row.bias_corrected_mm == 0.5 and second.correction_applied_mm == 0.0
+    csv_rows = [noise.sentinel_drift_row(t) for t in drift.targets]
+    assert [r["flagged"] for r in csv_rows] == [True, False]
+    assert set(noise.SENTINEL_DRIFT_COLUMNS) <= set(csv_rows[0])
+    assert csv_rows[0]["first_sentinel_hours"] < csv_rows[0]["last_sentinel_hours"]
+
+
+def test_a_step11_target_drifts_flag_uses_the_threshold():
+    """Section 10, Step 11: without an allowance (NaN) nothing is flagged; with one, a mount is flagged exactly when
+    |rate| x the time the mount covers exceeds it (a single-sentinel mount has no rate and is never flagged)."""
+    frames = _synthetic_frames(0.0, 0.001, [("T2", 0, [0.0, 1.0]), ("T3b", 1, [2.0])], mount_rates={0: 0.5})
+    unflagged = noise.target_drifts(frames, noise.NoiseOptions(), 0.0, {0})
+    assert not any(d.flagged for d in unflagged)
+    below = noise.target_drifts(frames, noise.NoiseOptions(), 0.0, {0}, threshold_mm=0.6)         # drift 0.5 x 1 h
+    above = noise.target_drifts(frames, noise.NoiseOptions(), 0.0, {0}, threshold_mm=0.4)
+    longer = noise.target_drifts(frames, noise.NoiseOptions(), 0.0, {0}, threshold_mm=0.6, mount_hours={0: 1.5})
+    assert [d.flagged for d in below] == [False, False] and [d.flagged for d in above] == [True, False]
+    assert longer[0].flagged and longer[0].mount_hours == 1.5                     # 0.5 mm/h x 1.5 h = 0.75 mm
+
+
 def test_a_step12_legacy_boxes_skipped_and_said(result_a):
     """Section 10, Step 12: the legacy boxes of the 640 x 480 image do not fit the 160 x 120 quick image (or the plate
     there); each skipped box is reported by name instead of silently dropped."""
@@ -386,10 +539,17 @@ def test_a_step13_outputs(result_a, analysis_dir):
     rows = _read_csv(analysis_dir / noise.SUMMARY_CSV_NAME)
     assert len(rows) == 5                                   # three main stations and two tilt poses
     assert [row["subseries"] for row in rows].count(SUBSERIES_MAIN) == 3
-    for column in ("sigma_t_median_mm", "sigma_fp_mm", "sigma_tot_mm", "bias_corrected_mm", "corr_len_h_px", "q_px"):
+    for column in ("sigma_t_median_mm", "sigma_fp_mm", "sigma_tot_mm", "bias_corrected_mm", "corr_len_h_px", "q_px",
+                   "field_fraction_achieved", "drift_rate_mm_per_h", "drift_flagged"):
         assert column in rows[0]
+    assert all(row["drift_rate_mm_per_h"] != "" and row["drift_flagged"] in ("True", "False") for row in rows)
     details = json.loads((analysis_dir / noise.DETAILS_JSON_NAME).read_text())
     assert details["model_fit"]["sigma_d_px"] > 0 and details["drift"]["rate_mm_per_hour"] is not None
+    assert details["model_fit"]["weights"] == noise.NOISE_FIT_WEIGHTS == "1/sigma_t (relative error)"
+    assert details["forward_model_terms"]["noise_fit_weights"] == noise.NOISE_FIT_WEIGHTS
+    mounts = _read_csv(analysis_dir / noise.SENTINEL_DRIFT_CSV_NAME)          # one row per mounted target
+    assert [m["target_id"] for m in mounts] == ["T2", "T5"] and mounts[1]["flagged"] == "False"
+    assert list(mounts[0]) == list(noise.SENTINEL_DRIFT_COLUMNS)
     for stem in noise.FIGURE_STEMS.values():
         for extension in ("png", "svg"):
             assert (analysis_dir / f"{stem}.{extension}").stat().st_size > 0
@@ -799,15 +959,19 @@ def test_z_ramp_without_the_fixed_pattern_map_is_noted(tmp_path):
 
 
 def test_a_keeps_the_fixed_pattern_map_of_the_center_main_poses(result_a, session):
-    """Section 11.2 (Ramp subtracts the fixed-pattern map of A): Analysis A keeps the frame-mean depth minus its fitted plane
-    (float32, NaN outside the region of interest) for the fronto-parallel center-field main poses only."""
+    """Section 11.2 (Ramp subtracts the fixed-pattern map of A): Analysis A keeps the frame-mean depth minus the registered
+    ground truth minus the bias (float32, zero mean, NaN outside the region of interest) for the fronto-parallel center-field
+    main poses only. The variance of the map is sigma_fp^2 plus the temporal share sigma_t^2 / N that the frame average leaves
+    in it (Section 10, Step 4)."""
     kept = [r for r in result_a.rows if result_a.diagnostics[r.pose_key].fixed_pattern_mm is not None]
     assert {r.station_z_mm for r in kept} == {r.station_z_mm for r in result_a.main_rows()} and len(kept) == 3
     for row in kept:
         diagnostics = result_a.diagnostics[row.pose_key]
         assert row.subseries == SUBSERIES_MAIN and row.field == 0 and row.tilt_deg == 0.0
         assert diagnostics.fixed_pattern_mm.dtype == np.float32 and np.isnan(diagnostics.fixed_pattern_mm[~diagnostics.roi]).all()
-        assert np.nanstd(diagnostics.fixed_pattern_mm) == pytest.approx(row.sigma_fp_mm, rel=0.01)
+        assert np.nanmean(diagnostics.fixed_pattern_mm) == pytest.approx(0.0, abs=1e-4)
+        map_variance = float(np.nanvar(diagnostics.fixed_pattern_mm.astype(np.float64)))
+        assert map_variance - row.sigma_t_rms_mm ** 2 / row.frames == pytest.approx(row.sigma_fp_mm ** 2, rel=0.01)
 
 
 def test_z_ramp_of_the_demonstration_session(result_z, result_a, session, truth, analysis_dir):

@@ -486,13 +486,26 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
   `io/manifest.py`).
 
 **Analyses.**
-- A: sentinels are grouped by mounted target and mount (`noise.mount_epochs`: a mount is a change of `target_id` between
+- A: Step 4 reports `sigma_fp_mm` about the REGISTERED plane, with the temporal share of the frame average removed:
+  sigma_fp^2 = var(Zbar - Z_GT) - sigma_t^2 / N (`noise.fixed_pattern_sigma_mm`; about 1 % of sigma_t^2 at 100 frames, clamped at
+  zero with a note when the clamp acts). The free plane fitted to Zbar serves only for `plane_angle_deg`. The fixed-pattern map
+  kept for the B-Z ramp (`PoseDiagnostics.fixed_pattern_mm`) is Zbar - Z_GT - bias on the same plane. Because sigma_t, sigma_fp,
+  the bias and sigma_tot are now all about one plane, the Step 5 closure sigma_tot^2 / (sigma_t^2 + sigma_fp^2 + bias^2) is 1
+  to a few percent on simulated data (algebraically 1 when every pixel is read in every frame); the tolerance stays
+  `noise_closure_tolerance`. Step 9 weights each station by 1 / sigma_t (relative error) and records the string
+  `NOISE_FIT_WEIGHTS` in the details JSON and in `forward_model_parameters.json` (`noise_fit_weights`).
+  Sentinels are grouped by mounted target and mount (`noise.mount_epochs`: a mount is a change of `target_id` between
   non-sentinel captures; with the manifest column `sentinel_mount_reference`, a second flagged reference in one mount also starts
-  a new mount) and each group's drift (`TargetDrift`: offsets, rate, drift over its span) is computed relative to the flagged
-  reference sentinel of the mount, or to its first sentinel after the mount when the manifest has no such column; all groups are in `DriftResult.targets` and the details JSON. The bias correction of A uses
-  the T2 sentinels of the mount of A (`used_for_a_correction`), its drift allowance uses the span of A and those sentinels, and
-  a mount with a single sentinel has only its reference (no rate). `A_noise_summary.csv` has a `field_fraction_achieved`
-  column per pose (station and field), read from the manifest metadata and NaN when the manifest does not provide it.
+  a new mount) and each group's drift (`TargetDrift`: offsets, rate in mm per hour, largest excursion, drift over the time the
+  mount covers) is computed relative to the flagged reference sentinel of the mount, or to its first sentinel after the mount
+  when the manifest has no such column; all groups are in `DriftResult.targets`, the details JSON and `A_sentinel_drift.csv`
+  (one row per mount). A mount is flagged when |rate| x the time it covers exceeds `warmup_drift_fraction_of_sigma` x sigma_t at
+  the reference station. The bias correction is applied PER MOUNT: a pose of A captured on a flagged T2 mount
+  (`used_for_a_correction`) has the offset of that mount's own sentinel line, interpolated at the pose's mean time, subtracted
+  from its bias (`bias_correction_mm`; the largest size per mount is `correction_applied_mm`). A mount with a single sentinel has
+  only its reference (no rate, never flagged). `A_noise_summary.csv` has a `field_fraction_achieved` column per pose (station and
+  field), read from the manifest metadata and NaN when the manifest does not provide it, and `drift_rate_mm_per_h` and
+  `drift_flagged` of the mount the pose was captured on (empty without a sentinel line).
 - C: transfer curves A_sensed/A_true and A_sensed/A_geo against D_px pooled over features and stations (the summary rows
   keep `site_id` / `level_index`; figures draw one curve per feature). The overlap (scaling) test of `analysis/overlap.py`
   compares neighboring features over their shared D_px range: per (kind, gap, ratio) and pair the mean difference of the two
