@@ -73,9 +73,9 @@
   },
   "C13": {
     "title": "Analysis C, area",
-    "reviewed": null,
-    "tier": null,
-    "note": "not yet reviewed"
+    "reviewed": "2026-10-06",
+    "tier": "fable",
+    "note": "Section 12 executed at rev 106: overlap statistic, depth-sense visibility rule, LSF handover, bias-fit threshold, plain style, outputs"
   },
   "C14": {
     "title": "Analysis D, detectability",

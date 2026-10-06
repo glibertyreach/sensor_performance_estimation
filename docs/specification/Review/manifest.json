@@ -1,6 +1,6 @@
 {
   "document": "VSX3000_characterization_specification.docx",
-  "built": "2026-10-06T19:00:02",
+  "built": "2026-10-06T19:10:08",
   "source_of_truth": "https://claude.ai/code/artifact/20fd839b-0e95-4210-9e8f-959da07ce6c2",
   "elements": [
     {
@@ -64,6 +64,7 @@
       "refs": [
         "Section 10",
         "Section 11.2",
+        "Section 12",
         "Section 3.1",
         "Section 3.2",
         "Step 4.4",
@@ -94,6 +95,7 @@
       "refs": [
         "Section 10",
         "Section 11.2",
+        "Section 12",
         "Section 3.1",
         "Section 3.2",
         "Step 4.4",
@@ -346,6 +348,7 @@
       },
       "refs": [
         "Section 10",
+        "Section 12",
         "Section 13",
         "Section 14",
         "Section 6.1",
@@ -358,7 +361,13 @@
       "title": "12. Analysis C: true vs sensed area",
       "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
       "asserts": {},
-      "refs": []
+      "refs": [
+        "Section 10",
+        "Section 11",
+        "Section 13",
+        "Section 14",
+        "Section 7"
+      ]
     },
     {
       "id": "§13",

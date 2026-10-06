@@ -615,5 +615,17 @@ Reviewer findings (proposals; nothing executed until Neil closes the chunk):
   field position and sub-series), C_overlap_test.csv, C_area_details.json; figures: transfer curves with the
   overlap ranges shaded, b against Z, phase spread against D_px, predicted against measured area. No term of C
   enters forward_model_parameters.json; b is a cross-check of the boundary widths of Section 14.
-Neil's comments: (pending)
+Neil's comments (2026-10-06): R1 to R7 approved; closed. Note on R2: "projector light" is ambiguous between
+visibility for the depth sense (both IR cameras at 0 and B, with the laser dot projector midway between them) and
+visibility for the 2-D information (a 2-D sensor on the axis between the IR sensors with collocated illumination).
+Executed (document rev 106; gate PASS, scope ['2', '11', '12']): R1 Step 9 states the overlap statistic (mean
+difference over the shared range, zero inside its bootstrap interval) and C_overlap_test.csv; R2 Step 7 states the
+depth-sense visibility rule (both cameras see the point and the projector lights it), that with the projector
+midway the three-center overlap equals the two-camera one for a convex outline, that both are computed with the
+as-built projector position, and that the 2-D image's visibility is a different, uncharacterized quantity; R3 Step
+11 uses Section 11's line spread functions (new B_lsf.csv in Section 11, Step 16) with the Gaussian of equal rise as
+the fallback, the two predictions, and the sign relation; R4 Step 10 names AREA_BIAS_FIT_MIN_D_PX = 14 px (twice
+the 7 px expected minimum; new Section 2 row; the code's 4 px threshold changes); R5 plain style in Steps 1, 3, 4,
+5, 8 and the skip rule; R6 Step 12 field fraction as a factor and the reference station; R7 Step 13 outputs listed.
+Code (area, resolution_lateral) and the technician procedure's Section 14 delegated.
 
