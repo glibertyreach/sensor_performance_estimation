@@ -337,6 +337,10 @@ def derived_values(params: CharacterizationParameters, geometry: SensorGeometry,
         "pose_log_min_decimals": MIN_POSE_LOG_DECIMALS,
         "pose_index_digits": {3: "three", 4: "four"}.get(manifest_module.POSE_INDEX_DIGITS, manifest_module.POSE_INDEX_DIGITS),
         "filters_off_first_pose": planning.FILTERS_OFF_POSE_INDEX_BASE,
+        # The other optional sets' first pose indices, read from the one place that defines the ranges.
+        "staircase_first_pose": manifest_module.STAIRCASE_POSE_INDEX_BASE,
+        "lateral_sweep_first_pose": manifest_module.LATERAL_SWEEP_POSE_INDEX_BASE,
+        "open_background_first_pose": manifest_module.OPEN_BACKGROUND_POSE_INDEX_BASE,
         "subseries_plan_text": ", ".join(
             value for name, value in vars(manifest_module).items()
             if name.startswith("SUBSERIES_") and value not in CHECK_SUBSERIES),

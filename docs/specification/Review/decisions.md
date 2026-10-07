@@ -777,3 +777,11 @@ Neil asked to close the four open items. Executed in code and the technician pro
 - Procedure example closed: the sensor_config.json example shows the optional camera_2d_offset_mm field, and the
   mount-check command is in the procedure's mount-check step and Appendix B.
 
+## F7 closed (2026-10-07)
+Neil asked to close the open-background sentinel item. Executed (248 tests pass; procedure baseline 2026-10-07_03,
+gate PASS): the open-background variant of series C is an optional set like the other four, with its own pose-index
+range (P5000 to P5999, the ranges listed in one place in the manifest module), its own sentinel clock and summary
+line, and no effect on the main budget, which holds at 7,194 poses, 42,520 frames and 7.18 h with every optional
+flag on; its own poses had also been counted in the main budget before, which is now corrected. The procedure's
+Sections 5, 9, 11 and 13 name all five optional sets and their pose-index ranges. No code follow-ups remain open.
+
