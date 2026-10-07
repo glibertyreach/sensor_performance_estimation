@@ -112,6 +112,11 @@ SUBSERIES_PILOT = "pilot"
 SUBSERIES_EXTENDED = "extended"
 """The D extended trials of the low point (D_5) at the farthest stations (Section 8)."""
 
+OPTIONAL_SUBSERIES = (SUBSERIES_FILTERS_OFF, SUBSERIES_STAIRCASE, SUBSERIES_LATERAL_SWEEP, SUBSERIES_DRIFT_RUN)
+"""The optional sets, all outside the Section 9 budget: the filters-off repeat, the B-Z staircase, the B-HV lateral sweep
+and the separate drift run. A drift sentinel captured while one of these sets is running carries the set's label as its
+sub-series (and takes its pose-index range), so that it counts with the set and never in the main budget."""
+
 VISIT_A = "A"
 VISIT_B = "B"
 """Visit labels of the B-Z ladder's A, B, A, B alternation."""
@@ -158,10 +163,21 @@ has no read-back robot pose; the manifest builder copies the robot pose and the 
 plan and requires the capture time and the sensor temperature in the pose log (see the module docstring)."""
 
 APPROACH_DIRECTION_KEY = "approach_direction"
-"""Plan-notes key and manifest metadata column of a pose of the optional lateral sweep (sub-series ``lateral_sweep``): the
-side the robot approached the pose from, ``-H``, ``+H``, ``-V`` or ``+V`` (``-`` = it arrived moving toward positive offsets,
-from the negative side; the letter is the swept axis). Empty on every other row. Analysis B-HV reads it for the approach
-hysteresis of the edge position transfer."""
+"""Plan-notes key and manifest metadata column holding the direction a pose was approached from. EVERY pose carries a value
+(specification, Part I: every pose of every series is approached along the same direction, so that backlash enters no
+comparison). Encoding: a sign per axis, ``-`` meaning that the robot arrived at the pose moving toward larger values of that
+axis, that is, from the negative side (from below in Z, nearer the sensor; from the left in H; from the top in V).
+    ``APPROACH_STANDARD``         ``-Z,-H,-V``: the rule for every pose except those below.
+    ``-H``, ``+H``, ``-V``, ``+V``  a pose of the optional lateral sweep (sub-series ``lateral_sweep``): the swept axis is
+                                  approached from the negative (``-``) or the positive (``+``) side, alternating on purpose so
+                                  that lateral hysteresis shows. Z and the other lateral axis follow the standard rule.
+    ``APPROACH_FIXED_STAND``      ``fixed stand``: a capture of the optional drift run, whose plate stands still on a fixed stand
+                                  with the robot idle, so there is no approach.
+Analysis B-HV reads the sweep values for the approach hysteresis of the edge position transfer."""
+APPROACH_STANDARD = "-Z,-H,-V"
+"""The approach direction of every pose that follows the standard rule: from below in Z and from -H and -V laterally."""
+APPROACH_FIXED_STAND = "fixed stand"
+"""The approach "direction" of a capture of a plate on a fixed stand (the optional drift run): the robot does not move it."""
 
 FLAG_TRUE_TEXT = "true"
 FLAG_FALSE_TEXT = "false"

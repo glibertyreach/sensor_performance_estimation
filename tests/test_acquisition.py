@@ -31,7 +31,7 @@ from sensorperf.acquisition.check import (
 from sensorperf.acquisition.plan import (
     DOCUMENT_ESTIMATE_FRAMES, DOCUMENT_ESTIMATE_HOURS, DOCUMENT_ESTIMATE_POSES, PLAN_CSV_NAME, PLAN_FIGURE_NAME, PLAN_SUMMARY_NAME, PlanDiagnostics, plan_summary_text,
     PlannedCapture, SERIES_ORDER, TIER_A_DISPARITY_QUANTUM_PX, budget_total, capture_budget, capture_duration_s,
-    camera_of, fit_violation_px, format_budget_table, insert_sentinels, jitter_offset_mm, place_in_field,
+    camera_of, filters_off_budget, fit_violation_px, format_budget_table, insert_sentinels, lateral_sweep_budget, staircase_budget, jitter_offset_mm, place_in_field,
     plan_detection_series, plan_drift_run, plan_edge_series, plan_full_session, plan_noise_series, plan_registration,
     plan_zstep_series, read_plan_csv, write_plan, APPROACH_FROM_BELOW, MIN_POSE_LOG_DECIMALS,
     count_sentinel_remounts, tilt_is_feasible, tilt_near_edge_mm,
@@ -42,16 +42,17 @@ from sensorperf.cli import make_manifest as manifest_cli
 from sensorperf.cli import plan_stations as plan_cli
 from sensorperf.cli import register as register_cli
 from sensorperf.geometry.registration import Registration, plane_of_pose
-from sensorperf.geometry.targets import fronto_parallel_pose, make_standard_target_set
+from sensorperf.geometry.targets import fronto_parallel_pose, make_standard_target_set, tilted_pose
 from sensorperf.geometry.transforms import RigidTransform
 from sensorperf.io.manifest import (
-    DRIFT_RUN_POSE_INDEX_BASE, FIELD_FRACTION_ACHIEVED_KEY, FILTERS_OFF_POSE_INDEX_BASE, FIXED_STAND_KEY, FOUR_DIGIT_POSE_INDEX_MIN, FrameRecord,
-    LATERAL_SWEEP_POSE_INDEX_BASE, OPTIONAL_POSE_INDEX_RANGE_SIZE, SENTINEL_MOUNT_REFERENCE_KEY, STAIRCASE_POSE_INDEX_BASE,
+    APPROACH_DIRECTION_KEY, APPROACH_FIXED_STAND, APPROACH_STANDARD, DRIFT_RUN_POSE_INDEX_BASE, FIELD_FRACTION_ACHIEVED_KEY, FILTERS_OFF_POSE_INDEX_BASE, FIXED_STAND_KEY, FOUR_DIGIT_POSE_INDEX_MIN, FrameRecord,
+    LATERAL_SWEEP_POSE_INDEX_BASE, OPTIONAL_POSE_INDEX_RANGE_SIZE, OPTIONAL_SUBSERIES, SENTINEL_MOUNT_REFERENCE_KEY, STAIRCASE_POSE_INDEX_BASE,
     SUBSERIES_DRIFT_RUN, SUBSERIES_FIELD, SUBSERIES_JITTER, VISIT_A, VISIT_B, format_file_name, parse_file_name, parse_flag, write_manifest_csv,
 )
 from sensorperf.features.planes import plane_depth_image
 from sensorperf.io.matcloud import write_matcloud
 from sensorperf.io.session import PARAMETERS_FILE_NAME, SENSOR_CONFIG_FILE_NAME, Session, SensorConfig
+from sensorperf.simulate.sensor_model import SyntheticSensorModel, render_frame, write_frame
 from sensorperf.parameters import (
     CharacterizationParameters, FIELD_POSITION_CODES, PROCEDURE_AREA, PROCEDURE_DETECTION, PROCEDURE_EDGES,
     PROCEDURE_NOISE, PROCEDURE_REGISTRATION, PROCEDURE_SENTINEL, SensorGeometry, TARGET_DISKS,
@@ -130,8 +131,11 @@ def test_optional_variants_keep_keys_unique():
     plan = plan_full_session(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), filters_off=True,
                              open_background=True, extended=False)
     assert len({c.pose_key() for c in plan}) == len(plan)
-    off = [c for c in plan if c.subseries == "filters_off"]
-    assert all(c.pose_index >= FILTERS_OFF_POSE_INDEX_BASE for c in off)
+    off_set = [c for c in plan if c.subseries == "filters_off"]
+    assert all(c.pose_index >= FILTERS_OFF_POSE_INDEX_BASE for c in off_set)
+    # The drift sentinels captured during the repeat belong to it (procedure S, its sub-series and its pose indices).
+    off = [c for c in off_set if c.procedure != PROCEDURE_SENTINEL]
+    assert off_set and len(off_set) > len(off)
     # Section 4, Step 4.2: the repeat covers A, B-HV and B-Z (A: 47 station poses + 16 tilt poses).
     off_by_series = {p: sum(1 for c in off if c.procedure == p) for p in ("A", "B", "Z")}
     assert len(off) == sum(off_by_series.values())
@@ -268,7 +272,8 @@ def test_field_fraction_achieved_is_recorded_in_the_pose_notes(full_plan):
     assert any(c.notes[FIELD_FRACTION_ACHIEVED_KEY] < 1.0 for c in pulled)
     # The manifest carries it as string metadata; poses without a field placement carry nothing.
     assert float(pulled[0].manifest_metadata()[FIELD_FRACTION_ACHIEVED_KEY]) == pulled[0].notes[FIELD_FRACTION_ACHIEVED_KEY]
-    assert [c for c in plan if c.subseries == "tilt"][0].manifest_metadata() == {}
+    # ... except the approach direction, which every pose carries (here the standard rule).
+    assert [c for c in plan if c.subseries == "tilt"][0].manifest_metadata() == {APPROACH_DIRECTION_KEY: APPROACH_STANDARD}
     # The fit margin is the ROI shrink of Analysis A: moving the margin changes the fraction kept.
     plate = make_standard_target_set(PARAMS, GEOMETRY).get(TARGET_NOISE_PLATE)
     at_band = place_in_field(PARAMS, GEOMETRY, plate, 1000.0, (1.0, -1.0), PARAMS.boundary_band_half_width_px)
@@ -653,7 +658,7 @@ def test_measured_quantum_overrides_the_staircase_step(tmp_path: Path):
     def steps_at_z0(folder: str) -> list[float]:
         """The step_mm values of the staircase poses at Z0, in order."""
         plan = read_plan_csv(tmp_path / folder / PLAN_CSV_NAME)
-        return [c.step_mm for c in plan if c.subseries == "staircase" and c.station_z_mm == z0]
+        return [c.step_mm for c in plan if c.subseries == "staircase" and c.procedure == "Z" and c.station_z_mm == z0]
 
     default_steps, measured_steps = steps_at_z0("default"), steps_at_z0("measured")
     default_step, measured_step = np.diff(default_steps)[0], np.diff(measured_steps)[0]
@@ -690,7 +695,9 @@ def test_filters_off_repeat_is_outside_the_main_budget(full_plan):
     reference = {r.procedure: r for r in capture_budget(base_plan, *args) if r.procedure != "S"}
     assert main.keys() == reference.keys()
     assert all((main[k].poses, main[k].frames) == (reference[k].poses, reference[k].frames) for k in main)
-    assert {r.procedure for r in filters_off_budget(plan, *args)} == {"A", "B", "Z"}
+    # The set's own table: the three series and the drift sentinels captured during the repeat (see
+    # test_optional_set_sentinels_belong_to_the_set).
+    assert {r.procedure for r in filters_off_budget(plan, *args)} == {"A", "B", "Z", "S"}
     assert filters_off_budget(base_plan, *args) == []
     text = plan_summary_text(plan, PARAMS, GEOMETRY)
     assert "Outside the main budget" in text and "outside the main budget" not in plan_summary_text(base_plan, PARAMS, GEOMETRY).lower()
@@ -1380,11 +1387,12 @@ def test_lateral_sweep_adds_40_poses_at_the_reference_station_and_is_off_by_defa
     assert "lateral sweep approach" not in plan_summary_text(default, PARAMS, GEOMETRY)
     # The full plan and the command line (the direction survives the CSV round trip in the notes).
     full = plan_full_session(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), series=["B"], lateral_sweep=True)
-    assert sum(1 for c in full if c.subseries == "lateral_sweep") == 40
+    assert sum(1 for c in full if c.subseries == "lateral_sweep" and c.procedure == PROCEDURE_EDGES) == 40
     assert plan_cli.main(["--out", str(tmp_path / "plain"), "--series", "B"]) == 0
     assert plan_cli.main(["--out", str(tmp_path / "sweep"), "--series", "B", "--lateral-sweep"]) == 0
     assert not any(c.subseries == "lateral_sweep" for c in read_plan_csv(tmp_path / "plain" / PLAN_CSV_NAME))
     from_csv = [c for c in read_plan_csv(tmp_path / "sweep" / PLAN_CSV_NAME) if c.subseries == "lateral_sweep"]
+    from_csv = [c for c in from_csv if c.procedure == PROCEDURE_EDGES]       # not the sentinel captured during the sweep
     assert len(from_csv) == 40 and [c.notes["approach_direction"] for c in from_csv[:3]] == ["-H", "+H", "-H"]
 
 
@@ -1457,7 +1465,8 @@ def test_plan_drift_run_and_its_manifest(tmp_path: Path):
     assert [r.sensor_temp_c for r in records[::2]] == [DRIFT_RUN_TEST_TEMPERATURE_C + 0.5 * k for k in range(5)]
     assert records[2].timestamp.startswith("2026-10-05T08:02")
     assert all(r.path.parent.name == "sentinels" for r in records)
-    assert all(r.metadata == {FIXED_STAND_KEY: "true"} for r in records)    # fixed stand, no mount-reference flag
+    # fixed stand, no mount-reference flag, and no approach to record
+    assert all(r.metadata == {FIXED_STAND_KEY: "true", APPROACH_DIRECTION_KEY: APPROACH_FIXED_STAND} for r in records)
     write_manifest_csv(root / "manifest.csv", records)
     loaded = load_manifest(root / "manifest.csv")
     assert [(r.subseries, r.pose_index, r.sensor_temp_c) for r in loaded] == \
@@ -1599,7 +1608,7 @@ def test_manifest_of_a_fixed_stand_log_without_read_back_columns(tmp_path: Path)
             assert np.allclose(record.target_pose_camera.rotation, nominal.rotation, atol=POSE_TOLERANCE)
             assert np.allclose(record.robot_pose.translation, commanded_flange.translation, atol=POSE_TOLERANCE)
             assert np.allclose(record.robot_pose.rotation, commanded_flange.rotation, atol=POSE_TOLERANCE)
-            assert record.metadata == {FIXED_STAND_KEY: "true"}
+            assert record.metadata == {FIXED_STAND_KEY: "true", APPROACH_DIRECTION_KEY: APPROACH_FIXED_STAND}
         assert [r.sensor_temp_c for r in records[::2]] == [DRIFT_RUN_TEST_TEMPERATURE_C + 0.5 * k for k in range(5)]
         assert records[2].timestamp == (DRIFT_RUN_START_TIME + datetime.timedelta(seconds=FIXED_STAND_SECONDS_PER_CAPTURE)).isoformat()
 
@@ -1674,3 +1683,281 @@ def test_manifest_of_a_fixed_stand_log_needs_time_and_temperature(tmp_path: Path
                 writer.writerow([capture.file_name(frame), DRIFT_RUN_START_TIME.isoformat(), DRIFT_RUN_TEST_TEMPERATURE_C])
     with pytest.raises(PoseLogError, match="lacks columns"):
         build_manifest(log, ordinary_root, ordinary_csv, registration)
+
+
+def test_every_pose_records_its_approach_direction(tmp_path: Path):
+    """Specification, Part I (F2): every pose of every series is approached along the same direction, from below in Z and
+    from -H and -V laterally, except the optional lateral sweep, which alternates on purpose. The planner records the approach
+    for EVERY pose, in the notes and in the manifest column ``approach_direction``: APPROACH_STANDARD for the standard rule,
+    the sweep's -H/+H/-V/+V unchanged, and APPROACH_FIXED_STAND for the captures of a plate on a fixed stand (nothing moves
+    it). plan_summary.txt states the rule for all poses and the exception."""
+    assert APPROACH_STANDARD == "-Z,-H,-V"
+    plan = plan_full_session(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), filters_off=True, staircase=True,
+                             lateral_sweep=True, drift_run=True)
+    # Every pose carries a value, in the notes and in the manifest metadata.
+    assert all(c.notes.get(APPROACH_DIRECTION_KEY) for c in plan)
+    assert all(c.manifest_metadata()[APPROACH_DIRECTION_KEY] == c.notes[APPROACH_DIRECTION_KEY] for c in plan)
+    sweep = [c for c in plan if c.subseries == "lateral_sweep" and c.procedure == PROCEDURE_EDGES]
+    run = [c for c in plan if c.subseries == SUBSERIES_DRIFT_RUN]
+    standard = [c for c in plan if c not in sweep and c not in run]
+    assert len(sweep) == 40 and len(run) == 241
+    assert all(c.notes[APPROACH_DIRECTION_KEY] == APPROACH_STANDARD for c in standard)
+    assert all(c.notes[APPROACH_DIRECTION_KEY] == APPROACH_FIXED_STAND for c in run)
+    # The sweep's alternation is unchanged: per axis the 1st, 3rd, ... pose from the negative side, the others from the positive.
+    for axis in ("H", "V"):
+        members = [c for c in sweep if c.notes["lateral_sweep_axis"] == axis]
+        assert [c.notes[APPROACH_DIRECTION_KEY] for c in members] == [("-" if k % 2 == 0 else "+") + axis
+                                                                       for k in range(len(members))]
+    # The series Z note keeps its own words and the overshoot.
+    assert all(c.notes["approach"] == APPROACH_FROM_BELOW for c in plan if c.procedure == "Z" and "approach" in c.notes)
+    # The direction survives poses.csv, and the summary states the rule and the exception.
+    write_plan(tmp_path, plan, None, PARAMS, GEOMETRY)
+    from_csv = read_plan_csv(tmp_path / PLAN_CSV_NAME)
+    assert [c.notes[APPROACH_DIRECTION_KEY] for c in from_csv] == [c.notes[APPROACH_DIRECTION_KEY] for c in plan]
+    text = (tmp_path / PLAN_SUMMARY_NAME).read_text(encoding="utf-8")
+    assert "Approach direction of every pose" in text and f"'{APPROACH_STANDARD}'" in text
+    assert "from below in Z" in text and "from -H and -V laterally" in text and "exception is the optional lateral sweep" in text
+    # Without a sweep the summary says that the exception is not in the plan.
+    default_text = plan_summary_text(plan_full_session(SMALL_PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED)),
+                                     SMALL_PARAMS, GEOMETRY)
+    assert "Approach direction of every pose" in default_text and "is not in this plan" in default_text
+
+
+def test_optional_set_sentinels_belong_to_the_set():
+    """Sentinels of an optional set (F6): the drift sentinels captured during an optional set (filters-off repeat, staircase,
+    lateral sweep) carry the set's sub-series label and pose-index range, count in the set's own "outside the main budget"
+    table and its sentinel line of plan_summary.txt, and never in the main ``capture_budget``. The main sentinels are those
+    of a plan without the optional sets, so the totals stay 7,194 poses, 42,520 frames and 7.18 h with every optional flag on
+    (the filters-off repeat alone used to add two sentinels to the main budget clock)."""
+    args = (GEOMETRY.frame_rate_hz, PARAMS.move_and_settle_time_s)
+    flags = {"filters-off": dict(filters_off=True), "staircase": dict(staircase=True), "lateral sweep": dict(lateral_sweep=True),
+             "all": dict(filters_off=True, staircase=True, lateral_sweep=True, drift_run=True)}
+    sets = {"filters-off": ("filters_off", FILTERS_OFF_POSE_INDEX_BASE, filters_off_budget),
+            "staircase": ("staircase", STAIRCASE_POSE_INDEX_BASE, staircase_budget),
+            "lateral sweep": ("lateral_sweep", LATERAL_SWEEP_POSE_INDEX_BASE, lateral_sweep_budget)}
+    for name, kwargs in flags.items():
+        plan = plan_full_session(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), **kwargs)
+        # The main budget is the document's estimate whatever optional sets are planned.
+        total = budget_total(capture_budget(plan, *args))
+        assert (total.poses, total.frames) == (7194, 42520), name
+        assert total.robot_hours == pytest.approx(7.18, abs=HOURS_TOLERANCE), name
+        # The main sentinels (sub-series "sentinel") are exactly those of the same plan without the optional sets (the main
+        # captures are walked alone), and there are 11 of them, as in the document's estimate.
+        main_only = insert_sentinels([c for c in plan if c.subseries not in OPTIONAL_SUBSERIES], PARAMS, GEOMETRY,
+                                     1.0 / GEOMETRY.frame_rate_hz, PARAMS.move_and_settle_time_s)
+        main_sentinels = [c.pose_key() for c in plan if c.procedure == PROCEDURE_SENTINEL and c.subseries == "sentinel"]
+        assert main_sentinels == [c.pose_key() for c in main_only if c.procedure == PROCEDURE_SENTINEL] and len(main_sentinels) == 11
+        assert count_sentinel_remounts(plan) == 0 and len({c.pose_key() for c in plan}) == len(plan), name
+        text = plan_summary_text(plan, PARAMS, GEOMETRY)
+        for set_name, (label, pose_base, budget) in sets.items():
+            if set_name not in kwargs_names(kwargs):
+                continue
+            own = [c for c in plan if c.procedure == PROCEDURE_SENTINEL and c.subseries == label]
+            assert own and all(c.pose_index >= pose_base for c in own), (name, set_name)
+            assert all(c.pose_index < pose_base + OPTIONAL_POSE_INDEX_RANGE_SIZE for c in own)
+            # The set's own table has a Sentinels row with exactly these, and its line of the summary reports their count.
+            row = next(r for r in budget(plan, *args) if r.procedure == PROCEDURE_SENTINEL)
+            assert (row.poses, row.frames) == (len(own), sum(c.frames for c in own))
+            assert (f"Drift sentinels captured during this set (counted here, not in the main budget): {len(own)}, "
+                    f"{sum(c.frames for c in own)} frames.") in text
+            # A sentinel of the set is captured on the target mounted when it falls due: the capture before it.
+            for index, c in enumerate(plan):
+                if c in own:
+                    assert plan[index - 1].target_id == c.target_id and plan[index - 1].gap_mm == c.gap_mm
+        # A set that is not planned has no sentinels of its own.
+        for set_name, (label, _, budget) in sets.items():
+            if set_name not in kwargs_names(kwargs):
+                assert not any(c.subseries == label for c in plan) and budget(plan, *args) == [], (name, set_name)
+
+
+def kwargs_names(kwargs: dict) -> set[str]:
+    """The optional sets a ``plan_full_session`` keyword set asks for, by the names used in the test above."""
+    names = {"filters_off": "filters-off", "staircase": "staircase", "lateral_sweep": "lateral sweep"}
+    return {names[key] for key in kwargs if key in names}
+
+
+def test_filters_off_plan_prints_the_document_totals_and_its_own_sentinel_count(tmp_path: Path, capsys):
+    """The command line with --filters-off (F6): the main budget reads 7,194 poses, 42,520 frames and 7.18 h, and the
+    filters-off table and its sentinel line report the sentinels of the repeat."""
+    assert plan_cli.main(["--out", str(tmp_path), "--filters-off"]) == 0
+    text = capsys.readouterr().out
+    assert "Total                7,194   42,520          7.18" in text
+    assert "Document estimate: 7,194 poses, 42,520 frames, 7.18 h. This plan: 7,194 poses (1.00 x), 42,520 frames (1.00 x)" in text
+    filters_off_block = text[text.index("Outside the main budget (filters-off repeat"):]
+    assert "Sentinels" in filters_off_block and "Drift sentinels captured during this set" in filters_off_block
+
+
+# ---------------------------------------------------------------------------
+# Mount check (Section 4, Step 4.8): check_captures --mount-check
+# ---------------------------------------------------------------------------
+MOUNT_CHECK_FRAMES = 5
+"""Frames of a synthetic mount-check capture (the procedure takes a handful; the check averages them)."""
+MOUNT_CHECK_TARGET = "T3b"
+"""The target of the main mount-check tests: a large plate with a square window, so that the front plane is well
+determined and a feature (the window) can be located."""
+Z_SHIFT_FACTOR = 2.0
+TILT_FACTOR = 2.0
+"""A defect of this many tolerances must fail the check of that quantity (twice the Z tolerance, twice the tilt tolerance)."""
+FEATURE_SHIFT_MM = 1.0
+"""A lateral shift of the mounted target that is clearly beyond FRAME_CHECK_PX at the mount-check station (1 mm = 0.86 px)."""
+
+
+def write_mount_check_session(folder: Path, shifted_pose: dict[str, RigidTransform], registration: Registration | None = None
+                              ) -> Path:
+    """A folder with registration.json and targets.json (the definitions the planner writes) and one folder of synthetic
+    depth frames per named case, each rendered with the full-size indicative sensor at the given TRUE pose of the target
+    (the registered one is the nominal pose). Returns the folder (the session folder of the registration file)."""
+    folder.mkdir(parents=True, exist_ok=True)
+    registration = Registration(RigidTransform.identity(), RigidTransform.identity(), accepted=True) \
+        if registration is None else registration
+    registration.save(folder / "registration.json")
+    targets = make_standard_target_set(PARAMS, GEOMETRY)
+    targets.save(folder / "targets.json")
+    model = SyntheticSensorModel.indicative(GEOMETRY)
+    for case, pose in shifted_pose.items():
+        target_id = case.split("_")[0]
+        (folder / case).mkdir()
+        rng = np.random.default_rng(MASTER_SEED)
+        for frame in range(MOUNT_CHECK_FRAMES):
+            write_frame(folder / case / f"M_{target_id}_f{frame:02d}.mc", render_frame(model, targets.get(target_id), pose, rng),
+                        GEOMETRY, {})
+    return folder
+
+
+def run_mount_check(folder: Path, case: str, *extra: str) -> tuple[int, dict]:
+    """(exit code, mount_check.json) of ``check_captures --mount-check`` on one case folder of the session."""
+    code = check_cli.main(["--mount-check", str(folder / case), "--registration", str(folder / "registration.json"),
+                           "--target", case.split("_")[0], *extra])
+    report_path = folder / case / "mount_check.json"
+    return code, (json.loads(report_path.read_text(encoding="utf-8")) if report_path.exists() else {})
+
+
+@pytest.fixture(scope="module")
+def mount_check_session(tmp_path_factory) -> Path:
+    """Synthetic mount-check captures of T3b (nominal, shifted in Z, tilted, shifted in H and in V) and of T2."""
+    z = PARAMS.mount_check_depth_mm
+    z_step = Z_SHIFT_FACTOR * PARAMS.registration_residual_accept_mm
+    tilt = TILT_FACTOR * PARAMS.mount_tilt_tolerance_deg
+    return write_mount_check_session(tmp_path_factory.mktemp("mount_check"), {
+        f"{MOUNT_CHECK_TARGET}_ok": fronto_parallel_pose(0.0, 0.0, z),
+        f"{MOUNT_CHECK_TARGET}_z": fronto_parallel_pose(0.0, 0.0, z + z_step),
+        f"{MOUNT_CHECK_TARGET}_tilt": tilted_pose(0.0, 0.0, z, "H", tilt),
+        f"{MOUNT_CHECK_TARGET}_h": fronto_parallel_pose(FEATURE_SHIFT_MM, 0.0, z),
+        f"{MOUNT_CHECK_TARGET}_v": fronto_parallel_pose(0.0, FEATURE_SHIFT_MM, z),
+        "T2_ok": fronto_parallel_pose(0.0, 0.0, z)})
+
+
+def outcomes(report: dict) -> dict[str, str]:
+    """The PASS, FAIL or SKIP of each check of a mount_check.json."""
+    return {check["name"]: check["outcome"] for check in report["checks"]}
+
+
+def test_mount_check_passes_a_correctly_mounted_target(mount_check_session, capsys):
+    """Step 4.8: a target mounted where the registration puts it passes all four checks; the output prints PASS per check with
+    the measured value and the tolerance; mount_check.json is written next to the frames."""
+    code, report = run_mount_check(mount_check_session, f"{MOUNT_CHECK_TARGET}_ok")
+    text = capsys.readouterr().out
+    assert code == 0 and report["passed"] is True
+    assert outcomes(report) == {"Z": "PASS", "tilt": "PASS", "H": "PASS", "V": "PASS"}
+    measured = {check["name"]: check["measured"] for check in report["checks"]}
+    assert abs(measured["Z"]) < PARAMS.registration_residual_accept_mm / Z_SHIFT_FACTOR
+    assert measured["tilt"] < PARAMS.mount_tilt_tolerance_deg / TILT_FACTOR
+    assert max(abs(measured["H"]), abs(measured["V"])) < PARAMS.frame_check_px
+    # The console text: PASS, the measured value, the tolerance and where it comes from.
+    assert text.count("PASS") >= 5 and "FAIL" not in text and "VERDICT: mount check PASSED" in text
+    assert "REGISTRATION_RESIDUAL_ACCEPT_MM" in text and "MOUNT_TILT_TOLERANCE_DEG" in text and "FRAME_CHECK_PX" in text
+    assert f"tolerance {PARAMS.registration_residual_accept_mm:g} mm" in text and f"tolerance {PARAMS.mount_tilt_tolerance_deg:g} deg" in text
+    # The tolerances are the parameter table's; the file records them.
+    tolerances = {check["name"]: check["tolerance"] for check in report["checks"]}
+    assert tolerances == {"Z": PARAMS.registration_residual_accept_mm, "tilt": PARAMS.mount_tilt_tolerance_deg,
+                          "H": PARAMS.frame_check_px, "V": PARAMS.frame_check_px}
+    assert report["frames"] == MOUNT_CHECK_FRAMES and report["target_id"] == MOUNT_CHECK_TARGET
+    assert any("depth outline" in note for note in report["notes"])        # the IR-image location is not available
+
+
+def test_mount_check_fails_a_target_shifted_by_twice_the_z_tolerance(mount_check_session, capsys):
+    """Step 4.8: a target 2 x REGISTRATION_RESIDUAL_ACCEPT_MM too far fails the Z check (and only that one), exit code 1."""
+    code, report = run_mount_check(mount_check_session, f"{MOUNT_CHECK_TARGET}_z")
+    text = capsys.readouterr().out
+    assert code == 1 and report["passed"] is False
+    assert outcomes(report) == {"Z": "FAIL", "tilt": "PASS", "H": "PASS", "V": "PASS"}
+    z = next(check["measured"] for check in report["checks"] if check["name"] == "Z")
+    assert z == pytest.approx(Z_SHIFT_FACTOR * PARAMS.registration_residual_accept_mm, abs=0.05)   # farther: positive
+    assert "FAIL" in text and "VERDICT: mount check FAILED" in text and "(Z)" in text
+
+
+def test_mount_check_fails_a_target_tilted_by_twice_the_tilt_tolerance(mount_check_session, capsys):
+    """Step 4.8: a target tilted by 2 x MOUNT_TILT_TOLERANCE_DEG fails the tilt check (and only that one)."""
+    code, report = run_mount_check(mount_check_session, f"{MOUNT_CHECK_TARGET}_tilt")
+    capsys.readouterr()
+    assert code == 1 and outcomes(report) == {"Z": "PASS", "tilt": "FAIL", "H": "PASS", "V": "PASS"}
+    tilt = next(check["measured"] for check in report["checks"] if check["name"] == "tilt")
+    assert tilt == pytest.approx(TILT_FACTOR * PARAMS.mount_tilt_tolerance_deg, abs=0.02)
+
+
+def test_mount_check_fails_a_feature_that_sits_beyond_the_frame_tolerance(mount_check_session, capsys):
+    """Step 4.8: a target shifted sideways in H (V) puts the located feature more than FRAME_CHECK_PX from the as-built
+    position: the H (V) check fails and the other lateral check and Z and tilt pass."""
+    code_h, report_h = run_mount_check(mount_check_session, f"{MOUNT_CHECK_TARGET}_h")
+    code_v, report_v = run_mount_check(mount_check_session, f"{MOUNT_CHECK_TARGET}_v")
+    capsys.readouterr()
+    assert (code_h, code_v) == (1, 1)
+    assert outcomes(report_h) == {"Z": "PASS", "tilt": "PASS", "H": "FAIL", "V": "PASS"}
+    assert outcomes(report_v) == {"Z": "PASS", "tilt": "PASS", "H": "PASS", "V": "FAIL"}
+    pixels_per_mm = GEOMETRY.sensor_fx_px / PARAMS.mount_check_depth_mm
+    assert next(c["measured"] for c in report_h["checks"] if c["name"] == "H") == pytest.approx(
+        FEATURE_SHIFT_MM * pixels_per_mm, abs=0.5)
+
+
+def test_mount_check_of_a_plain_plate_checks_z_and_tilt_only(mount_check_session, capsys):
+    """Step 4.8: T2 has no feature, so H and V are skipped with the reason and the verdict says what was not checked."""
+    code, report = run_mount_check(mount_check_session, "T2_ok")
+    text = capsys.readouterr().out
+    assert code == 0 and outcomes(report) == {"Z": "PASS", "tilt": "PASS", "H": "SKIP", "V": "SKIP"}
+    assert "no feature to locate" in text and "not checked: H, V" in text
+
+
+def test_mount_check_uses_the_read_back_flange_pose_and_the_option_tolerances(tmp_path: Path, capsys):
+    """Step 4.8: with --flange-pose the registered pose is the registration applied to the read-back flange pose (here a
+    plausible registration, not the identity); the tolerance options replace the parameter table's, and say so."""
+    registration = random_registration()
+    nominal = fronto_parallel_pose(0.0, 0.0, PARAMS.mount_check_depth_mm)
+    flange = registration.flange_to_base_for(nominal)
+    folder = write_mount_check_session(tmp_path, {"T2_ok": nominal}, registration)
+    flange_values = [*flange.translation, *flange.rotation_vector_degrees()]
+    code, report = run_mount_check(folder, "T2_ok", "--flange-pose", *(repr(float(v)) for v in flange_values))
+    capsys.readouterr()
+    assert code == 0 and outcomes(report)["Z"] == "PASS" and "read-back flange pose" in report["registered_pose"]
+    # The same capture checked against a registered pose that is 2 tolerances away fails.
+    wrong = registration.flange_to_base_for(fronto_parallel_pose(0.0, 0.0, PARAMS.mount_check_depth_mm + 0.3))
+    code, report = run_mount_check(folder, "T2_ok", "--flange-pose", *(repr(float(v)) for v in
+                                                                         [*wrong.translation, *wrong.rotation_vector_degrees()]))
+    capsys.readouterr()
+    assert code == 1 and outcomes(report)["Z"] == "FAIL"
+    # A tolerance option replaces the table value and the report names the option.
+    code, report = run_mount_check(folder, "T2_ok", "--z-tolerance-mm", "1e-6")
+    capsys.readouterr()
+    assert code == 1 and outcomes(report)["Z"] == "FAIL"
+    assert next(c for c in report["checks"] if c["name"] == "Z")["tolerance_name"] == "option --z-tolerance-mm"
+
+
+def test_mount_check_input_errors(mount_check_session, tmp_path: Path, capsys):
+    """Step 4.8: unreadable inputs give exit code 2 and a message that says what to fix; the options it needs are required."""
+    registration = str(mount_check_session / "registration.json")
+    frames = str(mount_check_session / f"{MOUNT_CHECK_TARGET}_ok")
+    assert check_cli.main(["--mount-check", str(tmp_path), "--registration", registration, "--target", "T2"]) == 2
+    assert "no .mc capture files" in capsys.readouterr().err
+    assert check_cli.main(["--mount-check", frames, "--registration", registration, "--target", "T9"]) == 2
+    assert "T9" in capsys.readouterr().err
+    assert check_cli.main(["--mount-check", frames, "--registration", str(tmp_path / "missing.json"), "--target", "T2"]) == 2
+    assert "registration" in capsys.readouterr().err
+    stray = tmp_path / "stray"
+    stray.mkdir()
+    Registration(RigidTransform.identity(), RigidTransform.identity()).save(stray / "registration.json")
+    assert check_cli.main(["--mount-check", frames, "--registration", str(stray / "registration.json"), "--target", "T2"]) == 2
+    assert "targets.json" in capsys.readouterr().err
+    for arguments in (["--mount-check", frames], ["--mount-check", frames, "--registration", registration], []):
+        with pytest.raises(SystemExit) as error:
+            check_cli.main(arguments)
+        assert error.value.code == 2
+    capsys.readouterr()

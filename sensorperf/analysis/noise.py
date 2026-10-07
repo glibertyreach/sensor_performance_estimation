@@ -88,7 +88,7 @@ from sensorperf.features.depth_features import temporal_statistics
 from sensorperf.features.planes import fit_plane_robust, plane_depth_image
 from sensorperf.io.capture_set import PoseStack, load_stack
 from sensorperf.io.manifest import (
-    FIELD_FRACTION_ACHIEVED_KEY, FIXED_STAND_KEY, FrameRecord, SENTINEL_MOUNT_REFERENCE_KEY, SUBSERIES_DRIFT_RUN, SUBSERIES_MAIN, SUBSERIES_TILT, TILT_AXIS_H,
+    FIELD_FRACTION_ACHIEVED_KEY, FIXED_STAND_KEY, FrameRecord, OPTIONAL_SUBSERIES, SENTINEL_MOUNT_REFERENCE_KEY, SUBSERIES_DRIFT_RUN, SUBSERIES_MAIN, SUBSERIES_TILT, TILT_AXIS_H,
     TILT_AXIS_V, group_by_pose, parse_flag, select,
 )
 from sensorperf.io.session import Session
@@ -926,8 +926,8 @@ def mount_epochs(records: Sequence[FrameRecord]) -> dict[tuple, int]:
     epoch = 0
     referenced_epoch: int | None = None          # the mount whose reference sentinel has been seen
     for record in records:
-        if record.subseries == SUBSERIES_DRIFT_RUN:
-            continue                             # the optional drift run is no mount of the session
+        if record.procedure == PROCEDURE_SENTINEL and record.subseries in OPTIONAL_SUBSERIES:
+            continue                             # a sentinel of an optional set (drift run included) is no mount of the session
         if record.procedure != PROCEDURE_SENTINEL:
             if mounted is not None and record.target_id != mounted:
                 epoch += 1
@@ -941,9 +941,11 @@ def mount_epochs(records: Sequence[FrameRecord]) -> dict[tuple, int]:
 
 
 def session_sentinels(records: Sequence[FrameRecord]) -> list[FrameRecord]:
-    """The drift sentinels of the session: the frames of procedure S that are not captures of the optional separate drift run
-    (sub-series ``drift_run``), which has no mount and is analyzed on its own (:func:`analyze_drift_run`)."""
-    return [r for r in records if r.procedure == PROCEDURE_SENTINEL and r.subseries != SUBSERIES_DRIFT_RUN]
+    """The drift sentinels of the session: the frames of procedure S of the main plan (sub-series ``sentinel``). Left out are
+    the captures of the optional separate drift run (sub-series ``drift_run``), which has no mount and is analyzed on its own
+    (:func:`analyze_drift_run`), and the sentinels captured during another optional set (filters-off repeat, staircase,
+    lateral sweep), which belong to that set: the sensor is not in the configuration of the main plan then."""
+    return [r for r in records if r.procedure == PROCEDURE_SENTINEL and r.subseries not in OPTIONAL_SUBSERIES]
 
 
 def a_mount_epochs(records: Sequence[FrameRecord], epochs: dict[tuple, int]) -> set[int]:
@@ -1066,7 +1068,8 @@ def _mount_hours(session: Session, epochs: dict[tuple, int], time_origin_s: floa
     (Registration frames are left out: they do not enter the bias that the correction adjusts.)"""
     stamps: dict[int, list[float]] = {}
     for record in session.records:
-        if record.procedure not in (PROCEDURE_NOISE, PROCEDURE_SENTINEL) or record.subseries == SUBSERIES_DRIFT_RUN:
+        if record.procedure not in (PROCEDURE_NOISE, PROCEDURE_SENTINEL) \
+                or (record.procedure == PROCEDURE_SENTINEL and record.subseries in OPTIONAL_SUBSERIES):
             continue
         stamp = _parse_time(record.timestamp)
         if stamp is not None:

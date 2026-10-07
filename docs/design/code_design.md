@@ -75,6 +75,7 @@ sensorperf/
   acquisition/plan.py    station and pose lists for registration (T2, plane-only), A, B-HV, B-Z, C, D, sentinels  DONE
   acquisition/pose_log.py  robot pose log (any rotation convention) -> manifest  DONE
   acquisition/check.py   quick-look check of a capture set, D pilot post check  DONE
+  acquisition/mount_check.py  mount check of Step 4.8 (Z, tilt, feature H and V against the registered pose)  DONE
   analysis/common.py     ROI masks, reference planes, figure and table writers shared by A-E  DONE
   analysis/overlap.py    overlap (scaling) test between neighboring features, shared by C and D  DONE
   stats/logistic.py      grouped logistic regression (noise covariate of D)  DONE
@@ -259,6 +260,7 @@ class PlannedCapture:
     tilt_axis: str; tilt_deg: float; step_mm: float | None; visit: str; level_index: int | None
     target_to_camera: RigidTransform        # the wanted ground-truth pose (offsets and tilt applied)
     order: int                               # acquisition order after randomization
+    notes: dict                              # always holds approach_direction (see below)
     def file_name(frame) -> str              # io.manifest.format_file_name
 
 def plan_registration(params, geometry, rng) -> list[PlannedCapture]        # Section 4, Step 6: T2, poses span Z_MIN..Z_MAX
@@ -267,11 +269,31 @@ def plan_edge_series(params, geometry, rng, lateral_sweep=False) -> list    # Se
 def plan_zstep_series(params, geometry, rng, expected_quantum_mm: Callable[[float], float]) -> list   # Section 6.2: ladder ABAB + staircase
 def plan_area_series(params, geometry, rng, open_background=False) -> list   # Section 7: arrays x gaps x stations, field sub-series, open variant
 def plan_detection_series(params, geometry, rng, extended=True, reuse_c_first_frames=False, c_plan=None) -> list   # Section 8: T4, T5 x gaps x all 9 stations; extended (low point, D_5) trials at the 3 farthest; optional reuse of the C first frames
-def insert_sentinels(plan, params, geometry, seconds_per_frame, move_settle_s) -> list   # sentinels on the MOUNTED target: at the series boundaries and every DRIFT_SENTINEL_INTERVAL_MIN of estimated clock
+def insert_sentinels(plan, params, geometry, seconds_per_frame, move_settle_s) -> list   # sentinels on the MOUNTED target: at the series boundaries and every DRIFT_SENTINEL_INTERVAL_MIN of estimated clock; one clock for the main plan and one per optional set (see below)
 def capture_budget(plan, frame_rate_hz, move_settle_s, c_reuse=None) -> BudgetRow list     # Section 9 table: poses, frames, robot hours per series; always WITHOUT the C reuse (c_reuse adds the reused D poses back)
 def write_plan(path_dir, plan, registration | None) -> poses.csv (+ robot flange poses when a registration is given), plan_summary.txt, plan.png
 ```
 Pose indices are unique within (procedure, target, gap, station, field).
+
+*Approach direction of every pose* (specification, Part I; follow-up F2). Every pose of every series is approached along the same
+direction, from below in Z and from -H and -V laterally, so that backlash enters no comparison. `PlannedCapture` records it for
+EVERY pose in `notes["approach_direction"]` (`io.manifest.APPROACH_DIRECTION_KEY`), which `manifest_metadata` carries into the
+manifest column of the same name: `APPROACH_STANDARD` = "-Z,-H,-V" (a sign per axis, `-` = the pose is reached moving toward larger
+values, from the negative side) for the standard rule; the optional lateral sweep keeps its alternating "-H", "+H", "-V", "+V"
+(the swept axis; Z and the other axis follow the standard rule); a capture of the optional drift run, whose plate stands on a fixed
+stand with the robot idle, carries `APPROACH_FIXED_STAND` ("fixed stand"). The default is set in `PlannedCapture.__post_init__`, so a plan
+read back from poses.csv or built by the demo plan has it too. Series Z keeps its own note `notes["approach"]` = "from below" with
+the overshoot. plan_summary.txt states the rule for all poses and the exception.
+
+*Sentinels of an optional set* (follow-up F6). The sentinels captured while an optional set (filters-off repeat, staircase,
+lateral sweep) runs belong to that set: `insert_sentinels` keeps one clock for the main plan, which walks the main captures only (so
+its 11 sentinels, and the Section 9 totals of 7,194 poses, 42,520 frames and 7.18 h, are the same whichever optional flags are on), and
+one clock per optional set, which walks that set's captures only, with the same rules (a sentinel at the end of each of its series
+and whenever `drift_sentinel_interval_min` of its own clock is up; no opening sentinel). Such a sentinel is placed right after the
+capture it follows, has the set's label as sub-series, takes pose indices from the set's base (`OPTIONAL_POSE_INDEX_BASES`) and no
+mount-reference flag, so `capture_budget` leaves it out and the set's own table (`filters_off_budget` ...) has a Sentinels row and
+plan_summary.txt a line "Drift sentinels captured during this set". The analysis of the session's drift (`analysis.noise`:
+`session_sentinels`, the mount epochs) leaves the sentinels of the optional sets out, as it already did for the drift run.
 Random offsets are uniform over +/- PHASE_JITTER_SPAN_PX / 2 converted to mm at
 the station depth; the seed of every draw is logged in the record. Station
 order within a series is shuffled with the logged seed (Section 5, Step 2;
@@ -304,6 +326,21 @@ def pilot_post_check(session, params, geometry, station_z_mm=None, subseries=("j
     # at Z_REFERENCE_MM; per (plate, gap) the blank-site threshold tau and the fraction of post-only sites detected (should
     # be about the false-alarm target). The pilot D_50 / D_0 and the level selection from them no longer exist.
 ```
+
+### acquisition/mount_check.py
+```python
+def check_mount(paths, target, pose, pose_note, tolerances: MountTolerances, check_params=None) -> MountCheckReport
+    # Step 4.8: Z (distance along the ray through the reference point between the fitted and the registered front plane,
+    # <= registration_residual_accept_mm), tilt (<= mount_tilt_tolerance_deg), and H and V of the largest usable feature
+    # (<= frame_check_px). Reuses fit_plane_robust, the expected-front mask of the quick-look check and the target's own
+    # outline; H and V are located from the DEPTH outline (front region of a raised feature, back or unread region of a hole,
+    # centroid compared with the centroid of the same region predicted from the registered pose and the as-built offsets):
+    # the package has no routine that locates an edge in the left IR image, so the IR image is not used.
+def registered_pose(params, registration, flange_pose=None)   # commanded pose, or registration.target_to_camera(read-back)
+```
+`check_captures --mount-check FRAMES_OR_FOLDER --registration registration.json --target ID` prints PASS, FAIL or SKIP per check with
+the measured value and the tolerance and writes `mount_check.json` next to the frames (exit 0 / 1 / 2). targets.json,
+targets_asbuilt.csv and parameters.json are read from the folder of registration.json unless given.
 
 ### analysis/* (each writes into session.analysis_dir())
 Each analysis exposes `run_<letter>(session: Session, options) -> <Letter>Result`

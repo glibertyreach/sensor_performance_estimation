@@ -83,8 +83,8 @@ from sensorperf.geometry.targets import (
 )
 from sensorperf.geometry.transforms import RigidTransform
 from sensorperf.io.manifest import (
-    APPROACH_DIRECTION_KEY, DRIFT_RUN_POSE_INDEX_BASE, FIELD_FRACTION_ACHIEVED_KEY, FILTERS_OFF_POSE_INDEX_BASE, FIXED_STAND_KEY, LATERAL_SWEEP_POSE_INDEX_BASE, SENTINEL_MOUNT_REFERENCE_KEY,
-    STAIRCASE_POSE_INDEX_BASE, SUBSERIES_DRIFT_RUN, SUBSERIES_EXTENDED, SUBSERIES_FIELD, SUBSERIES_FILTERS_OFF, SUBSERIES_JITTER, SUBSERIES_LATERAL_SWEEP, SUBSERIES_LADDER, SUBSERIES_MAIN,
+    APPROACH_DIRECTION_KEY, APPROACH_FIXED_STAND, APPROACH_STANDARD, DRIFT_RUN_POSE_INDEX_BASE, FIELD_FRACTION_ACHIEVED_KEY, FILTERS_OFF_POSE_INDEX_BASE, FIXED_STAND_KEY, LATERAL_SWEEP_POSE_INDEX_BASE, SENTINEL_MOUNT_REFERENCE_KEY,
+    OPTIONAL_SUBSERIES, STAIRCASE_POSE_INDEX_BASE, SUBSERIES_DRIFT_RUN, SUBSERIES_EXTENDED, SUBSERIES_FIELD, SUBSERIES_FILTERS_OFF, SUBSERIES_JITTER, SUBSERIES_LATERAL_SWEEP, SUBSERIES_LADDER, SUBSERIES_MAIN,
     SUBSERIES_NOMINAL, SUBSERIES_OPEN, SUBSERIES_RAMP, SUBSERIES_REMOUNT, SUBSERIES_SENTINEL, SUBSERIES_STAIRCASE, SUBSERIES_TILT,
     TARGET_POSE_COLUMNS, TILT_AXIS_H, TILT_AXIS_V, VISIT_A, VISIT_B, format_file_name, format_flag, pose_to_six,
     six_to_pose,
@@ -150,10 +150,16 @@ sentinels (11, on the mounted target) are part of the totals. plan_summary.txt c
 numbers, so a change of the parameters shows up as a ratio away from 1. The filters-off repeat and the optional B-Z
 staircase are never part of these totals (see ``capture_budget``)."""
 
-OPTIONAL_SUBSERIES = (SUBSERIES_FILTERS_OFF, SUBSERIES_STAIRCASE, SUBSERIES_LATERAL_SWEEP, SUBSERIES_DRIFT_RUN)
-"""Sub-series outside the main (Section 9) budget: the filters-off repeat, the optional B-Z staircase, the optional
-B-HV lateral sweep and the optional separate drift run (captures of procedure letter S, so that they must be kept out of the
-sentinel row of the budget)."""
+# OPTIONAL_SUBSERIES (imported from io.manifest): the filters-off repeat, the optional B-Z staircase, the optional B-HV
+# lateral sweep and the optional separate drift run, all outside the main (Section 9) budget. The captures of procedure
+# letter S among them (the drift run, and the drift sentinels captured during one of the other sets) are kept out of the
+# sentinel row of the main budget by their sub-series.
+OPTIONAL_POSE_INDEX_BASES = {SUBSERIES_FILTERS_OFF: FILTERS_OFF_POSE_INDEX_BASE,
+                             SUBSERIES_STAIRCASE: STAIRCASE_POSE_INDEX_BASE,
+                             SUBSERIES_LATERAL_SWEEP: LATERAL_SWEEP_POSE_INDEX_BASE,
+                             SUBSERIES_DRIFT_RUN: DRIFT_RUN_POSE_INDEX_BASE}
+"""The pose-index base of each optional sub-series (all of them outside the Section 9 budget; ranges in ``io.manifest``).
+The drift sentinels captured during an optional set count their pose indices from the base of that set."""
 
 PLAN_CSV_NAME = "poses.csv"
 PLAN_SUMMARY_NAME = "plan_summary.txt"
@@ -248,6 +254,14 @@ class PlannedCapture:
     """Acquisition order after randomization (0-based, over the whole plan)."""
     notes: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        """Record the approach direction of EVERY pose (specification, Part I). A pose that names its own approach (the
+        lateral sweep) keeps it; a capture of a plate on a fixed stand has none to record (``APPROACH_FIXED_STAND``); every
+        other pose is approached by the standard rule (``APPROACH_STANDARD``: from below in Z, from -H and -V laterally)."""
+        if APPROACH_DIRECTION_KEY not in self.notes:
+            self.notes = {**self.notes, APPROACH_DIRECTION_KEY: APPROACH_FIXED_STAND if self.notes.get(FIXED_STAND_KEY)
+                          else APPROACH_STANDARD}
+
     def pose_key(self) -> tuple:
         """The key shared by all frames of this pose (same as FrameRecord.pose_key)."""
         return (self.procedure, self.target_id, self.gap_mm, self.station_z_mm, self.field, self.pose_index)
@@ -262,8 +276,9 @@ class PlannedCapture:
         fraction of the requested field offset, for a pose placed at a field position, and the mount-reference flag of a
         drift sentinel (``sentinel_mount_reference``: true for the first sentinel after its target was mounted, false for
         a later one), and the fixed-stand flag (``fixed_stand``: true for a capture of the optional drift run, whose plate
-        stands still on a fixed stand, see ``io.manifest``), and the approach direction of a lateral-sweep pose
-        (``approach_direction``: "-H", "+H", "-V" or "+V"). Any other pose has none of them, so the cell stays empty."""
+        stands still on a fixed stand, see ``io.manifest``), and the approach direction (``approach_direction``) of EVERY
+        pose: ``APPROACH_STANDARD`` ("-Z,-H,-V") for the standard rule, "-H", "+H", "-V" or "+V" for a lateral-sweep pose,
+        ``APPROACH_FIXED_STAND`` for the drift run. A pose without the quantity leaves the cell empty."""
         metadata: dict[str, str] = {}
         fraction = self.notes.get(FIELD_FRACTION_ACHIEVED_KEY)
         if fraction is not None:
@@ -1309,6 +1324,17 @@ def plan_drift_run(params: CharacterizationParameters) -> list[PlannedCapture]:
                       for _ in range(captures)])
 
 
+MAIN_CLOCK = "main"
+"""Name of the clock of the main plan in :func:`insert_sentinels` (the clock of an optional set is named by its sub-series)."""
+
+
+def _clock_of(capture: PlannedCapture) -> str:
+    """The sentinel clock a capture runs on: that of its optional set (the sub-series label) when it belongs to one, else
+    the clock of the main plan. The main clock never counts the time of an optional set, because the set is outside the
+    Section 9 budget (and, for the filters-off repeat, the sensor is in another configuration)."""
+    return capture.subseries if capture.subseries in OPTIONAL_SUBSERIES else MAIN_CLOCK
+
+
 def insert_sentinels(plan: list[PlannedCapture], params: CharacterizationParameters, geometry: SensorGeometry,
                      seconds_per_frame: float, move_settle_s: float,
                      diagnostics: PlanDiagnostics | None = None,
@@ -1329,20 +1355,47 @@ def insert_sentinels(plan: list[PlannedCapture], params: CharacterizationParamet
         comes first, as the procedure defines it);
       * at every series boundary, that is after the last pose of each series, on the target still mounted there (T2
         after A and after B-Z, so T2 sentinels bracket those series; T3b, T5 and T5 after B-HV, C and D);
-      * before any capture that starts when at least DRIFT_SENTINEL_INTERVAL_MIN of clock time has passed since the
-        previous sentinel began, on the mounted target;
+      * after any capture that is followed by one that would start when at least DRIFT_SENTINEL_INTERVAL_MIN of clock
+        time has passed since the previous sentinel began, on the mounted target;
       * after the last capture (the end of the last series).
+
+    The optional sets (``OPTIONAL_SUBSERIES``: the filters-off repeat, the staircase, the lateral sweep) are outside the
+    main budget, so the sentinels captured during one belong to that set and never to the main plan. Each clock runs on its
+    own: the MAIN clock walks the captures of the main plan only (the sentinels it places are exactly those of a plan without
+    the optional sets, so the Section 9 totals do not depend on which optional sets are planned), and each optional set
+    has a clock of its own that walks the captures of that set only (the set's captures may lie in several places of the
+    plan, e.g. the filters-off repeat of A, B-HV and B-Z), with the same rules (a sentinel at the end of each of its series
+    and whenever the interval is up; no opening sentinel, the main plan has just placed one). A sentinel of an optional set
+    is placed right after the capture it follows, takes the sub-series label of the set and counts its pose indices from the
+    set's base (``OPTIONAL_POSE_INDEX_BASES``), so the set's budget table and pose-index range include it. It carries no
+    mount-reference flag: the analysis of the session's drift (``analysis.noise``) leaves the sentinels of the optional sets
+    out, because they are not captured in the main configuration.
+
     Registration poses (Section 4) come before the first sentinel and are not counted. Existing sentinels in ``plan``
     are dropped first, so the function can be applied to a plan again after it was changed. Order is renumbered
     0..N-1; the input list is not modified.
 
     ``diagnostics`` receives a note with the sentinel count and the number of re-mounts they need (zero by
-    construction; a warning if it were not), and a warning for a mounted target that does not fit the field of view at
-    Z_REFERENCE_MM. ``targets`` is the target set of that fit check (default: the standard set)."""
+    construction; a warning if it were not), a note with the sentinels of each optional set, and a warning for a mounted
+    target that does not fit the field of view at Z_REFERENCE_MM. ``targets`` is the target set of that fit check
+    (default: the standard set)."""
     interval_s = params.drift_sentinel_interval_min * SECONDS_PER_MINUTE
     pose = fronto_parallel_pose(0.0, 0.0, params.z_reference_mm)
-    sentinel_counter = _PoseCounter()
     sentinel_duration = capture_duration_s_for_frames(params.sentinel_frames, seconds_per_frame, move_settle_s)
+    # One pose-index counter per clock: the main sentinels count from zero, those of an optional set from the set's base.
+    sentinel_counters = {MAIN_CLOCK: _PoseCounter()}
+    sentinel_counters.update({label: _PoseCounter(base) for label, base in OPTIONAL_POSE_INDEX_BASES.items()})
+    captures = [c for c in plan if c.procedure != PROCEDURE_SENTINEL]
+    # The capture that follows each capture ON THE SAME CLOCK (None for the last of its clock): a sentinel that is due
+    # before that next capture is placed right after this one.
+    next_on_clock: dict[int, PlannedCapture | None] = {}
+    latest_of_clock: dict[str, int] = {}
+    for position, capture in enumerate(captures):
+        clock = _clock_of(capture)
+        if clock in latest_of_clock:
+            next_on_clock[latest_of_clock[clock]] = capture
+        latest_of_clock[clock] = position
+        next_on_clock[position] = None
     result: list[PlannedCapture] = []
     mounted_target: str | None = None          # target of the latest capture placed (registration poses included)
     mount_serial = 0                           # counts the mounts so far
@@ -1354,49 +1407,61 @@ def insert_sentinels(plan: list[PlannedCapture], params: CharacterizationParamet
         if capture.target_id != mounted_target:
             mounted_target, mount_serial = capture.target_id, mount_serial + 1
 
-    def sentinel(on: PlannedCapture) -> PlannedCapture:
-        """A new sentinel pose on the target (and gap) of the capture ``on``, with the next free pose index."""
+    def sentinel(on: PlannedCapture, clock: str) -> PlannedCapture:
+        """A new sentinel pose of the clock on the target (and gap) of the capture ``on``, with the next free pose index."""
         nonlocal referenced_serial
-        reference = referenced_serial != mount_serial
-        referenced_serial = mount_serial
         gap_text = "no back plate" if on.gap_mm is None else f"G = {on.gap_mm:g} mm"
-        notes = {SENTINEL_NOTE_KEY: f"drift sentinel on the mounted target {on.target_id} ({gap_text}): front plane at "
-                                    f"Z = {params.z_reference_mm:g} mm, centered" + ("; reference of this mount"
-                                                                                   if reference else ""),
-                 SENTINEL_TARGET_KEY: on.target_id, SENTINEL_GAP_KEY: on.gap_mm, SENTINEL_REFERENCE_KEY: reference}
-        return _new_capture(sentinel_counter, PROCEDURE_SENTINEL, on.target_id, on.gap_mm, params.z_reference_mm,
-                            FIELD_POSITION_CENTER, params.sentinel_frames, SUBSERIES_SENTINEL, pose, notes=notes)
+        notes = {SENTINEL_TARGET_KEY: on.target_id, SENTINEL_GAP_KEY: on.gap_mm}
+        note = (f"drift sentinel on the mounted target {on.target_id} ({gap_text}): front plane at "
+                f"Z = {params.z_reference_mm:g} mm, centered")
+        if clock == MAIN_CLOCK:
+            reference = referenced_serial != mount_serial
+            referenced_serial = mount_serial
+            notes[SENTINEL_REFERENCE_KEY] = reference
+            note += "; reference of this mount" if reference else ""
+        else:
+            note += f"; captured during the {clock} set, counted with it (outside the main budget)"
+        notes[SENTINEL_NOTE_KEY] = note
+        return _new_capture(sentinel_counters[clock], PROCEDURE_SENTINEL, on.target_id, on.gap_mm, params.z_reference_mm,
+                            FIELD_POSITION_CENTER, params.sentinel_frames,
+                            SUBSERIES_SENTINEL if clock == MAIN_CLOCK else clock, pose, notes=notes)
 
-    since_last: float | None = None            # clock time since the last sentinel began; None before the first
-    previous: PlannedCapture | None = None     # latest capture placed that is not a registration pose
-    for capture in (c for c in plan if c.procedure != PROCEDURE_SENTINEL):
+    since_last: dict[str, float] = {}          # per clock: clock time since the last sentinel of it began
+    for position, capture in enumerate(captures):
         if capture.procedure == PROCEDURE_REGISTRATION:
             mount(capture)
             result.append(capture)
             continue
-        if previous is None:
+        clock = _clock_of(capture)
+        if clock == MAIN_CLOCK and MAIN_CLOCK not in since_last:
             mount(capture)                                       # the first pose of the plan: sentinel on its target
-            result.append(sentinel(capture))
-            since_last = sentinel_duration
-        elif since_last >= interval_s or capture.procedure != previous.procedure:
-            result.append(sentinel(previous))                    # interval up or series ended: target still mounted
-            since_last = sentinel_duration
+            result.append(sentinel(capture, clock))
+            since_last[clock] = sentinel_duration
+        since_last.setdefault(clock, 0.0)                        # an optional set starts without an opening sentinel
         mount(capture)
         result.append(capture)
-        since_last += capture_duration_s(capture, seconds_per_frame, move_settle_s) \
+        since_last[clock] += capture_duration_s(capture, seconds_per_frame, move_settle_s) \
             * (1.0 + capture.notes.get(REUSED_CLOCK_SHARE_KEY, 0.0))
-        previous = capture
-    if previous is not None:
-        result.append(sentinel(previous))                        # after the last pose of the last series
+        following = next_on_clock[position]
+        if following is None or following.procedure != capture.procedure or since_last[clock] >= interval_s:
+            # The end of the clock's last series, a series boundary, or the interval is up: the target is still mounted.
+            result.append(sentinel(capture, clock))
+            since_last[clock] = sentinel_duration
     _renumber(result)
     if diagnostics is not None and result:
         sentinels = [c for c in result if c.procedure == PROCEDURE_SENTINEL]
-        per_target = ", ".join(f"{t}: {n}" for t, n in sorted(Counter(c.target_id for c in sentinels).items()))
+        main_sentinels = [c for c in sentinels if c.subseries == SUBSERIES_SENTINEL]
+        per_target = ", ".join(f"{t}: {n}" for t, n in sorted(Counter(c.target_id for c in main_sentinels).items()))
         remounts = count_sentinel_remounts(result)
-        diagnostics.note(f"{len(sentinels)} drift sentinels ({per_target}), each on the front plane of the target "
+        diagnostics.note(f"{len(main_sentinels)} drift sentinels ({per_target}), each on the front plane of the target "
                          f"mounted at that point of the plan, centered at Z = {params.z_reference_mm:g} mm, "
                          f"{params.sentinel_frames} frames, at the series boundaries and every "
                          f"{params.drift_sentinel_interval_min:g} min of estimated clock; {remounts} sentinel re-mounts")
+        for label in OPTIONAL_POSE_INDEX_BASES:
+            in_set = [c for c in sentinels if c.subseries == label]
+            if in_set:
+                diagnostics.note(f"{len(in_set)} drift sentinels captured during the {label} set: counted with that set, "
+                                 "outside the main budget")
         if remounts:
             diagnostics.warn(f"{remounts} of {len(sentinels)} drift sentinels are not on the target mounted at that "
                              "point of the plan; each needs a re-mount")
@@ -1678,11 +1743,6 @@ def _subseries_lines(plan: Sequence[PlannedCapture]) -> list[str]:
     return lines
 
 
-OPTIONAL_POSE_INDEX_BASES = {SUBSERIES_FILTERS_OFF: FILTERS_OFF_POSE_INDEX_BASE,
-                             SUBSERIES_STAIRCASE: STAIRCASE_POSE_INDEX_BASE,
-                             SUBSERIES_LATERAL_SWEEP: LATERAL_SWEEP_POSE_INDEX_BASE,
-                             SUBSERIES_DRIFT_RUN: DRIFT_RUN_POSE_INDEX_BASE}
-"""The pose-index base of each optional sub-series (all of them outside the Section 9 budget; ranges in ``io.manifest``)."""
 
 
 def _pose_index_range_lines(plan: Sequence[PlannedCapture]) -> list[str]:
@@ -1699,6 +1759,14 @@ def _pose_index_range_lines(plan: Sequence[PlannedCapture]) -> list[str]:
                         f"P{FILTERS_OFF_POSE_INDEX_BASE - 1:03d}):")
         lines.insert(0, "")
     return lines
+
+
+def _set_sentinel_line(plan: Sequence[PlannedCapture], label: str) -> str:
+    """The line under the budget table of an optional set that states how many drift sentinels were captured during the set
+    (they are in the set's Sentinels row and never in the main budget)."""
+    sentinels = [c for c in plan if c.procedure == PROCEDURE_SENTINEL and c.subseries == label]
+    return (f"  Drift sentinels captured during this set (counted here, not in the main budget): {len(sentinels)}, "
+            f"{sum(c.frames for c in sentinels)} frames.")
 
 
 def _drift_run_lines(plan: Sequence[PlannedCapture], params: CharacterizationParameters) -> list[str]:
@@ -1817,19 +1885,23 @@ def plan_summary_text(plan: Sequence[PlannedCapture], params: CharacterizationPa
                      f"{total.frames:,} frames ({total.frames / DOCUMENT_ESTIMATE_FRAMES:.2f} x), "
                      f"{total.robot_hours:.1f} h ({total.robot_hours / DOCUMENT_ESTIMATE_HOURS:.2f} x).")
         # The optional filters-off repeat is listed on its own: it is outside the main budget and the comparison above.
+        # The drift sentinels captured during an optional set are counted with that set (its Sentinels row and the line
+        # under its table), never in the totals above.
         off_rows = filters_off_budget(plan, rate, params.move_and_settle_time_s)
         if off_rows:
             lines += ["", "Outside the main budget (filters-off repeat, Section 4, Step 4.2; not in the totals above "
-                          "or in the comparison with the document's estimate):", format_budget_table(off_rows)]
+                          "or in the comparison with the document's estimate):", format_budget_table(off_rows),
+                      _set_sentinel_line(plan, SUBSERIES_FILTERS_OFF)]
         stair_rows = staircase_budget(plan, rate, params.move_and_settle_time_s)
         if stair_rows:
             lines += ["", "Outside the main budget (optional B-Z staircase, Section 6.2, second pass; not in the totals "
-                          "above or in the comparison with the document's estimate):", format_budget_table(stair_rows)]
+                          "above or in the comparison with the document's estimate):", format_budget_table(stair_rows),
+                      _set_sentinel_line(plan, SUBSERIES_STAIRCASE)]
         sweep_rows = lateral_sweep_budget(plan, rate, params.move_and_settle_time_s)
         if sweep_rows:
             lines += ["", "Outside the main budget (optional B-HV lateral sweep, Section 6.1, second pass; not in the "
                           "totals above or in the comparison with the document's estimate):",
-                      format_budget_table(sweep_rows)]
+                      format_budget_table(sweep_rows), _set_sentinel_line(plan, SUBSERIES_LATERAL_SWEEP)]
     if diagnostics is not None and diagnostics.c_reuse is not None:
         reuse = diagnostics.c_reuse
         d_planned = sum(1 for c in plan if c.procedure == PROCEDURE_DETECTION)
@@ -1840,7 +1912,17 @@ def plan_summary_text(plan: Sequence[PlannedCapture], params: CharacterizationPa
                       f"{d_planned + reuse.poses:,}. Only the first frame of a C pose may be used (Section 8, Independence "
                       "rule)."]
     lines += _drift_run_lines(plan, params)
-    sweep = [c for c in plan if c.subseries == SUBSERIES_LATERAL_SWEEP]
+    # The poses of the sweep itself (the sentinels captured during it share its sub-series label but are not sweep poses).
+    sweep = [c for c in plan if c.subseries == SUBSERIES_LATERAL_SWEEP and c.procedure == PROCEDURE_EDGES]
+    if plan:
+        lines += ["", "Approach direction of every pose (specification, Part I): every pose of every series is approached "
+                      "along the same direction, from below in Z (nearer the sensor, moving toward larger Z) and from -H and "
+                      "-V laterally, so that backlash enters no comparison. poses.csv records it in the notes of every pose "
+                      f"and the manifest in the column {APPROACH_DIRECTION_KEY}: '{APPROACH_STANDARD}' for the standard rule."
+                      + (" The one exception is the optional lateral sweep (see below), which alternates on purpose."
+                         if sweep else " The one exception, the optional lateral sweep, is not in this plan.")
+                      + (f" The captures of the optional drift run stand on a fixed stand and carry '{APPROACH_FIXED_STAND}'."
+                         if any(c.subseries == SUBSERIES_DRIFT_RUN for c in plan) else "")]
     if sweep:
         lines += ["", f"B-HV lateral sweep approach (Section 6.1, Step 6): {len(sweep)} poses, "
                       f"{sum(1 for c in sweep if c.notes['lateral_sweep_axis'] == 'H')} in H and "
@@ -1848,7 +1930,7 @@ def plan_summary_text(plan: Sequence[PlannedCapture], params: CharacterizationPa
                       f"Z = {sweep[0].station_z_mm:g} mm. The approach ALTERNATES on purpose so that lateral hysteresis "
                       "shows: odd-numbered poses are approached from the negative side (-H, -V) and even-numbered poses "
                       "from the positive side (+H, +V); the side is in the notes of poses.csv as "
-                      f"{APPROACH_DIRECTION_KEY}."]
+                      f"{APPROACH_DIRECTION_KEY}. Z and the other lateral axis follow the standard rule."]
     if any(c.procedure == PROCEDURE_ZSTEP for c in plan):
         lines += ["", f"Series Z approach: every visit {APPROACH_FROM_BELOW} (back off {params.z_step_approach_overshoot_mm:g} mm "
                       "toward smaller Z, then move up onto the pose), so that backlash does not enter the A / B difference.",

@@ -759,3 +759,21 @@ file in archive/). Code: 236 tests pass at the closing commit; the technician pr
 Open code follow-ups logged above: F2 (record the approach direction for every pose), F6 (count an optional set's
 sentinels with that set), and the mount-check mode of check_captures (Step 4.8 tolerances).
 
+## Follow-ups closed (2026-10-07)
+Neil asked to close the four open items. Executed in code and the technician procedure (procedure baseline
+2026-10-07_01, gate PASS; 246 tests pass):
+- F2 closed: every pose carries approach_direction in the notes and the manifest (the standard rule "-Z,-H,-V"; the
+  lateral sweep keeps its alternating values; fixed-stand poses are marked); plan_summary.txt states the rule and
+  the exception.
+- F6 closed: sentinels captured during an optional set (filters-off repeat, staircase, lateral sweep, drift run)
+  belong to that set, take its pose-index range, and count on its own line; the main budget stays 7,194 poses,
+  42,520 frames, 7.18 h with every optional flag on. Not covered: the open-background variant still runs on the
+  main sentinel clock (it was outside the four sets); logged as F7 for a later pass.
+- Mount-check mode closed: check_captures --mount-check fits the mounted target's front plane, compares Z and tilt
+  with the registered pose against REGISTRATION_RESIDUAL_ACCEPT_MM and MOUNT_TILT_TOLERANCE_DEG, and checks H and V
+  against the as-built datum offsets within FRAME_CHECK_PX using a depth-derived outline (no routine locates an
+  edge in the left IR image; the tool and the procedure say so); writes mount_check.json. Section 4, Step 8 of the
+  specification allows the IR image; the depth-derived outline is the implemented form.
+- Procedure example closed: the sensor_config.json example shows the optional camera_2d_offset_mm field, and the
+  mount-check command is in the procedure's mount-check step and Appendix B.
+

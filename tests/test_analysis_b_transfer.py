@@ -27,7 +27,7 @@ from sensorperf.analysis.resolution_lateral import (
 )
 from sensorperf.cli import simulate as simulate_cli
 from sensorperf.geometry.targets import make_standard_target_set
-from sensorperf.io.manifest import APPROACH_DIRECTION_KEY, SUBSERIES_LATERAL_SWEEP
+from sensorperf.io.manifest import APPROACH_DIRECTION_KEY, APPROACH_STANDARD, SUBSERIES_LATERAL_SWEEP
 from sensorperf.io.session import Session
 from sensorperf.parameters import CharacterizationParameters, SensorGeometry
 from sensorperf.simulate.demo_plan import demo_registration, scaled_geometry
@@ -252,7 +252,7 @@ def test_sweep_poses_are_used_only_by_the_transfer(sweep_session, sweep_result):
 
 
 def test_sweep_approach_direction_round_trips_through_the_manifest(sweep_session):
-    """The plan's ``approach_direction`` note reaches the manifest as a metadata column (empty for other poses) and the
+    """The plan's ``approach_direction`` note reaches the manifest as a metadata column (the standard rule for every other pose) and the
     analysis reads it: for every sweep pose the column equals the planned direction and the analysis returns that axis and
     side. Only for a manifest without the column does it derive the same answer from the logged offset by the plan's rule."""
     session, plan = sweep_session
@@ -263,7 +263,7 @@ def test_sweep_approach_direction_round_trips_through_the_manifest(sweep_session
     checked = 0
     for record in session.records:
         if record.subseries != SUBSERIES_LATERAL_SWEEP:
-            assert APPROACH_DIRECTION_KEY not in record.metadata          # empty cell for every other pose
+            assert record.metadata[APPROACH_DIRECTION_KEY] == APPROACH_STANDARD   # every other pose: the standard rule
             continue
         direction = planned[record.pose_index]
         assert record.metadata[APPROACH_DIRECTION_KEY] == direction

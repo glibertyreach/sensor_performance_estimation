@@ -17,7 +17,10 @@ Section 7 (C: jittered poses, field sub-series, optional open-background
 variant) and the detection series of Section 8 (D: main trials at every station and
 extended trials of the low point, D_5, at the farthest stations),
 with drift sentinels inserted on the budget clock. ``--filters-off`` appends the filters-off repeat of A, B-HV and
-B-Z (Section 4, Step 4.2) after each filters-on series; the summary lists it outside the main budget. Two further
+B-Z (Section 4, Step 4.2) after each filters-on series; the summary lists it outside the main budget. The drift sentinels
+captured during an optional set (filters-off repeat, staircase, lateral sweep) belong to that set: they carry its sub-series label
+and pose-index range and are counted in its own table, never in the main budget. Every pose records the direction it is
+approached from (Part I: from below in Z and from -H and -V; ``approach_direction`` in the notes and the manifest). Two further
 options, both off by default: ``--lateral-sweep`` adds the optional second pass of B-HV (Section 6.1, Step 6: T3a swept
 in H and then in V in steps of LATERAL_SWEEP_STEP_PX over LATERAL_SWEEP_SPAN_PX at Z_REFERENCE_MM, outside the main
 budget), ``--drift-run`` adds the optional separate drift run (Section 4, Step 3: T2 on a fixed stand at Z_REFERENCE_MM, the
@@ -122,11 +125,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--filters-off", action="store_true",
                         help="append the filters-off repeat of the A and B series (A, B-HV and B-Z; Section 4, Step 4.2) "
                              "after each filters-on series; its poses are labeled filters_off and are listed outside "
-                             "the main budget in plan_summary.txt")
+                             "the main budget in plan_summary.txt, together with the drift sentinels captured "
+                             "during the repeat")
     parser.add_argument("--staircase", action="store_true",
                         help="add the optional second pass of the B-Z series, the fine staircase (Section 6.2), at the "
                              "reduced stations; its poses are labeled staircase and are listed outside the main budget "
-                             "in plan_summary.txt (the ramp and the step ladder are always planned). To use the disparity quantum "
+                             "in plan_summary.txt, with the drift sentinels captured during it (the ramp and the step ladder are "
+                             "always planned). To use the disparity quantum "
                              "measured by the ramp instead of the assumed one (0.125 px), pass it as "
                              "tier_a_disparity_quantum_px in the --parameters JSON.")
     parser.add_argument("--reuse-c-first-frames", action="store_true",
@@ -138,7 +143,8 @@ def build_parser() -> argparse.ArgumentParser:
                         help="add the optional second pass of the B-HV series (Section 6.1, Step 6): the edge target T3a "
                              "swept in H and then in V at Z_REFERENCE_MM in steps of LATERAL_SWEEP_STEP_PX over "
                              "LATERAL_SWEEP_SPAN_PX (20 poses per axis, approached from alternating directions); its poses "
-                             "are labeled lateral_sweep and are listed outside the main budget in plan_summary.txt")
+                             "are labeled lateral_sweep and are listed outside the main budget in plan_summary.txt, with the "
+                             "drift sentinels captured during the sweep")
     parser.add_argument("--drift-run", action="store_true",
                         help="add the optional separate drift run (Section 4, Step 3): T2 on a FIXED STAND at the reference "
                              "station, the robot idle, SENTINEL_FRAMES frames every DRIFT_RUN_CAPTURE_INTERVAL_MIN minutes for "

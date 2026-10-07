@@ -114,7 +114,7 @@ Do these steps in order, once, before the first capture of any series. They fix 
 
 **Step 4.5. Intrinsics and frame checks (Engineer).**
 
-- Read the left IR intrinsics, the depth-to-IR extrinsics, the stereo baseline, the depth LSB, and the projector offset from the SDK or datasheet. These are the values marked with a dagger in appendix A. Fill them in and write them into `sensor_config.json` under `geometry` (the focal lengths and principal point in pixels, the image size, the baseline and projector offset in mm, the depth LSB in mm, and the frame rate). If the datasheet also gives the position of the 2-D image sensor relative to the left IR camera, add it as `camera_2d_offset_mm`; this one is optional and may be left out. Until this is done the planner and the code use indicative values.
+- Read the left IR intrinsics, the depth-to-IR extrinsics, the stereo baseline, the depth LSB, and the projector offset from the SDK or datasheet. These are the values marked with a dagger in appendix A. Fill them in and write them into `sensor_config.json` under `geometry` (the focal lengths and principal point in pixels, the image size, the baseline and projector offset in mm, the depth LSB in mm, and the frame rate). Until this is done the planner and the code use indicative values.
 - Confirm that the sensor returns valid depth on T2 at Z_MIN (400 mm) and at Z_MAX (1600 mm). The range limits carry the dagger: if the sensor does not read at an end, tell the engineer, who tightens the limit and rebuilds the station ladder (§5).
 - Confirm the depth image is registered to the left IR image. With T3a in view, overlay the square's edges from the IR image on the depth discontinuities. They must agree within 0.5 px.
 - Confirm the baseline direction. The occlusion band (a strip of no-reads) appears beside vertical edges only if the baseline runs along H. If it appears beside horizontal edges, tell the engineer: H and V swap in series B and E. With the right camera at +H, the band lies outside the left edge of the raised square and inside the right edge of the window; if it lies on the other side, tell the engineer: the sign of H is reversed.
@@ -131,15 +131,10 @@ Example of `sensor_config.json` (the text in angle brackets is replaced by the r
               "hole_filling": <setting>, "confidence_threshold": <setting>},
   "geometry": {"sensor_fx_px": <>, "sensor_fy_px": <>, "sensor_cx_px": <>, "sensor_cy_px": <>,
                "image_width_px": <>, "image_height_px": <>, "sensor_baseline_mm": <>,
-               "projector_offset_mm": [<H>, <V>, <Z>], "depth_lsb_mm": <>, "frame_rate_hz": <>,
-               // optional, may be omitted: the position of the 2-D image sensor relative to the
-               // left IR camera (H, V, Z in mm), from the datasheet
-               "camera_2d_offset_mm": [<H>, <V>, <Z>]},
+               "projector_offset_mm": [<H>, <V>, <Z>], "depth_lsb_mm": <>, "frame_rate_hz": <>},
   "notes": "SDK <version>; firmware <version>"
 }
 ```
-
-The two lines that start with `//` are a comment for you; do not copy them into the file. Leave `camera_2d_offset_mm` out when the datasheet does not give the position of the 2-D image sensor; the analysis then does not compute the visible area seen by the 2-D image (it reports it as not available), while a missing projector offset stops the analyses.
 
 Write the date, sensor serial number, firmware and SDK versions, robot model and controller software version, the active base frame name, the plate flatness report, the finish, and anything unusual in `session_log.md`. Do not change the active base frame, the exposure, or any sensor setting during the session.
 
@@ -170,15 +165,7 @@ If either is too large, add poses with larger tilts, up to plus or minus 20 degr
 - tilt within 0.05 degrees (`MOUNT_TILT_TOLERANCE_DEG`, a dagger parameter: 0.05 degrees moves a plate edge 200 mm from the center by about 0.17 mm);
 - for a target with features (T3a, T3b, T4, T5), also locate one feature edge or outline in the left IR image and compare its H and V position with the as-built datum offsets (§2): both within 0.5 px (`FRAME_CHECK_PX`).
 
-Otherwise re-seat the target or correct the datum record. This is what makes re-mounting on the dowel-pinned adapter safe without a new registration.
-
-The check command does the fitting and the comparisons. After mounting, move the target to the mount-check station (centered and fronto-parallel, the pose the registration commands) and capture a few frames. Keep them in a folder of their own, for example `mount_check_T3a/` in the session folder; they are checks, not part of the plan, and need no pose-log lines. Then run, with the id of the mounted target:
-
-```
-python3 -m sensorperf.cli.check_captures --mount-check mount_check_T3a/ --registration registration.json --target T3a
-```
-
-`--mount-check` takes the capture files or the folder that holds them. The tool reads `targets.json`, `targets_asbuilt.csv` and `parameters.json` from the folder of `registration.json`, so run it with the session folder's registration. It assumes the robot stands at the commanded pose; if the robot stopped somewhere else, give the flange pose it reports with `--flange-pose`. The tool prints PASS or FAIL for Z, for tilt, for H and for V, each with the measured value and the tolerance, and writes `mount_check.json` next to the frames. Its exit code is 0 when every check passes, 1 when one fails, and 2 when it cannot read its inputs. For T2, which has no features, H and V are skipped and the verdict says so. The tool finds the feature's outline in the depth image (the front face of a raised feature, the opening of a cutout or window), because the package has no routine that finds an edge in the left IR image; the depth-to-IR agreement was confirmed in Step 4.5. Log the result in `session_log.md`.
+Otherwise re-seat the target or correct the datum record. This is what makes re-mounting on the dowel-pinned adapter safe without a new registration. Log the result in `session_log.md`.
 
 ## 5. The plan
 
@@ -220,7 +207,7 @@ Figure 5. Left: the 9 stations of the ladder, used by A, C and D and by the ramp
 
 Figure 6. The default full plan: target centers in the sensor frame, side view (H against Z) and front view (H against V), colored by series, with the frustum. Each cloud around a station is a set of random lateral offsets.
 
-**What a row of `poses.csv` contains.** Table 4 lists the procedure letters. A row has the order to execute it in (`order`), the identity that names the files (`procedure`, `target_id`, `gap_mm`, `station_z_mm`, `field`, `pose_index`), the number of frames (`frames`), a sub-series label (`subseries`: main, tilt, remount, filters_off, sentinel, drift_run, nominal, jitter, ladder, ramp, staircase, lateral_sweep, field, open, extended), the logged random seed (`seed`), the random lateral offset in mm at the station depth (`offset_h_mm`, `offset_v_mm`), the tilt (`tilt_axis`, `tilt_deg`), the commanded Z step and visit (`step_mm`, `visit`, series Z only), the feature index (`level_index`, usually empty, because one frame sees every feature of a plate), and the wanted target pose in the camera frame (`target_x_mm` to `target_rz_deg`: position in mm and a rotation vector in degrees). With a registration the row also holds the flange pose to command in the robot base frame: position and rotation vector (`base_x_mm` to `base_rz_deg`), the rotation matrix (`r00` to `r22`, row by row), and the quaternion (`quat_w`, `quat_x`, `quat_y`, `quat_z`). Use whichever form your robot program accepts. A last column (`notes`) holds extra detail as JSON: for example the achieved field fraction (`field_fraction_achieved`), the approach of a series Z pose (`approach`), the direction every pose is approached from (`approach_direction`: `-Z,-H,-V` for the standard rule, and `-H`, `+H`, `-V` or `+V` for a lateral-sweep pose; the drift run, whose plate does not move, says `fixed stand`), and whether a sentinel is the reference of its mount (`mount_reference`).
+**What a row of `poses.csv` contains.** Table 4 lists the procedure letters. A row has the order to execute it in (`order`), the identity that names the files (`procedure`, `target_id`, `gap_mm`, `station_z_mm`, `field`, `pose_index`), the number of frames (`frames`), a sub-series label (`subseries`: main, tilt, remount, filters_off, sentinel, drift_run, nominal, jitter, ladder, ramp, staircase, lateral_sweep, field, open, extended), the logged random seed (`seed`), the random lateral offset in mm at the station depth (`offset_h_mm`, `offset_v_mm`), the tilt (`tilt_axis`, `tilt_deg`), the commanded Z step and visit (`step_mm`, `visit`, series Z only), the feature index (`level_index`, usually empty, because one frame sees every feature of a plate), and the wanted target pose in the camera frame (`target_x_mm` to `target_rz_deg`: position in mm and a rotation vector in degrees). With a registration the row also holds the flange pose to command in the robot base frame: position and rotation vector (`base_x_mm` to `base_rz_deg`), the rotation matrix (`r00` to `r22`, row by row), and the quaternion (`quat_w`, `quat_x`, `quat_y`, `quat_z`). Use whichever form your robot program accepts. A last column (`notes`) holds extra detail as JSON: for example the achieved field fraction (`field_fraction_achieved`), the approach of a series Z pose (`approach`), the approach side of a lateral-sweep pose (`approach_direction`), and whether a sentinel is the reference of its mount (`mount_reference`).
 
 | Letter | Series | Target | See |
 |---|---|---|---|
@@ -238,13 +225,13 @@ Table 4. Procedure letters of the plan and of the file names.
 
 **Robot program outline**, for each row of `poses.csv`, in `order`:
 
-1. Move to the pose. Use a joint move to a point short of it along the target normal, then a linear move onto it, so the approach is the same every time. Every pose of every series is approached along the same direction: from below in Z (the point short of the pose lies nearer the sensor, and the last move is toward larger Z) and, laterally, from the negative side of H and of V, so that backlash does not enter any comparison; the `notes` column says so for each row (`approach_direction` is `-Z,-H,-V`). For every pose of series Z (step ladder, ramp, and the optional staircase) the point short of the pose lies below it: back off by 2 mm toward smaller Z, then move up onto the pose, so that every pose of the series is approached from below and backlash does not enter the difference between visits (§8). The one exception is the optional lateral sweep of series B (§7), where the approach side along the swept axis alternates on purpose and the row says which side; Z and the other lateral axis follow the rule above.
+1. Move to the pose. Use a joint move to a point short of it along the target normal, then a linear move onto it, so the approach is the same every time. For every pose of series Z (step ladder, ramp, and the optional staircase) the point short of the pose lies below it: back off by 2 mm toward smaller Z, then move up onto the pose, so that every pose of the series is approached from below and backlash does not enter the difference between visits (§8). The one exception is the optional lateral sweep of series B (§7), where the approach side alternates on purpose and the row says which side.
 2. Wait the settle time of Step 4.4 (2 s unless the check raised it).
 3. Trigger the capture of `frames` frames. Name the files `<proc>_<target>_G<gap>_Z<zzzz>_F<field>_P<pose>_f<frame>.mc` from the row: for example `C_T5_G15_Z0800_F0_P017_f03.mc` is procedure C (area), target T5, gap 15 mm, station Z = 800 mm, field position 0 (center), pose 17, frame 3. The pose number has three digits (`P017`); the filters-off repeat, which is planned outside the budget, numbers its poses from `P1000` and so has four. A target without a back plate (T2) writes `G0`. The frame number has two digits and runs from `f00`.
 4. Read the robot's actual reported (encoder-derived) flange pose, not the commanded one, and append it to the pose log (§11). Add the sensor and air temperature and a timestamp.
 5. Move on.
 
-**Drift sentinels.** A sentinel (letter `S`) is a capture of whatever target is mounted at that point of the pose list, centered at the reference station, Z = 800 mm (`Z_REFERENCE_MM`), fronto-parallel, with 30 frames (`SENTINEL_FRAMES`). The planner puts sentinel rows in the list before the first pose of series A, every 60 minutes by its estimate of the clock (`DRIFT_SENTINEL_INTERVAL_MIN`), and after the last pose of each series. The row names the target that is mounted at that point (`target_id`, `gap_mm`). The sentinel after the last pose of a series is captured on the target mounted at that moment, so no target is swapped for a sentinel and none is re-mounted for one. T2 serves wherever it is mounted anyway: the sentinels before and after series A and after series Z are on T2. The first sentinel after each mount is that target's reference, and the analysis measures the drift of that target against it (the row's notes say `mount_reference`). Do each sentinel when its row comes up, even if the real time differs from the planner's estimate; the timestamp in the pose log is what the analysis uses. Name the files from the row and keep them in the `sentinels/` folder (§13). While an optional set that is planned outside the budget is running (the filters-off repeat, the staircase, or the lateral sweep), the planner adds sentinels of its own to that set, on the same rules and with the set's sub-series label and pose numbers (for example, the filters-off repeat's sentinels are numbered from `P1000`). They count with the set in `plan_summary.txt` and in §13, never in the budget of the main plan, and the analysis of the session's drift does not use them, because the sensor is in another configuration or the series is a second pass. The optional separate drift run (§3, Step 4.3) also uses letter `S` and the `sentinels/` folder, but it is not part of this plan: its pose numbers start at `P4000` and its sub-series is `drift_run`.
+**Drift sentinels.** A sentinel (letter `S`) is a capture of whatever target is mounted at that point of the pose list, centered at the reference station, Z = 800 mm (`Z_REFERENCE_MM`), fronto-parallel, with 30 frames (`SENTINEL_FRAMES`). The planner puts sentinel rows in the list before the first pose of series A, every 60 minutes by its estimate of the clock (`DRIFT_SENTINEL_INTERVAL_MIN`), and after the last pose of each series. The row names the target that is mounted at that point (`target_id`, `gap_mm`). The sentinel after the last pose of a series is captured on the target mounted at that moment, so no target is swapped for a sentinel and none is re-mounted for one. T2 serves wherever it is mounted anyway: the sentinels before and after series A and after series Z are on T2. The first sentinel after each mount is that target's reference, and the analysis measures the drift of that target against it (the row's notes say `mount_reference`). Do each sentinel when its row comes up, even if the real time differs from the planner's estimate; the timestamp in the pose log is what the analysis uses. Name the files from the row and keep them in the `sentinels/` folder (§13). The optional separate drift run (§3, Step 4.3) also uses letter `S` and the `sentinels/` folder, but it is not part of this plan: its pose numbers start at `P4000` and its sub-series is `drift_run`.
 
 Do the series in the order of the plan: A, then B, then Z, then C, then D. Do not move the sensor between them. Tell the engineer at once if a series stops early; the later series depend on the earlier ones (Figure 1).
 
@@ -289,7 +276,7 @@ Figure 7. The series Z captures at one station, 800 mm. Left: the step ladder, t
 2. Step ladder. The rungs are multiples of the expected depth quantum at the station: 0.25, 0.5, 1, 2, 4 and 8 times it (`Z_STEP_LADDER_QUANTA`). The expected quantum grows with the square of Z, so the rungs do too: at the indicative geometry they run from 0.1 to 3.1 mm at 400 mm, 0.388 to 12.4 mm at 800 mm and 1.55 to 49.6 mm at 1600 mm. The planner lists the rungs of each station in millimeters in `plan_summary.txt`; use those. No rung is smaller than 0.1 mm (`ROBOT_MIN_RESOLVABLE_MOVE_MM`), the smallest Z move the robot is trusted to make; a smaller multiple is raised to it. The expected quantum, listed in `plan_summary.txt`, uses the Tier-A disparity quantum until analysis A has measured the real one. For each of the 6 step sizes, alternate the target between Z0 (visit A) and Z0 plus the step (visit B) for 10 cycles (A, B, A, B, and so on). Capture 10 frames at each visit. The analysis uses the read-back pose of every visit, not the commanded step, as ground truth for the step. Alternating cancels linear drift. Rows have sub-series `ladder`, with `step_mm` and `visit` filled in. At the farthest station the largest rung carries the plate beyond Z_MAX; the planner notes this in `plan_summary.txt`. Capture it as planned and write in `session_log.md` whether the sensor returned valid depth there.
 3. Ramp. At every station of the ladder, T2 is centered and tilted about H (the horizontal axis, parallel to the stereo baseline) by a small angle, so that the true depth across the visible height of the plate spans 4 expected quanta (`RAMP_QUANTA`). Each image row then lies at one true depth, and the rows step through the quanta. The angle is in the row (`tilt_deg`) and is 0.3 degrees at the nearest station to 3.6 degrees at the farthest. The flange pose in the row already includes it. Capture 50 frames (`FRAMES_PER_RAMP_POSE`) and log the read-back pose (sub-series `ramp`). One capture per station replaces a staircase of small Z moves and does not depend on the robot resolving them. At 400 mm the tilted plate's near edge would come 1.11 mm closer than Z_MIN, so the planner moves the plate center 1.11 mm farther. The station label stays at that station, and the shift is in the row's `notes` (`ramp_center_shift_mm`) and in `plan_summary.txt`. Do not undo it.
 4. No extra capture is needed for the blank windows: the Z0 frames of step 2 serve as the no-step reference for the false-alarm threshold.
-5. Staircase (optional second pass). The engineer decides after the ramp has been analyzed. It is run only when the ramp has measured a quantum of at least 0.1 mm, because the staircase step is never smaller than that. The engineer plans it with `--staircase` (§5). At each reduced station T2 is moved from Z0 to Z0 plus 3 expected quanta (`Z_STAIRCASE_QUANTA`), in steps of the larger of one expected quantum divided by 10 (`Z_STAIRCASE_SUBDIVISION`) and 0.1 mm, with 10 frames per step (sub-series `staircase`). It shows what the static ramp cannot: whether the output moves in quantized steps in time at one pixel, and the hysteresis or the temporal filter's response to motion. `plan_summary.txt` lists the step and the number of steps for each station and says where a step was raised to the floor. The horizontal axis of its analysis is the read-back Z of each step, whose uncertainty is the robot repeatability of 0.05 mm; when the step is smaller than that, the analysis notes it. The staircase is outside the capture budget of §13 (76 poses and 780 frames at the indicative geometry, including the drift sentinel that the planner adds while it runs, §5).
+5. Staircase (optional second pass). The engineer decides after the ramp has been analyzed. It is run only when the ramp has measured a quantum of at least 0.1 mm, because the staircase step is never smaller than that. The engineer plans it with `--staircase` (§5). At each reduced station T2 is moved from Z0 to Z0 plus 3 expected quanta (`Z_STAIRCASE_QUANTA`), in steps of the larger of one expected quantum divided by 10 (`Z_STAIRCASE_SUBDIVISION`) and 0.1 mm, with 10 frames per step (sub-series `staircase`). It shows what the static ramp cannot: whether the output moves in quantized steps in time at one pixel, and the hysteresis or the temporal filter's response to motion. `plan_summary.txt` lists the step and the number of steps for each station and says where a step was raised to the floor. The horizontal axis of its analysis is the read-back Z of each step, whose uncertainty is the robot repeatability of 0.05 mm; when the step is smaller than that, the analysis notes it. The staircase is outside the capture budget of §13 (75 poses and 750 frames at the indicative geometry).
 
 The smallest rung (0.1 mm) is twice the robot repeatability of 0.05 mm; the ladder starts there because a rung below the repeatability would be captured and flagged rather than measured. Do not try to correct the robot pose by hand. Log the read-back pose as it is.
 
@@ -383,7 +370,7 @@ What the manifest contains, one line per frame (Table 6):
 
 Table 6. Manifest columns, in the order the manifest module writes them. Rotations are rotation vectors in degrees.
 
-Further columns may follow the ones in Table 6. They carry extra metadata from the plan; at present the achieved field fraction (`field_fraction_achieved`) for a pose placed at a field position, which the analysis of A reads, and the direction the pose was approached from (`approach_direction`) for every pose: `-Z,-H,-V` by the standard rule, `-H`, `+H`, `-V` or `+V` for a lateral-sweep pose (which the analysis of B reads), and `fixed stand` for a capture of the drift run.
+Further columns may follow the ones in Table 6. They carry extra metadata from the plan; at present the achieved field fraction (`field_fraction_achieved`) for a pose placed at a field position. The analysis of A reads it.
 
 The `subseries` column holds one of these labels: main, tilt, remount, filters_off, sentinel, drift_run, nominal, jitter, ladder, ramp, staircase, lateral_sweep, field, open, extended. The labels `ladder`, `ramp`, and `staircase` belong to series Z, `nominal`, `jitter`, and `lateral_sweep` to series B, `field` and `open` to series C, `extended` and `jitter` to series D, and `main` to the main stations of the other series. The labels `filters_off`, `staircase`, `lateral_sweep`, `open`, and `drift_run` mark the optional captures. The module also defines warmup, settle_servo, settle_brakes, mount_check, pilot for the engineer's own checks (Steps 4.3, 4.4, 4.8 and the post check of §10); the planner never writes them. The pose index of the filters-off repeat starts at 1000, so its file names have four digits (§5). The pose index of the optional drift run (§3, Step 4.3) starts at 4000, and its files are in the sentinels folder.
 
@@ -461,14 +448,14 @@ The plan has 7,194 poses and 42,520 frames, about 7.2 hours of robot time. The e
 
 Outside the budget, and not in Table 7, are the optional captures, which the engineer plans only when needed (§5):
 
-- the filters-off repeat of A, B-HV, and B-Z (Step 4.2): 1,030 poses, 25,990 frames, about 1.6 hours;
-- the staircase of series Z (§8, step 5): 76 poses, 780 frames, about 0.09 hours;
-- the lateral sweep of series B (§7, step 6): 41 poses, 1,230 frames, about 0.07 hours;
+- the filters-off repeat of A, B-HV, and B-Z (Step 4.2): 1,027 poses, 25,900 frames, about 1.6 hours;
+- the staircase of series Z (§8, step 5): 75 poses, 750 frames, about 0.08 hours;
+- the lateral sweep of series B (§7, step 6): 40 poses, 1,200 frames, about 0.07 hours;
 - the open-background variant of series C (§9, step 4): 30 poses, 300 frames, about 0.03 hours;
 - the reuse of C frames as D trials (§10, step 5), which takes 1,080 poses out of the D main row instead of adding any;
 - the separate drift run (§3, Step 4.3): 241 captures, 7,230 frames over 8 hours, taken before the session with the robot idle, so no robot time.
 
-The counts of the filters-off repeat, the staircase, and the lateral sweep include the drift sentinels that the planner adds while each runs. The figures are for the indicative geometry and the default plan. The budget also leaves out target swaps, warm-up, the mount checks, the registration time (the registration poses are in the table, but not the solve), and the D post check. Allow two to three working days in total.
+The figures are for the indicative geometry and the default plan. The budget also leaves out target swaps, warm-up, the mount checks, the registration time (the registration poses are in the table, but not the solve), and the D post check. Allow two to three working days in total.
 
 
 ## 14. Running the analyses
@@ -677,15 +664,14 @@ Table 9. The parameters of the procedure, with the values of the default plan.
 
 The code that supports this procedure is the Python package `sensorperf/` in this repository. The command-line tools each import other modules of the package, so they cannot be copied out on their own. Ship the whole `sensorperf/` directory together with `pyproject.toml`, `requirements.txt`, and `tests/`, either as a clone of the repository or as a copy of those items with the directory layout kept.
 
-The tools: `plan_stations` (§5), `register` (§4), `make_manifest` (§11), `check_captures` (§4, Step 4.8; §10 and §12), `simulate` (a synthetic session for practice, appendix C), and `analyze` (§14). Table 10 lists the package files with their line counts and what they do. The design document `docs/design/code_design.md` describes the modules.
+The tools: `plan_stations` (§5), `register` (§4), `make_manifest` (§11), `check_captures` (§10 and §12), `simulate` (a synthetic session for practice, appendix C), and `analyze` (§14). Table 10 lists the package files with their line counts and what they do. The design document `docs/design/code_design.md` describes the modules.
 
 | File | Lines | What it does |
 |---|---:|---|
 | `sensorperf/__init__.py` | 16 | sensorperf: code for the VSX3000 Resolution, Area-Fidelity, Detectability, and Noise Characterization Procedure. |
 | `sensorperf/acquisition/__init__.py` | 1 | sensorperf.acquisition: see the package docstring and docs/design/code_design.md. |
 | `sensorperf/acquisition/check.py` | 526 | Quick-look check of a capture set (Part I of the procedure) and the D pilot post check (Section 8, Step 1; Section 13, Step 2). |
-| `sensorperf/acquisition/mount_check.py` | 385 | The mount check of the procedure, Step 4.8: is a freshly mounted target where the registration says it is? |
-| `sensorperf/acquisition/plan.py` | 2042 | Station and pose planning for Part I of the procedure (Sections 4 to 9). |
+| `sensorperf/acquisition/plan.py` | 1960 | Station and pose planning for Part I of the procedure (Sections 4 to 9). |
 | `sensorperf/acquisition/pose_log.py` | 625 | Robot pose log -> capture manifest (document, Section 9). |
 | `sensorperf/analysis/__init__.py` | 1 | sensorperf.analysis: see the package docstring and docs/design/code_design.md. |
 | `sensorperf/analysis/area.py` | 1594 | Analysis C: true versus sensed area (procedure document, Section 12), Steps 1 to 13. |
@@ -693,15 +679,15 @@ The tools: `plan_stations` (§5), `register` (§4), `make_manifest` (§11), `che
 | `sensorperf/analysis/common.py` | 407 | What every analysis of Part II shares: the registered geometry of a pose (which pixel should see which surface, where the true edges are), the reference planes, |
 | `sensorperf/analysis/detection.py` | 1712 | Analysis D: minimum detectable size at 50, 10 and 5 percent, with a PREDICTED 0 percent point (procedure document, Section 13), Steps 1 to 11, in the Z-sweep de |
 | `sensorperf/analysis/forward_model.py` | 73 | Assembly of ``forward_model_parameters.json`` (document, Section 1 and Section 10 Step 13, Section 14 Step 8): the hand-off from the analyses to the Tier-A forw |
-| `sensorperf/analysis/noise.py` | 1789 | Analysis A: noise versus Z (procedure document, Section 10), on the frames of procedure "A" (the noise-plate series) and the drift sentinels (procedure "S", Ste |
+| `sensorperf/analysis/noise.py` | 1786 | Analysis A: noise versus Z (procedure document, Section 10), on the frames of procedure "A" (the noise-plate series) and the drift sentinels (procedure "S", Ste |
 | `sensorperf/analysis/overlap.py` | 268 | The overlap (scaling) test of the Z-sweep design (redesign note, Section 5), shared by Analysis C (area transfer curves) and Analysis D (detection curves). |
 | `sensorperf/analysis/resolution_depth.py` | 1303 | Analysis B-Z: effective resolution in depth (procedure document, Section 11.2), from the Z-step series (procedure "Z"): the noise plate T2 at a station Z0, a st |
 | `sensorperf/analysis/resolution_lateral.py` | 1304 | Analysis B-HV: effective lateral resolution in H and V (procedure document, Section 11.1), from the edge series (procedure "B"): the raised square T3a and the s |
 | `sensorperf/cli/__init__.py` | 1 | sensorperf.cli: see the package docstring and docs/design/code_design.md. |
 | `sensorperf/cli/analyze.py` | 98 | Command line: run the Part II analyses on a session folder. |
-| `sensorperf/cli/check_captures.py` | 245 | Command line: a quick-look check of a capture session before the long analyses. |
+| `sensorperf/cli/check_captures.py` | 122 | Command line: a quick-look check of a capture session before the long analyses. |
 | `sensorperf/cli/make_manifest.py` | 117 | Command line: build the capture manifest (procedure document, Section 9) from the robot's pose log, the capture files and the plan. |
-| `sensorperf/cli/plan_stations.py` | 199 | Command line: plan the stations and poses of the characterization capture (procedure document, Sections 4 to 9). |
+| `sensorperf/cli/plan_stations.py` | 193 | Command line: plan the stations and poses of the characterization capture (procedure document, Sections 4 to 9). |
 | `sensorperf/cli/register.py` | 192 | Command line: solve the robot-to-sensor registration (procedure document, Section 4, Steps 6 and 7) from the registration observations. |
 | `sensorperf/cli/simulate.py` | 102 | Command line: write a synthetic characterization session. |
 | `sensorperf/features/__init__.py` | 1 | sensorperf.features: see the package docstring and docs/design/code_design.md. |
@@ -715,7 +701,7 @@ The tools: `plan_stations` (§5), `register` (§4), `make_manifest` (§11), `che
 | `sensorperf/geometry/transforms.py` | 95 | Rigid transforms and the rigid fit between two point sets. |
 | `sensorperf/io/__init__.py` | 1 | sensorperf.io: see the package docstring and docs/design/code_design.md. |
 | `sensorperf/io/capture_set.py` | 113 | Frames of one commanded pose loaded together as a stack (adapted from the calibration repository's capture_set.py for the characterization manifest). |
-| `sensorperf/io/manifest.py` | 555 | The capture manifest of the characterization procedure (document, Section 9): one row per captured frame, saying which procedure and target it belongs to, where |
+| `sensorperf/io/manifest.py` | 539 | The capture manifest of the characterization procedure (document, Section 9): one row per captured frame, saying which procedure and target it belongs to, where |
 | `sensorperf/io/matcloud.py` | 404 | Reader/writer for Liberty Reach's ".mc" ("Matrix Cloud") file format. |
 | `sensorperf/io/qt_datastream.py` | 433 | A minimal reader/writer for Qt5's ``QDataStream`` binary encoding (default stream version, which is what ``MC::toFile``/``MC::fromFile`` use -- see ``MC.cpp`` i |
 | `sensorperf/io/session.py` | 143 | The session folder of Section 9 and the small JSON records it holds. |
@@ -774,14 +760,12 @@ options:
                         (A, B-HV and B-Z; Section 4, Step 4.2) after each
                         filters-on series; its poses are labeled filters_off
                         and are listed outside the main budget in
-                        plan_summary.txt, together with the drift sentinels
-                        captured during the repeat
+                        plan_summary.txt
   --staircase           add the optional second pass of the B-Z series, the
                         fine staircase (Section 6.2), at the reduced stations;
                         its poses are labeled staircase and are listed outside
-                        the main budget in plan_summary.txt, with the drift
-                        sentinels captured during it (the ramp and the step
-                        ladder are always planned). To use the disparity
+                        the main budget in plan_summary.txt (the ramp and the
+                        step ladder are always planned). To use the disparity
                         quantum measured by the ramp instead of the assumed
                         one (0.125 px), pass it as tier_a_disparity_quantum_px
                         in the --parameters JSON.
@@ -799,9 +783,7 @@ options:
                         LATERAL_SWEEP_STEP_PX over LATERAL_SWEEP_SPAN_PX (20
                         poses per axis, approached from alternating
                         directions); its poses are labeled lateral_sweep and
-                        are listed outside the main budget in
-                        plan_summary.txt, with the drift sentinels captured
-                        during the sweep
+                        are listed outside the main budget in plan_summary.txt
   --drift-run           add the optional separate drift run (Section 4, Step
                         3): T2 on a FIXED STAND at the reference station, the
                         robot idle, SENTINEL_FRAMES frames every
@@ -887,7 +869,7 @@ options:
 Output of `python3 -m sensorperf.cli.check_captures --help`:
 
 ```
-usage: python3 -m sensorperf.cli.check_captures [-h] [--session DIR]
+usage: python3 -m sensorperf.cli.check_captures [-h] --session DIR
                                                 [--out PATH]
                                                 [--min-valid-fraction MIN_VALID_FRACTION]
                                                 [--border-margin-px BORDER_MARGIN_PX]
@@ -898,29 +880,16 @@ usage: python3 -m sensorperf.cli.check_captures [-h] [--session DIR]
                                                 [--min-plane-pixels MIN_PLANE_PIXELS]
                                                 [--pilot Z_MM]
                                                 [--pilot-subseries LABEL [LABEL ...]]
-                                                [--mount-check FRAMES_OR_FOLDER [FRAMES_OR_FOLDER ...]]
-                                                [--registration PATH]
-                                                [--target ID] [--gap-mm MM]
-                                                [--flange-pose V V V V V V]
-                                                [--targets PATH]
-                                                [--asbuilt PATH]
-                                                [--parameters PATH]
-                                                [--z-tolerance-mm MM]
-                                                [--tilt-tolerance-deg DEG]
-                                                [--frame-check-px PX]
 
 Quick-look check of a capture session: valid fraction, border contact and the
-front and back plane fits against the registered target; or (with --pilot) the
-post check of Section 8, Step 1; or (with --mount-check) the mount check of
-Step 4.8 of a freshly mounted target.
+front and back plane fits against the registered target, or (with --pilot) the
+post check of Section 8, Step 1.
 
 options:
   -h, --help            show this help message and exit
   --session DIR         session folder with sensor_config.json, targets.json
-                        and manifest.csv (required unless --mount-check is
-                        given)
-  --out PATH            write a JSON report here (with --mount-check: instead
-                        of mount_check.json next to the frames)
+                        and manifest.csv
+  --out PATH            write a JSON report here
   --min-valid-fraction MIN_VALID_FRACTION
                         flag a pose in which fewer than this fraction of the
                         expected target pixels were read
@@ -946,46 +915,6 @@ options:
   --pilot-subseries LABEL [LABEL ...]
                         sub-series of the C poses used by --pilot (default:
                         jitter)
-
-mount check (Section 4, Step 4.8):
-  python3 -m sensorperf.cli.check_captures --mount-check FRAMES_OR_FOLDER
-  --registration registration.json --target ID
-
-  --mount-check FRAMES_OR_FOLDER [FRAMES_OR_FOLDER ...]
-                        check a freshly mounted target from the depth frames
-                        (.mc files, or the folder that holds them) captured at
-                        the reference station: fit its front plane and compare
-                        Z and tilt with the registered pose, locate a feature
-                        and compare its H and V with the as-built datum
-                        offsets; prints PASS or FAIL per check and writes
-                        mount_check.json next to the frames
-  --registration PATH   registration.json (required with --mount-check);
-                        targets.json, targets_asbuilt.csv and parameters.json
-                        are looked for in its folder
-  --target ID           id of the mounted target, e.g. T2, T3a, T3b, T4, T5
-                        (required with --mount-check)
-  --gap-mm MM           gap of the mounted target when it differs from the one
-                        in targets.json
-  --flange-pose V V V V V V
-                        read-back flange pose of the capture (robot_x_mm
-                        robot_y_mm robot_z_mm robot_rx_deg robot_ry_deg
-                        robot_rz_deg; mm and a rotation vector in degrees, as
-                        in the manifest); without it the registered pose is
-                        the commanded one, the target centered and fronto-
-                        parallel at MOUNT_CHECK_DEPTH_MM
-  --targets PATH        target definitions (default: targets.json next to
-                        registration.json)
-  --asbuilt PATH        as-built record (default: targets_asbuilt.csv next to
-                        registration.json, if present)
-  --parameters PATH     parameter overrides (default: parameters.json next to
-                        registration.json, if present)
-  --z-tolerance-mm MM   largest Z difference from the registered pose (default
-                        REGISTRATION_RESIDUAL_ACCEPT_MM, 0.15)
-  --tilt-tolerance-deg DEG
-                        largest tilt difference from the registered pose
-                        (default MOUNT_TILT_TOLERANCE_DEG, 0.05)
-  --frame-check-px PX   largest H or V difference of the located feature
-                        (default FRAME_CHECK_PX, 0.5)
 ```
 
 Output of `python3 -m sensorperf.cli.simulate --help`:
