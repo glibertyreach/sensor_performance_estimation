@@ -9,10 +9,10 @@ VSX3000 performance-testing procedure. Decisions settled by the characterization
 | 1 | Targets | settled | T2 noise plate 400 x 400 mm; T3a raised square 160 mm; T3b square window 160 mm; T4 disk plate (7.0, 19.7, 55.8 mm disks, 3 blank sites, 1 post site); T5 cutout plate (same ladder, 3 blank sites); gaps 15 and 60 mm by spacers (specification Sections 3.2 and 3.3) |
 | 2 | Size tolerance | settled | fabrication tolerances left to the fabricator; every feature measured as built (diameter, land, bevel, position, datum offset) with uncertainties into targets_asbuilt.csv |
 | 3 | Form | settled | plates flat to 0.05 mm; land 0.2 mm or less; bevel from the back, 45 degrees passes at the indicative geometry |
-| 4 | How size is measured | ask (Q2) | optical comparator or calibrated microscope named in the specification; in-house availability unknown |
+| 4 | How size is measured | answered (Q2) | fabricator's inspection report; in-house only plate flatness (run-out gauge), width and length; sphere diameter by micrometer if a sphere is ever used |
 | 5 | Finish | settled | one finish on every front and back surface, bead-blasted aluminum or matte coating, mid-range IR reflectance, recorded |
 | 6 | Mounting | settled | dowel-pinned quick-change adapter, re-mount repeatability 0.02 mm, every target on the same dowel datum; posts 2 mm or thinner behind the disks and the raised square |
-| 7 | Robot flange | ask (Q1) | ISO 9409-1-50-4-M6 assumed until the robot is named |
+| 7 | Robot flange | answered (Q1) | robot TBD; drawn to ISO 9409-1-50-4-M6 with the confirm note; documents agnostic of the model |
 | 8 | Robot accuracy | settled | repeatability 0.05 mm (ISO 9283), read-back pose at 0.01 mm time-stamped against the frames; documented specification, not a calibration |
 | 9 | Independent check | settled | no ball bar; registration residual and plane fits are the robot-independent checks; the bar is never mentioned |
 | 10 | Capture trigger | settled | the VSX3000 SDK with the LRVisionLibs MatCloud reader and the existing robot interface |
@@ -27,5 +27,6 @@ VSX3000 performance-testing procedure. Decisions settled by the characterization
 
 Questions asked, in order, and the answers:
 
-- Q1 (robot and flange): pending.
-- Q2 (metrology and fabrication route): pending.
+- Q1 (robot and flange), Neil 2026-10-07: the robot model is unknown (TBD); the specification stays agnostic of the robot model. Consequence: the adapter is drawn to ISO 9409-1-50-4-M6 with the boxed confirm note, as in the related projects; no robot is named anywhere.
+- Q2 (metrology), Neil 2026-10-07: no as-built measurements of the targets in-house beyond a sphere's diameter with a micrometer, a plate's flatness with a run-out gauge, and a plate's width and length. Resolution proposed and agreed: the fabricator delivers an inspection report (feature diameter, land, bevel, position from the dowel datum) that fills targets_asbuilt.csv; a value not reported falls back to the nominal with the drawing tolerance as its uncertainty, so the drawings carry tolerances; in-house the technician records each plate's flatness, width and length. This changes the specification's Section 3.3 (as-built record) and is to be executed there as well.
+- Related projects named by Neil for consistency and reuse: "Binocular depth sensor calibration" = glibertyreach/depth_calibration_from_spherical_target (stage-1 decks, drawings SC1-01 to SC1-06, cost pattern); "Sensor registration via plane correspondence" = glibertyreach/plane_plane_registration (procedure with the same Section 1 structure, costs.py, decks, the consistency-pass skill). Equipment and procedures are reused from them wherever they fit.
