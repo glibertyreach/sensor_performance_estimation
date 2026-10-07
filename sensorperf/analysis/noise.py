@@ -944,7 +944,9 @@ def session_sentinels(records: Sequence[FrameRecord]) -> list[FrameRecord]:
     """The drift sentinels of the session: the frames of procedure S of the main plan (sub-series ``sentinel``). Left out are
     the captures of the optional separate drift run (sub-series ``drift_run``), which has no mount and is analyzed on its own
     (:func:`analyze_drift_run`), and the sentinels captured during another optional set (filters-off repeat, staircase,
-    lateral sweep), which belong to that set: the sensor is not in the configuration of the main plan then."""
+    lateral sweep, open-background variant of C), which belong to that set: the sensor is not in the configuration of the
+    main plan then (for the open-background variant the cutout plate has no back plate). Every set named in
+    ``OPTIONAL_SUBSERIES`` is left out the same way, so a new optional set needs no change here."""
     return [r for r in records if r.procedure == PROCEDURE_SENTINEL and r.subseries not in OPTIONAL_SUBSERIES]
 
 

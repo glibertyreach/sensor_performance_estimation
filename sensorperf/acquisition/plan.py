@@ -83,7 +83,7 @@ from sensorperf.geometry.targets import (
 )
 from sensorperf.geometry.transforms import RigidTransform
 from sensorperf.io.manifest import (
-    APPROACH_DIRECTION_KEY, APPROACH_FIXED_STAND, APPROACH_STANDARD, DRIFT_RUN_POSE_INDEX_BASE, FIELD_FRACTION_ACHIEVED_KEY, FILTERS_OFF_POSE_INDEX_BASE, FIXED_STAND_KEY, LATERAL_SWEEP_POSE_INDEX_BASE, SENTINEL_MOUNT_REFERENCE_KEY,
+    APPROACH_DIRECTION_KEY, APPROACH_FIXED_STAND, APPROACH_STANDARD, DRIFT_RUN_POSE_INDEX_BASE, FIELD_FRACTION_ACHIEVED_KEY, FILTERS_OFF_POSE_INDEX_BASE, FIXED_STAND_KEY, LATERAL_SWEEP_POSE_INDEX_BASE, OPEN_BACKGROUND_POSE_INDEX_BASE, SENTINEL_MOUNT_REFERENCE_KEY,
     OPTIONAL_SUBSERIES, STAIRCASE_POSE_INDEX_BASE, SUBSERIES_DRIFT_RUN, SUBSERIES_EXTENDED, SUBSERIES_FIELD, SUBSERIES_FILTERS_OFF, SUBSERIES_JITTER, SUBSERIES_LATERAL_SWEEP, SUBSERIES_LADDER, SUBSERIES_MAIN,
     SUBSERIES_NOMINAL, SUBSERIES_OPEN, SUBSERIES_RAMP, SUBSERIES_REMOUNT, SUBSERIES_SENTINEL, SUBSERIES_STAIRCASE, SUBSERIES_TILT,
     TARGET_POSE_COLUMNS, TILT_AXIS_H, TILT_AXIS_V, VISIT_A, VISIT_B, format_file_name, format_flag, pose_to_six,
@@ -99,8 +99,9 @@ from sensorperf.parameters import (
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-# The pose-index bases of the optional sets outside the budget (FILTERS_OFF_POSE_INDEX_BASE, STAIRCASE_POSE_INDEX_BASE and
-# LATERAL_SWEEP_POSE_INDEX_BASE) and the file-name widths are defined together in ``sensorperf.io.manifest``.
+# The pose-index bases of the optional sets outside the budget (FILTERS_OFF_POSE_INDEX_BASE, STAIRCASE_POSE_INDEX_BASE,
+# LATERAL_SWEEP_POSE_INDEX_BASE, DRIFT_RUN_POSE_INDEX_BASE and OPEN_BACKGROUND_POSE_INDEX_BASE) and the file-name widths are
+# defined together in ``sensorperf.io.manifest``.
 SEED_UPPER_BOUND = 2 ** 31 - 1
 """Exclusive upper bound of the seeds drawn from the master generator (a 31-bit
 integer, so a seed survives a CSV round trip and any 32-bit consumer)."""
@@ -147,17 +148,20 @@ frames, 7.18 h). The B-Z series has 369 poses: the step ladder (6 rungs x 10 cyc
 stations, 360 poses, 3,600 frames) and the ramp (one pose at each of the nine stations, 450 frames). The A series has
 47 main poses (nine ladder stations at five field positions plus the two legacy depths at the center), 16 tilt poses (the 800 and 1600 mm stations; every tilt at 400 mm is infeasible) and the re-mount check, and the
 sentinels (11, on the mounted target) are part of the totals. plan_summary.txt compares the plan it summarizes with these
-numbers, so a change of the parameters shows up as a ratio away from 1. The filters-off repeat and the optional B-Z
-staircase are never part of these totals (see ``capture_budget``)."""
+numbers, so a change of the parameters shows up as a ratio away from 1. The optional sets (the filters-off repeat, the B-Z
+staircase, the B-HV lateral sweep, the drift run and the open-background variant of C) and the drift sentinels captured
+during them are never part of these totals (see ``capture_budget``)."""
 
 # OPTIONAL_SUBSERIES (imported from io.manifest): the filters-off repeat, the optional B-Z staircase, the optional B-HV
-# lateral sweep and the optional separate drift run, all outside the main (Section 9) budget. The captures of procedure
+# lateral sweep, the optional separate drift run and the optional open-background variant of C, all outside the main
+# (Section 9) budget. The captures of procedure
 # letter S among them (the drift run, and the drift sentinels captured during one of the other sets) are kept out of the
 # sentinel row of the main budget by their sub-series.
 OPTIONAL_POSE_INDEX_BASES = {SUBSERIES_FILTERS_OFF: FILTERS_OFF_POSE_INDEX_BASE,
                              SUBSERIES_STAIRCASE: STAIRCASE_POSE_INDEX_BASE,
                              SUBSERIES_LATERAL_SWEEP: LATERAL_SWEEP_POSE_INDEX_BASE,
-                             SUBSERIES_DRIFT_RUN: DRIFT_RUN_POSE_INDEX_BASE}
+                             SUBSERIES_DRIFT_RUN: DRIFT_RUN_POSE_INDEX_BASE,
+                             SUBSERIES_OPEN: OPEN_BACKGROUND_POSE_INDEX_BASE}
 """The pose-index base of each optional sub-series (all of them outside the Section 9 budget; ranges in ``io.manifest``).
 The drift sentinels captured during an optional set count their pose indices from the base of that set."""
 
@@ -1083,10 +1087,13 @@ def plan_area_series(params: CharacterizationParameters, geometry: SensorGeometr
     at the four off-axis field positions, FIELD_SUBSERIES_POSES_AREA poses each (sub-series "field"; a
     position that does not fit is pulled inward, Section 5 Step 1; the position order is shuffled).
     Step 4, open-background variant (``open_background=True``, cutout arrays only): at Z = Z_REFERENCE_MM,
-    back plate removed (gap None), Step 2 repeated (sub-series "open"). Step 5 (drift sentinels) is
+    back plate removed (gap None), Step 2 repeated (sub-series "open"). The variant is an optional set outside the Section 9
+    budget, like the staircase: its poses have pose indices from OPEN_BACKGROUND_POSE_INDEX_BASE (a four-digit range of their
+    own), and :func:`insert_sentinels` gives it a sentinel clock of its own. Step 5 (drift sentinels) is
     :func:`insert_sentinels`."""
     target_set = _targets(params, geometry, targets)
     counter = _PoseCounter()
+    open_counter = _PoseCounter(OPEN_BACKGROUND_POSE_INDEX_BASE)      # the optional variant's own index range
     camera = camera_of(geometry)
     plan: list[PlannedCapture] = []
     z_ref = params.z_reference_mm
@@ -1124,7 +1131,7 @@ def plan_area_series(params: CharacterizationParameters, geometry: SensorGeometr
         # Step 4: open-background variant for the cutout arrays (back plate removed).
         if open_background and target_id in CUTOUT_TARGETS:
             for _ in range(params.phase_jitter_poses_area):
-                plan.append(_jitter_capture(counter, params, geometry, rng, PROCEDURE_AREA, target_id, None, z_ref,
+                plan.append(_jitter_capture(open_counter, params, geometry, rng, PROCEDURE_AREA, target_id, None, z_ref,
                                             FIELD_POSITION_CENTER, params.frames_per_area_pose, SUBSERIES_OPEN,
                                             0.0, 0.0))
     return _renumber(plan)
@@ -1359,8 +1366,8 @@ def insert_sentinels(plan: list[PlannedCapture], params: CharacterizationParamet
         time has passed since the previous sentinel began, on the mounted target;
       * after the last capture (the end of the last series).
 
-    The optional sets (``OPTIONAL_SUBSERIES``: the filters-off repeat, the staircase, the lateral sweep) are outside the
-    main budget, so the sentinels captured during one belong to that set and never to the main plan. Each clock runs on its
+    The optional sets (``OPTIONAL_SUBSERIES``: the filters-off repeat, the staircase, the lateral sweep, the open-background
+    variant of C; the drift run has no sentinels) are outside the main budget, so the sentinels captured during one belong to that set and never to the main plan. Each clock runs on its
     own: the MAIN clock walks the captures of the main plan only (the sentinels it places are exactly those of a plan without
     the optional sets, so the Section 9 totals do not depend on which optional sets are planned), and each optional set
     has a clock of its own that walks the captures of that set only (the set's captures may lie in several places of the
@@ -1566,9 +1573,10 @@ def capture_budget(plan: Sequence[PlannedCapture], frame_rate_hz: float, move_se
                    c_reuse: CReuse | None = None) -> list[BudgetRow]:
     """The Section 9 table: poses, frames and robot hours per series, in the order of the procedure.
     "The estimate assumes 10 frames/s and 3 s per move plus settle": hours = (poses x move_settle_s + frames /
-    frame_rate_hz) / 3600. Series without poses are omitted. The optional passes, the filters-off repeat (sub-series
-    "filters_off") and the B-Z staircase (sub-series "staircase"), are outside the main budget and are not counted here;
-    see :func:`filters_off_budget`, :func:`staircase_budget` and :func:`lateral_sweep_budget`.
+    frame_rate_hz) / 3600. Series without poses are omitted. The optional sets (``OPTIONAL_SUBSERIES``: the filters-off
+    repeat, the B-Z staircase, the B-HV lateral sweep, the drift run and the C open-background variant) are outside the main
+    budget and are not counted here, nor are the drift sentinels captured during them; see :func:`filters_off_budget`,
+    :func:`staircase_budget`, :func:`lateral_sweep_budget` and :func:`open_background_budget`.
 
     The budget is computed WITHOUT the reuse of C first frames (Section 9: "the budget assumes no reuse"): when the plan
     was made with ``reuse_c_first_frames`` and the caller passes ``c_reuse`` (``diagnostics.c_reuse``), the D poses and
@@ -1602,6 +1610,13 @@ def lateral_sweep_budget(plan: Sequence[PlannedCapture], frame_rate_hz: float, m
     """The same table for the optional B-HV lateral sweep alone (Section 6.1, second pass), which is outside the main
     budget. Empty when the plan has no lateral-sweep poses."""
     return _budget_rows([c for c in plan if c.subseries == SUBSERIES_LATERAL_SWEEP], frame_rate_hz, move_settle_s)
+
+
+def open_background_budget(plan: Sequence[PlannedCapture], frame_rate_hz: float, move_settle_s: float) -> list[BudgetRow]:
+    """The same table for the optional open-background variant of series C alone (Section 7, Step 4), which is outside the
+    main budget. Its Sentinels row holds the drift sentinels captured during the variant. Empty when the plan has no
+    open-background poses."""
+    return _budget_rows([c for c in plan if c.subseries == SUBSERIES_OPEN], frame_rate_hz, move_settle_s)
 
 
 def _budget_rows(members_of_plan: Sequence[PlannedCapture], frame_rate_hz: float,
@@ -1902,6 +1917,11 @@ def plan_summary_text(plan: Sequence[PlannedCapture], params: CharacterizationPa
             lines += ["", "Outside the main budget (optional B-HV lateral sweep, Section 6.1, second pass; not in the "
                           "totals above or in the comparison with the document's estimate):",
                       format_budget_table(sweep_rows), _set_sentinel_line(plan, SUBSERIES_LATERAL_SWEEP)]
+        open_rows = open_background_budget(plan, rate, params.move_and_settle_time_s)
+        if open_rows:
+            lines += ["", "Outside the main budget (optional open-background variant of C, Section 7, Step 4; not in the "
+                          "totals above or in the comparison with the document's estimate):",
+                      format_budget_table(open_rows), _set_sentinel_line(plan, SUBSERIES_OPEN)]
     if diagnostics is not None and diagnostics.c_reuse is not None:
         reuse = diagnostics.c_reuse
         d_planned = sum(1 for c in plan if c.procedure == PROCEDURE_DETECTION)

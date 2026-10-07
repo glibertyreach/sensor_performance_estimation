@@ -1,0 +1,31 @@
+# Procedure-docs pass: decision log (opened 2026-10-07)
+
+Method: the procedure-docs skill (scope of work section 1a to 1f, shop drawings, two decks), applied to the
+VSX3000 performance-testing procedure. Decisions settled by the characterization specification are marked
+"settled"; the rest are asked one or two at a time and the answers logged here.
+
+| # | Topic | Status | Answer / source |
+|---|---|---|---|
+| 1 | Targets | settled | T2 noise plate 400 x 400 mm; T3a raised square 160 mm; T3b square window 160 mm; T4 disk plate (7.0, 19.7, 55.8 mm disks, 3 blank sites, 1 post site); T5 cutout plate (same ladder, 3 blank sites); gaps 15 and 60 mm by spacers (specification Sections 3.2 and 3.3) |
+| 2 | Size tolerance | settled | fabrication tolerances left to the fabricator; every feature measured as built (diameter, land, bevel, position, datum offset) with uncertainties into targets_asbuilt.csv |
+| 3 | Form | settled | plates flat to 0.05 mm; land 0.2 mm or less; bevel from the back, 45 degrees passes at the indicative geometry |
+| 4 | How size is measured | ask (Q2) | optical comparator or calibrated microscope named in the specification; in-house availability unknown |
+| 5 | Finish | settled | one finish on every front and back surface, bead-blasted aluminum or matte coating, mid-range IR reflectance, recorded |
+| 6 | Mounting | settled | dowel-pinned quick-change adapter, re-mount repeatability 0.02 mm, every target on the same dowel datum; posts 2 mm or thinner behind the disks and the raised square |
+| 7 | Robot flange | ask (Q1) | ISO 9409-1-50-4-M6 assumed until the robot is named |
+| 8 | Robot accuracy | settled | repeatability 0.05 mm (ISO 9283), read-back pose at 0.01 mm time-stamped against the frames; documented specification, not a calibration |
+| 9 | Independent check | settled | no ball bar; registration residual and plane fits are the robot-independent checks; the bar is never mentioned |
+| 10 | Capture trigger | settled | the VSX3000 SDK with the LRVisionLibs MatCloud reader and the existing robot interface |
+| 11 | Sensor processing | settled | production configuration recorded in sensor_config.json; optional filters-off repeat |
+| 12 | Robot program | settled | written with Claude Code once the robot model and controller are settled |
+| 13 | Items not needed | settled | lighting control (enclosed laboratory, constant lighting); file transfer |
+| 14 | Sensor mount | ask (Q3) | the specification requires a rigid stand separate from the robot; whether an existing drawing exists is unknown |
+| 15 | Drift-run fixed stand | ask (Q3) | a stand for T2 at 800 mm, robot idle; drawn or bought is open |
+| 16 | Decks | settled | two: procurement and mechanical build; test procedure and robot program |
+| 17 | Status slides | settled | none |
+| 18 | Notes PDF | ask at delivery | offered once when the decks exist |
+
+Questions asked, in order, and the answers:
+
+- Q1 (robot and flange): pending.
+- Q2 (metrology and fabrication route): pending.

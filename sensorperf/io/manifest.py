@@ -106,16 +106,20 @@ station (Section 6.1, Step 6)."""
 SUBSERIES_FIELD = "field"
 """The C field sub-series (Section 7, Step 3)."""
 SUBSERIES_OPEN = "open"
-"""The C open-background variant (Section 7, Step 4)."""
+"""The OPTIONAL C open-background variant (Section 7, Step 4; ``plan_stations --open-background``): the cutout array without
+its back plate at the reference station. It is outside the Section 9 budget, so its poses, and the drift sentinels captured
+while it runs, take the pose-index range of their own that starts at OPEN_BACKGROUND_POSE_INDEX_BASE."""
 SUBSERIES_PILOT = "pilot"
 """A D pilot frame (the post check, Section 8, Step 1)."""
 SUBSERIES_EXTENDED = "extended"
 """The D extended trials of the low point (D_5) at the farthest stations (Section 8)."""
 
-OPTIONAL_SUBSERIES = (SUBSERIES_FILTERS_OFF, SUBSERIES_STAIRCASE, SUBSERIES_LATERAL_SWEEP, SUBSERIES_DRIFT_RUN)
-"""The optional sets, all outside the Section 9 budget: the filters-off repeat, the B-Z staircase, the B-HV lateral sweep
-and the separate drift run. A drift sentinel captured while one of these sets is running carries the set's label as its
-sub-series (and takes its pose-index range), so that it counts with the set and never in the main budget."""
+OPTIONAL_SUBSERIES = (SUBSERIES_FILTERS_OFF, SUBSERIES_STAIRCASE, SUBSERIES_LATERAL_SWEEP, SUBSERIES_DRIFT_RUN,
+                      SUBSERIES_OPEN)
+"""The optional sets, all outside the Section 9 budget: the filters-off repeat, the B-Z staircase, the B-HV lateral sweep,
+the separate drift run and the C open-background variant. A drift sentinel captured while one of these sets is running
+carries the set's label as its sub-series (and takes its pose-index range), so that it counts with the set and never in the
+main budget."""
 
 VISIT_A = "A"
 VISIT_B = "B"
@@ -209,6 +213,10 @@ POSE_INDEX_DIGITS digits, and POSE_INDEX_DIGITS_OPTIONAL digits for the optional
 #     optional B-Z staircase     P2000 to P2999   (Section 6.2, second pass)
 #     optional B-HV lateral sweep P3000 to P3999  (Section 6.1, Step 6)
 #     optional drift run          P4000 to P4999  (Section 4, Step 3; sentinels folder, sub-series drift_run)
+#     optional open-background    P5000 to P5999  (Section 7, Step 4; the C poses without the back plate, sub-series open)
+#     variant of C
+# The drift sentinels captured while an optional set runs take the range of that set (this list is the one place that
+# names the ranges; docs/design/code_design.md and the procedure refer to it).
 OPTIONAL_POSE_INDEX_RANGE_SIZE = 1000
 """Number of pose indices reserved for the main plan and for each optional set. The B-Z series has up to about 150 poses at
 one station (ladder, ramp), the staircase about 30 and the lateral sweep 40, so each range is wide enough."""
@@ -223,8 +231,11 @@ DRIFT_RUN_POSE_INDEX_BASE = 4 * OPTIONAL_POSE_INDEX_RANGE_SIZE
 """First pose index of the optional drift run (Section 4, Step 3): the pose index counts its captures from here, so that a
 capture never shares a pose key with an in-session sentinel at the same station (the run has about 240 captures, within the
 range)."""
+OPEN_BACKGROUND_POSE_INDEX_BASE = 5 * OPTIONAL_POSE_INDEX_RANGE_SIZE
+"""First pose index of the optional open-background variant of series C (Section 7, Step 4;
+``plan_stations --open-background``): its poses, and the drift sentinels captured while it runs, count from here."""
 OPTIONAL_POSE_INDEX_BASES = (FILTERS_OFF_POSE_INDEX_BASE, STAIRCASE_POSE_INDEX_BASE, LATERAL_SWEEP_POSE_INDEX_BASE,
-                             DRIFT_RUN_POSE_INDEX_BASE)
+                             DRIFT_RUN_POSE_INDEX_BASE, OPEN_BACKGROUND_POSE_INDEX_BASE)
 """The first pose index of each optional set; the lowest of them is where file names switch to four digits."""
 FOUR_DIGIT_POSE_INDEX_MIN = min(OPTIONAL_POSE_INDEX_BASES)
 """Pose indices from this one on are written with POSE_INDEX_DIGITS_OPTIONAL digits in file names."""

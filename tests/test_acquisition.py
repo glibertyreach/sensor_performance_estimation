@@ -31,7 +31,7 @@ from sensorperf.acquisition.check import (
 from sensorperf.acquisition.plan import (
     DOCUMENT_ESTIMATE_FRAMES, DOCUMENT_ESTIMATE_HOURS, DOCUMENT_ESTIMATE_POSES, PLAN_CSV_NAME, PLAN_FIGURE_NAME, PLAN_SUMMARY_NAME, PlanDiagnostics, plan_summary_text,
     PlannedCapture, SERIES_ORDER, TIER_A_DISPARITY_QUANTUM_PX, budget_total, capture_budget, capture_duration_s,
-    camera_of, filters_off_budget, fit_violation_px, format_budget_table, insert_sentinels, lateral_sweep_budget, staircase_budget, jitter_offset_mm, place_in_field,
+    camera_of, filters_off_budget, open_background_budget, fit_violation_px, format_budget_table, insert_sentinels, lateral_sweep_budget, staircase_budget, jitter_offset_mm, place_in_field,
     plan_detection_series, plan_drift_run, plan_edge_series, plan_full_session, plan_noise_series, plan_registration,
     plan_zstep_series, read_plan_csv, write_plan, APPROACH_FROM_BELOW, MIN_POSE_LOG_DECIMALS,
     count_sentinel_remounts, tilt_is_feasible, tilt_near_edge_mm,
@@ -46,7 +46,7 @@ from sensorperf.geometry.targets import fronto_parallel_pose, make_standard_targ
 from sensorperf.geometry.transforms import RigidTransform
 from sensorperf.io.manifest import (
     APPROACH_DIRECTION_KEY, APPROACH_FIXED_STAND, APPROACH_STANDARD, DRIFT_RUN_POSE_INDEX_BASE, FIELD_FRACTION_ACHIEVED_KEY, FILTERS_OFF_POSE_INDEX_BASE, FIXED_STAND_KEY, FOUR_DIGIT_POSE_INDEX_MIN, FrameRecord,
-    LATERAL_SWEEP_POSE_INDEX_BASE, OPTIONAL_POSE_INDEX_RANGE_SIZE, OPTIONAL_SUBSERIES, SENTINEL_MOUNT_REFERENCE_KEY, STAIRCASE_POSE_INDEX_BASE,
+    LATERAL_SWEEP_POSE_INDEX_BASE, OPEN_BACKGROUND_POSE_INDEX_BASE, OPTIONAL_POSE_INDEX_RANGE_SIZE, OPTIONAL_SUBSERIES, SENTINEL_MOUNT_REFERENCE_KEY, STAIRCASE_POSE_INDEX_BASE,
     SUBSERIES_DRIFT_RUN, SUBSERIES_FIELD, SUBSERIES_JITTER, VISIT_A, VISIT_B, format_file_name, parse_file_name, parse_flag, write_manifest_csv,
 )
 from sensorperf.features.planes import plane_depth_image
@@ -143,8 +143,11 @@ def test_optional_variants_keep_keys_unique():
     assert off_by_series["B"] == sum(1 for c in plan if c.procedure == "B" and c.subseries in ("nominal", "jitter"))
     assert off_by_series["Z"] == sum(1 for c in plan if c.procedure == "Z" and c.subseries in ("ladder", "ramp"))
     assert off_by_series["B"] > 0 and off_by_series["Z"] > 0
-    open_poses = [c for c in plan if c.subseries == "open"]
+    # The variant's poses (its drift sentinels share the sub-series label but are procedure S) have a range of their own.
+    open_poses = [c for c in plan if c.subseries == "open" and c.procedure != PROCEDURE_SENTINEL]
     assert len(open_poses) == PARAMS.phase_jitter_poses_area
+    assert all(c.pose_index >= OPEN_BACKGROUND_POSE_INDEX_BASE for c in open_poses)
+    assert any(c.subseries == "open" and c.procedure == PROCEDURE_SENTINEL for c in plan)
     assert all(c.gap_mm is None and c.station_z_mm == PARAMS.z_reference_mm for c in open_poses)
     assert {c.target_id for c in open_poses} == {"T5"}
 
@@ -1725,16 +1728,18 @@ def test_every_pose_records_its_approach_direction(tmp_path: Path):
 
 def test_optional_set_sentinels_belong_to_the_set():
     """Sentinels of an optional set (F6): the drift sentinels captured during an optional set (filters-off repeat, staircase,
-    lateral sweep) carry the set's sub-series label and pose-index range, count in the set's own "outside the main budget"
+    lateral sweep, open-background variant of C) carry the set's sub-series label and pose-index range, count in the set's own "outside the main budget"
     table and its sentinel line of plan_summary.txt, and never in the main ``capture_budget``. The main sentinels are those
     of a plan without the optional sets, so the totals stay 7,194 poses, 42,520 frames and 7.18 h with every optional flag on
     (the filters-off repeat alone used to add two sentinels to the main budget clock)."""
     args = (GEOMETRY.frame_rate_hz, PARAMS.move_and_settle_time_s)
     flags = {"filters-off": dict(filters_off=True), "staircase": dict(staircase=True), "lateral sweep": dict(lateral_sweep=True),
-             "all": dict(filters_off=True, staircase=True, lateral_sweep=True, drift_run=True)}
+             "open background": dict(open_background=True),
+             "all": dict(filters_off=True, staircase=True, lateral_sweep=True, drift_run=True, open_background=True)}
     sets = {"filters-off": ("filters_off", FILTERS_OFF_POSE_INDEX_BASE, filters_off_budget),
             "staircase": ("staircase", STAIRCASE_POSE_INDEX_BASE, staircase_budget),
-            "lateral sweep": ("lateral_sweep", LATERAL_SWEEP_POSE_INDEX_BASE, lateral_sweep_budget)}
+            "lateral sweep": ("lateral_sweep", LATERAL_SWEEP_POSE_INDEX_BASE, lateral_sweep_budget),
+            "open background": ("open", OPEN_BACKGROUND_POSE_INDEX_BASE, open_background_budget)}
     for name, kwargs in flags.items():
         plan = plan_full_session(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), **kwargs)
         # The main budget is the document's estimate whatever optional sets are planned.
@@ -1755,6 +1760,9 @@ def test_optional_set_sentinels_belong_to_the_set():
             own = [c for c in plan if c.procedure == PROCEDURE_SENTINEL and c.subseries == label]
             assert own and all(c.pose_index >= pose_base for c in own), (name, set_name)
             assert all(c.pose_index < pose_base + OPTIONAL_POSE_INDEX_RANGE_SIZE for c in own)
+            # The poses of the set lie in its range too (the sentinels share the sub-series label of the set).
+            assert all(pose_base <= c.pose_index < pose_base + OPTIONAL_POSE_INDEX_RANGE_SIZE
+                       for c in plan if c.subseries == label)
             # The set's own table has a Sentinels row with exactly these, and its line of the summary reports their count.
             row = next(r for r in budget(plan, *args) if r.procedure == PROCEDURE_SENTINEL)
             assert (row.poses, row.frames) == (len(own), sum(c.frames for c in own))
@@ -1772,8 +1780,26 @@ def test_optional_set_sentinels_belong_to_the_set():
 
 def kwargs_names(kwargs: dict) -> set[str]:
     """The optional sets a ``plan_full_session`` keyword set asks for, by the names used in the test above."""
-    names = {"filters_off": "filters-off", "staircase": "staircase", "lateral_sweep": "lateral sweep"}
+    names = {"filters_off": "filters-off", "staircase": "staircase", "lateral_sweep": "lateral sweep",
+             "open_background": "open background"}
     return {names[key] for key in kwargs if key in names}
+
+
+def test_open_background_plan_prints_the_document_totals_and_its_own_sentinel_count(tmp_path: Path, capsys):
+    """The command line with --open-background: the variant is outside the Section 9 budget, so the main budget still reads
+    7,194 poses, 42,520 frames and 7.18 h, and the variant's table and sentinel line report its own sentinels."""
+    assert plan_cli.main(["--out", str(tmp_path), "--open-background"]) == 0
+    text = capsys.readouterr().out
+    assert "Total                7,194   42,520          7.18" in text
+    assert "Document estimate: 7,194 poses, 42,520 frames, 7.18 h. This plan: 7,194 poses (1.00 x), 42,520 frames (1.00 x)" in text
+    block = text[text.index("Outside the main budget (optional open-background variant"):]
+    assert "Sentinels" in block and "Drift sentinels captured during this set" in block
+    plan = read_plan_csv(tmp_path / PLAN_CSV_NAME)
+    own = [c for c in plan if c.procedure == PROCEDURE_SENTINEL and c.subseries == "open"]
+    assert own and all(OPEN_BACKGROUND_POSE_INDEX_BASE <= c.pose_index
+                       < OPEN_BACKGROUND_POSE_INDEX_BASE + OPTIONAL_POSE_INDEX_RANGE_SIZE for c in own)
+    assert f"Drift sentinels captured during this set (counted here, not in the main budget): {len(own)}, " in block
+    assert f"open           pose indices P{OPEN_BACKGROUND_POSE_INDEX_BASE:04d} to " in text
 
 
 def test_filters_off_plan_prints_the_document_totals_and_its_own_sentinel_count(tmp_path: Path, capsys):

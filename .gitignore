@@ -5,3 +5,6 @@ __pycache__/
 /build/
 /dist/
 Review/*.pdf
+
+# Deck generator dependencies (installed with npm install in docs/presentations/build)
+docs/presentations/build/node_modules/

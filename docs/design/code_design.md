@@ -286,14 +286,17 @@ read back from poses.csv or built by the demo plan has it too. Series Z keeps it
 the overshoot. plan_summary.txt states the rule for all poses and the exception.
 
 *Sentinels of an optional set* (follow-up F6). The sentinels captured while an optional set (filters-off repeat, staircase,
-lateral sweep) runs belong to that set: `insert_sentinels` keeps one clock for the main plan, which walks the main captures only (so
+lateral sweep, open-background variant of C) runs belong to that set: `insert_sentinels` keeps one clock for the main plan, which walks the main captures only (so
 its 11 sentinels, and the Section 9 totals of 7,194 poses, 42,520 frames and 7.18 h, are the same whichever optional flags are on), and
 one clock per optional set, which walks that set's captures only, with the same rules (a sentinel at the end of each of its series
 and whenever `drift_sentinel_interval_min` of its own clock is up; no opening sentinel). Such a sentinel is placed right after the
 capture it follows, has the set's label as sub-series, takes pose indices from the set's base (`OPTIONAL_POSE_INDEX_BASES`) and no
 mount-reference flag, so `capture_budget` leaves it out and the set's own table (`filters_off_budget` ...) has a Sentinels row and
 plan_summary.txt a line "Drift sentinels captured during this set". The analysis of the session's drift (`analysis.noise`:
-`session_sentinels`, the mount epochs) leaves the sentinels of the optional sets out, as it already did for the drift run.
+`session_sentinels`, the mount epochs) leaves the sentinels of the optional sets out, as it already did for the drift run. The open-background variant of C
+(`plan_area_series(open_background=True)`, sub-series `open`, base `OPEN_BACKGROUND_POSE_INDEX_BASE` = 5000) is one of these sets like the
+others: its poses and its sentinels take its range, it is outside the Section 9 totals (`open_background_budget` has its table, plan_summary.txt
+its "Drift sentinels captured during this set" line), and `OPTIONAL_SUBSERIES` makes `analysis.noise` skip its sentinels with no change there.
 Random offsets are uniform over +/- PHASE_JITTER_SPAN_PX / 2 converted to mm at
 the station depth; the seed of every draw is logged in the record. Station
 order within a series is shuffled with the logged seed (Section 5, Step 2;
@@ -488,13 +491,15 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
   even-numbered from the positive side (`notes["approach_direction"]` = -H, +H, -V or +V; plan_summary.txt says so). Outside the
   main budget like the staircase (`lateral_sweep_budget`, `OPTIONAL_SUBSERIES`; 40 poses, 1,200 frames); the lateral-resolution analysis leaves
   these poses out of its pooled edge spread function. Pose indices start at `LATERAL_SWEEP_POSE_INDEX_BASE` (3000).
-- *Pose-index ranges* (`io/manifest.py`: `OPTIONAL_POSE_INDEX_RANGE_SIZE` = 1000 and the three bases). The pose index of the file name
+- *Pose-index ranges* (`io/manifest.py`: `OPTIONAL_POSE_INDEX_RANGE_SIZE` = 1000 and the bases, listed in one comment there). The pose index of the file name
   has three digits for the main plan (P000 to P999) and four for each optional set planned outside the budget, each in a
   range of its own so that the ranges cannot overlap: filters-off repeat from `FILTERS_OFF_POSE_INDEX_BASE` = 1000 (P1000 to
   P1999), staircase from `STAIRCASE_POSE_INDEX_BASE` = 2000, lateral sweep from `LATERAL_SWEEP_POSE_INDEX_BASE` = 3000, optional drift run
   (Section 4, Step 3: `plan_drift_run`, procedure S in the sentinels folder, sub-series `SUBSERIES_DRIFT_RUN`, one capture per pose
   index, `drift_run_duration_min` / `drift_run_capture_interval_min` + 1 = 241 captures of `sentinel_frames` frames) from
-  `DRIFT_RUN_POSE_INDEX_BASE` = 4000, so that a capture never shares a pose key with an in-session sentinel.
+  `DRIFT_RUN_POSE_INDEX_BASE` = 4000, so that a capture never shares a pose key with an in-session sentinel, and the optional
+  open-background variant of C (Section 7, Step 4, sub-series `open`) from `OPEN_BACKGROUND_POSE_INDEX_BASE` = 5000. The
+  sentinels captured during an optional set take that set's range.
   `plan_stations --drift-run` (`plan_full_session(drift_run=True)`) appends the 241 captures after the session's poses, whatever
   `--series` selects (`--series` without letters plans the run alone). The run is outside the main budget
   (`SUBSERIES_DRIFT_RUN` is in `OPTIONAL_SUBSERIES`, so the totals stay 7,194 poses, 42,520 frames, 7.18 h), gets no drift sentinels

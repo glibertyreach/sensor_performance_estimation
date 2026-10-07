@@ -1,0 +1,445 @@
+{
+  "slides": [
+    {
+      "id": "title",
+      "layout": "title_dark",
+      "section": "Introduction",
+      "title": "Stage-1 Calibration: Test Procedure and Robot Program",
+      "subtitle": "Running the capture session and what the robot program must do",
+      "footer": "Test procedure  ·  October 2026",
+      "notes": "This is the second of two decks on the stage-1 calibration captures. The first covers procurement and the mechanical build. This one covers the session: setup in the robot cell, the pose plan, the robot program's job, how poses are recorded, and the checks. It summarizes sections 2 to 11 of the stage-1 capture procedure in docs/procedures."
+    },
+    {
+      "id": "product",
+      "layout": "title_only",
+      "section": "Introduction",
+      "title": "The session produces data plus an exact table of poses",
+      "stats": [
+        {
+          "value": "186",
+          "label": "robot poses, 5 frames each"
+        },
+        {
+          "value": "~2 h",
+          "label": "robot time with fixture changes and checks"
+        },
+        {
+          "value": "0.1 mm",
+          "label": "accuracy target at 500 mm, scaling with distance"
+        }
+      ],
+      "message": "If the pose table is wrong, the calibration is wrong.",
+      "body": "Every capture file must be matched to the target that was in view and to exactly where the robot put it. Most of the procedure is about getting that table right.",
+      "notes": "The output of a session is a folder of sensor capture files, one group per robot pose, and a manifest that records for every file which target was in view and exactly where the robot had placed it. The software compares what the sensor measured with the known geometry of the target at that known pose. Any error in the table goes straight into the correction map, so most of the procedure's steps exist to make the table trustworthy. The accuracy target is 0.1 mm at 500 mm, scaling with distance; the robot's own absolute accuracy of 0.1 mm is of the same size, which is why the robot pose must be the reported one, not the commanded one."
+    },
+    {
+      "id": "flow",
+      "layout": "title_only",
+      "section": "Introduction",
+      "title": "The session at a glance",
+      "steps": [
+        {
+          "n": 1,
+          "head": "Prepare",
+          "text": "Warm up the sensor 30 min; fix exposure, gain and SGM parameters"
+        },
+        {
+          "n": 2,
+          "head": "Mount spheres",
+          "text": "Doweled adapter and stem; find each sphere's TCP in the nest"
+        },
+        {
+          "n": 3,
+          "head": "Board frame",
+          "text": "Runout check; set the tool frame on the front face"
+        },
+        {
+          "n": 4,
+          "head": "Locate sensor",
+          "text": "Four sphere captures give a rough sensor position"
+        },
+        {
+          "n": 5,
+          "head": "Plan poses",
+          "text": "The plan tool writes 186 poses and a picture"
+        },
+        {
+          "n": 6,
+          "head": "Capture",
+          "text": "Sphere A, then sphere B, then the board"
+        },
+        {
+          "n": 7,
+          "head": "Manifest",
+          "text": "Pose log and files become the manifest"
+        },
+        {
+          "n": 8,
+          "head": "Check",
+          "text": "Quick check before the robot and fixtures are put away"
+        }
+      ],
+      "notes": "These are the eight stages of a session, in order; sections 2 to 8 of the procedure correspond to them. Steps 1 to 4 are setup and happen once per session. Step 5 runs the plan tool, which needs the rough sensor position from step 4. Step 6 is the long robot run. Steps 7 and 8 run software on the capture computer or the engineer's laptop, and step 8 should happen while everything is still set up, so a flagged pose can be captured again at once."
+    },
+    {
+      "id": "prep",
+      "layout": "title_only",
+      "section": "Introduction",
+      "title": "Preparation before the first session",
+      "columns": [
+        {
+          "head": "Robot",
+          "icon": "robot",
+          "points": [
+            "Check the documented absolute accuracy: 0.1 mm or better",
+            "Weigh each fixture; enter its tool load data",
+            "Write the robot program; note where it writes pose_log.csv",
+            "Dry-run every pose at reduced speed",
+            "Safety review of the new program"
+          ]
+        },
+        {
+          "head": "Sensor and computers",
+          "icon": "camera",
+          "points": [
+            "Capture software set for the robot's trigger and the file names",
+            "Exposure, gain and SGM parameters set and recorded: smoothing filters off, installation patch size",
+            "10 GB free per 1,000 frames",
+            "Calibration software installed and self-tested"
+          ]
+        },
+        {
+          "head": "Cell",
+          "icon": "layout",
+          "points": [
+            "Layout study: the 300 to 1,100 mm volume inside the robot's reach",
+            "Table drilled and tapped for the nest and the run-out plate",
+            "Robot base frame identified and recorded"
+          ]
+        }
+      ],
+      "message": "The fixtures and tools themselves are in the procurement and build deck, and in section 1 of the procedure.",
+      "notes": "This is section 1f of the procedure: everything to prepare before the first session, beyond the fixtures and tools. The robot's absolute accuracy is taken from its documented specification. Tool load data matters because an absolute-accuracy robot compensates for load, so a wrong mass or center of gravity shifts every pose. The capture trigger goes through the capture computer's existing communication software, so the robot program only needs to call it. The SGM parameters are set the way installations use them except that smoothing filters are off, so the calibration sees the sensor's raw matching. The layout study comes first, because it fixes where the sensor mount goes."
+    },
+    {
+      "id": "tcp",
+      "layout": "title_only",
+      "section": "Setup",
+      "title": "The three-ball nest finds each sphere's center",
+      "image": "assets/fixtures_b_tcp.png",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Enter a rough TCP from caliper measurements, and the fixture's tool load data"
+        },
+        {
+          "n": 2,
+          "text": "Run the robot's multi-orientation TCP routine with at least six seatings: stem up, tilted 40 degrees four ways, one twisted"
+        },
+        {
+          "n": 3,
+          "text": "Accept only a routine error of 0.1 mm or less"
+        },
+        {
+          "n": 4,
+          "text": "Re-seat at a very different wrist angle: positions agree within 0.1 mm"
+        },
+        {
+          "n": 5,
+          "text": "Save TCP_SPHERE_A_76mm and TCP_SPHERE_B_152mm"
+        }
+      ],
+      "notes": "The robot cannot see the sphere, so its center is found mechanically. A sphere resting on three fixed balls always has its center at the same point, whatever direction its stem points. The robot's built-in multi-orientation tool-center-point routine finds the one point on the tool that stays still while the wrist turns, and seating the sphere in the nest from several directions makes that point the sphere's center. Lower the sphere gently for the last millimeter; pressing down bends the stem. The usual causes of a large routine error are a sphere not fully seated or a loose adapter."
+    },
+    {
+      "id": "board",
+      "layout": "title_only",
+      "section": "Setup",
+      "title": "The board's tool frame sits on its front face",
+      "image": "assets/fixtures_c_board.png",
+      "points": [
+        "Runout: rotate joint 6 through 360 degrees; the dial indicator stays within 0.05 mm",
+        "Measure flange-to-face distance D at four places; they agree within 0.05 mm",
+        "Tool frame: origin at the face center, z out of the face, x along the long edge",
+        "A few degrees of error in x is harmless; an error in z is not",
+        "Save as TOOL_BOARD with its load data; record D, the runout and the board size"
+      ],
+      "notes": "The board's pose is commanded, not fitted, so its frame must be right. The runout check tests whether the board face is perpendicular to the flange axis; if the reading wanders more than 0.05 mm over a full turn, shim the adapter and repeat. D is the distance from the flange face to the board's front face. Because the board is symmetric, an error of a few degrees in the x direction does no harm, but a tilt of the z axis puts a false slope into every board observation. The board's half-sizes go into the pose log."
+    },
+    {
+      "id": "bootstrap",
+      "layout": "title_only",
+      "section": "Setup",
+      "title": "Four captures locate the sensor well enough to plan",
+      "boot": [
+        {
+          "id": "boot01",
+          "text": "About 500 mm in front, near the image center"
+        },
+        {
+          "id": "boot02",
+          "text": "About 150 mm to the left"
+        },
+        {
+          "id": "boot03",
+          "text": "About 150 mm up"
+        },
+        {
+          "id": "boot04",
+          "text": "About 250 mm farther away"
+        }
+      ],
+      "points": [
+        "Record the robot's reported TCP position for each",
+        "The check tool fits the sphere centers; the plan tool fits the sensor position",
+        "Residuals of a few millimeters are fine; tens of millimeters mean a copying error or a wrong TCP"
+      ],
+      "notes": "The software determines the sensor's exact position from the full capture set; this step only needs a rough position so that the planned poses land inside the field of view. Four positions not on a line are enough to solve for the sensor's position and orientation. The check tool fits the sphere center in each bootstrap capture, the engineer writes these and the robot positions into boot.json, and the plan tool solves for the sensor and prints the residual of each pair. A residual of tens of millimeters almost always means a position was copied wrongly or the TCP is wrong."
+    },
+    {
+      "id": "plan",
+      "layout": "title_only",
+      "section": "Capture",
+      "title": "The plan spreads 186 poses through the volume",
+      "image": "assets/plan_example.png",
+      "stats": [
+        {
+          "value": "90",
+          "label": "sphere A poses at 300, 425 and 550 mm"
+        },
+        {
+          "value": "57",
+          "label": "sphere B poses from 500 to 1,100 mm"
+        },
+        {
+          "value": "39",
+          "label": "board poses at 4 depths, tilted 0, 20 and 40 degrees"
+        }
+      ],
+      "caption": "About 20 percent of poses are held out to test the fit; they are captured like all the others.",
+      "notes": "The plan tool writes poses.csv, a summary, and the picture shown here, which plots the planned sphere and board centers in the sensor's frame: a side view on the left and a front view on the right, with the field of view drawn. Sphere A covers the near range on a grid 1.5 radii apart, sphere B the far range, and both appear at 500 to 550 mm. Board poses that would leave the field of view are dropped automatically. A handful of the outermost sphere poses may touch the image border; the check flags them and they are left out of the fit. Poses with a black edge in the picture are the held-out ones."
+    },
+    {
+      "id": "robot_program",
+      "layout": "title_only",
+      "section": "Capture",
+      "title": "What the robot program must do",
+      "columns": [
+        {
+          "head": "Inputs",
+          "icon": "input",
+          "points": [
+            "poses.csv from the plan tool: base-frame position and orientation of every pose, as a matrix, a quaternion and a rotation vector",
+            "Three tool frames: TCP_SPHERE_A_76mm, TCP_SPHERE_B_152mm and TOOL_BOARD"
+          ]
+        },
+        {
+          "head": "Behavior",
+          "icon": "cogs",
+          "points": [
+            "Visit poses in plan order: sphere A, sphere B, board",
+            "Pause for each fixture change and activate its tool frame",
+            "Same approach every time; settle 1.5 seconds",
+            "Never change the base frame during the session"
+          ]
+        },
+        {
+          "head": "Outputs",
+          "icon": "output",
+          "points": [
+            "Trigger five frames per pose through the communication software, named <pose_id>_Index00 to _Index04",
+            "Append the REPORTED TCP pose to pose_log.csv in the controller's own orientation form; note where the file is written"
+          ]
+        }
+      ],
+      "message": "Once the robot model and controller are settled, the robot program can be written with Claude Code.",
+      "notes": "The robot program is small: it reads the plan, moves, waits, triggers the sensor, and logs what the robot reports. Its interface is fixed by the files on either side: poses.csv from the plan tool on the way in, and the capture file names and pose_log.csv on the way out, whose columns the manifest tool expects. The capture trigger goes through the capture computer's communication software, which already provides it; the program only calls that interface. Note where the program writes pose_log.csv, on the controller or on the network, so it can be collected after the session. Because the input and output formats are already defined, the program can be written with Claude Code as soon as the robot model and its controller are settled; each controller's language and its pose readout differ, which is the part that waits for that choice."
+    },
+    {
+      "id": "loop",
+      "layout": "title_only",
+      "section": "Capture",
+      "title": "Every pose runs the same short robot loop",
+      "steps": [
+        {
+          "n": 1,
+          "head": "Approach",
+          "text": "Joint move to 100 mm short along the stem axis, then a linear move onto the pose"
+        },
+        {
+          "n": 2,
+          "head": "Settle",
+          "text": "Wait 1.5 seconds for vibration to die out"
+        },
+        {
+          "n": 3,
+          "head": "Capture",
+          "text": "Five frames: <pose_id>_Index00 to _Index04"
+        },
+        {
+          "n": 4,
+          "head": "Log",
+          "text": "Read the REPORTED TCP pose and append it to the pose log"
+        }
+      ],
+      "stats": [
+        {
+          "value": "~8 s",
+          "label": "per pose"
+        },
+        {
+          "value": "~25 min",
+          "label": "robot time for 186 poses"
+        }
+      ],
+      "message": "Order: all sphere A poses, then sphere B, then the board. Never move the sensor in between.",
+      "notes": "The approach is the same every time so that any small hysteresis in the robot is the same for every pose. The settle time lets vibration from the move die out before the sensor captures. The pose that goes in the log is the one the robot reports after it has arrived, not the one it was commanded to; with a robot of 0.1 mm absolute accuracy the difference matters. Remember to activate the right tool frame at each fixture change: TCP_SPHERE_B_152mm for sphere B and TOOL_BOARD for the board."
+    },
+    {
+      "id": "manifest",
+      "layout": "title_only",
+      "section": "Capture",
+      "title": "Poses are recorded in the file header or in a pose log",
+      "columns": [
+        {
+          "head": "Option A: in the file header",
+          "points": [
+            "The capture software writes robotPose, a 4 x 4 matrix, tool to base",
+            "No separate log needed beyond the target sizes",
+            "Use it if the capture software supports it"
+          ]
+        },
+        {
+          "head": "Option B: pose log and manifest",
+          "points": [
+            "The robot program appends one CSV line per pose",
+            "Orientation in the controller's own form: KUKA A, B, C or FANUC W, P, R, quaternion, rotation vector, matrix",
+            "make_manifest matches files to poses and names every mismatch",
+            "Recommended as a backup even with option A"
+          ]
+        }
+      ],
+      "example": "s038_z0425_017,sphere,38.10,,,812.40,-33.21,455.02,none,,,,",
+      "notes": "Both options are supported by the software. In option B the pose log columns are the pose id, the target kind, the radius or the board half-sizes, the reported position, the rotation type and up to four rotation values; the example line is a sphere pose, which needs no rotation. The manifest tool converts every orientation form to a matrix and complains by name about any pose without files, any file without a pose, and any missing size. A pose log is worth keeping even when the headers carry the pose, because it is the only independent record."
+    },
+    {
+      "id": "checks",
+      "layout": "title_only",
+      "section": "Checks",
+      "title": "Check the captures before the robot is put away",
+      "cards": [
+        {
+          "head": "Low valid fraction",
+          "flag": "below 50 percent of frames",
+          "text": "Target not read: check exposure, or the target was outside the field"
+        },
+        {
+          "head": "Touches the image border",
+          "flag": "valid pixels at the edge",
+          "text": "Target partly out of view: the pose is unusable; re-plan it slightly inward"
+        },
+        {
+          "head": "Sphere center off",
+          "flag": "more than 2 mm",
+          "text": "One pose: position copied wrongly. One sphere: wrong TCP. Growing across the volume: base frame or robot accuracy"
+        },
+        {
+          "head": "Board normal off",
+          "flag": "more than 2 degrees",
+          "text": "Board tool frame orientation wrong, or the rotation type in the log is misnamed"
+        }
+      ],
+      "caption": "Re-capture a flagged pose under a new id, for example s038_z0425_017r; never delete lines from the log.",
+      "notes": "The check tool prints one line per pose and a verdict, and its exit code is 0 when nothing is flagged, 1 when something is, and 2 when it cannot read the manifest. Running it while the fixtures are still mounted means a bad pose can be captured again in minutes instead of setting everything up again another day. The pattern of the sphere-center flags tells you the cause: one pose, one sphere, or a trend across the volume."
+    },
+    {
+      "id": "independent",
+      "layout": "title_only",
+      "section": "Checks",
+      "title": "Two shape checks test the corrected surfaces",
+      "columns": [
+        {
+          "head": "Sphere shape",
+          "icon": "circle",
+          "points": [
+            "Each held-out sphere is fitted with its radius free",
+            "After correction the fitted radius should match the measured radius",
+            "Judge each error against its standard error, which is large for a small or distant sphere"
+          ]
+        },
+        {
+          "head": "Board flatness",
+          "icon": "square",
+          "points": [
+            "Each held-out board is fitted with its own plane",
+            "After correction the spread should fall toward the plate's flatness",
+            "Sees only errors that bend the board; mainly catches the fixed pattern"
+          ]
+        }
+      ],
+      "message": "Neither check tests the scale of the volume or a smooth robot error; those rest on the robot's 0.1 mm accuracy.",
+      "notes": "Nothing in the session has a geometry known independently of the robot, so these two checks use no robot positions at all; the fit's report computes them on the held-out poses, so nothing extra is captured. The technician's part is to make the references good: measure the sphere diameters carefully and keep the board's flatness report. A uniform range-scale error of 0.1 percent changes sphere A's fitted radius by only 0.04 mm, so scale is checked mainly by the held-out sphere centers against the robot."
+    },
+    {
+      "id": "spoilers",
+      "layout": "title_only",
+      "section": "Wrap-up",
+      "title": "Seven things that spoil a session",
+      "items": [
+        {
+          "icon": "move",
+          "text": "Moving or bumping the sensor: everything after it is a new session"
+        },
+        {
+          "icon": "sliders",
+          "text": "Changing exposure, gain or the base frame mid-session"
+        },
+        {
+          "icon": "edit",
+          "text": "Logging the commanded pose instead of the reported pose"
+        },
+        {
+          "icon": "tool",
+          "text": "A loose adapter or a bent stem: roll the stem on a flat surface first"
+        },
+        {
+          "icon": "hand",
+          "text": "Fingerprints or gloss: wipe the targets with isopropyl alcohol"
+        },
+        {
+          "icon": "eye",
+          "text": "Letting the stem point toward the sensor: the sphere must hide it"
+        },
+        {
+          "icon": "swap",
+          "text": "Mixing up the two spheres' radii in the pose log"
+        }
+      ],
+      "notes": "These are the failures that cannot be repaired afterwards in software. The first two change the sensor itself mid-session, which invalidates the comparison between early and late captures. The third and seventh put wrong numbers into the pose table. The others damage the measurement: a joint that moves shifts the sphere center away from the TCP that was measured, a shiny spot returns a highlight and a bad read, and a visible stem corrupts the sphere fit."
+    },
+    {
+      "id": "deliverables",
+      "layout": "title_only",
+      "section": "Wrap-up",
+      "title": "What to hand over at the end of the session",
+      "checklist": [
+        "captures/ with every .mc file, named <pose_id>_Index<nn>.mc",
+        "pose_log.csv, or confirmation that the headers carry robotPose",
+        "captures/manifest.csv, built without errors",
+        "captures/check.json with no flags, or a note on each",
+        "plan/ files as used, boot.json and the bootstrap captures",
+        "session_notes.txt: sensor serial, warm-up, exposure, gain and SGM parameters, base frame, TCPs, board D and runout, sphere diameters, temperature, pose log location",
+        "Photos (a phone camera is fine) of the sensor mount, each fixture on the flange, and the nest"
+      ],
+      "software": {
+        "head": "Software",
+        "points": [
+          "plan_poses, make_manifest and check_captures in sphcal/cli",
+          "Install and self-test: procedure appendix C",
+          "Every tool prints its options with --help"
+        ]
+      },
+      "notes": "The checklist is section 10 of the procedure. The session notes matter as much as the data: the fit needs the measured sphere diameters, and the notes are the only record of warm-up time, temperature and fixture changes if a result looks wrong later. The three command-line tools come with the repository; appendix C of the procedure walks through installing Python, creating an environment, installing the package and running the self-test, on Windows or Linux."
+    }
+  ]
+}

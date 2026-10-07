@@ -679,6 +679,21 @@ def test_drift_run_frames_are_not_session_sentinels(session):
     assert noise.mount_epochs(mixed) == noise.mount_epochs(session.records)
 
 
+def test_optional_set_sentinels_are_not_session_sentinels(session):
+    """Drift sentinels captured during any optional set (``OPTIONAL_SUBSERIES``, the open-background variant of C among them)
+    carry the set's sub-series label and pose-index range: they stay out of the session's sentinels, the mount numbering
+    and the hours of a mount, like the drift run."""
+    from sensorperf.io.manifest import OPEN_BACKGROUND_POSE_INDEX_BASE, OPTIONAL_SUBSERIES, SUBSERIES_OPEN
+    assert SUBSERIES_OPEN in OPTIONAL_SUBSERIES
+    sentinel = next(r for r in session.records if r.procedure == "S" and r.target_id == "T2")
+    extra = [dataclasses.replace(sentinel, subseries=SUBSERIES_OPEN, pose_index=OPEN_BACKGROUND_POSE_INDEX_BASE + i,
+                                 metadata={}) for i in range(3)]
+    mixed = list(session.records) + extra
+    assert [r.pose_key() for r in noise.session_sentinels(mixed)] \
+        == [r.pose_key() for r in noise.session_sentinels(session.records)]
+    assert noise.mount_epochs(mixed) == noise.mount_epochs(session.records)
+
+
 FIXED_STAND_CAPTURES = 61
 """Captures of the synthetic fixed-stand drift run of the analysis test (two hours at the 2-minute interval)."""
 FIXED_STAND_FRAMES = 2
