@@ -785,3 +785,12 @@ line, and no effect on the main budget, which holds at 7,194 poses, 42,520 frame
 flag on; its own poses had also been counted in the main budget before, which is now corrected. The procedure's
 Sections 5, 9, 11 and 13 name all five optional sets and their pose-index ranges. No code follow-ups remain open.
 
+## As-built record revised (2026-10-07, procedure-docs pass)
+Neil (Q2 of the procedure-docs decisions): no as-built measurement of the targets in-house beyond a sphere's
+diameter with a micrometer, a plate's flatness with a run-out gauge, and a plate's width and length. Resolution
+agreed by Neil: the fabricator's inspection report fills targets_asbuilt.csv; a value not reported falls back to
+the nominal with the drawing tolerance as its uncertainty, so the drawings now carry tolerances; in-house the
+technician records each plate's flatness, width and length. Executed (document rev 114; gate PASS, scope ['3']):
+Section 3 lead paragraph and the as-built record paragraph of Section 3.3 rewritten accordingly. The technician
+procedure follows in the procedure-docs pass.
+
