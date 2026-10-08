@@ -456,11 +456,10 @@ class CharacterizationParameters:
 
     # Targets
     noise_plate_size_mm: tuple[float, float] = (200.0, 150.0)
-    """Uniform matte plate (T2), the stage-1 calibration board: width (along H) x height (along V), mm. Decision of the
-    project owner, 2026-10-08: the former 400 x 400 mm noise plate is eliminated. The plate is at least 6 mm thick, matte
-    and flat to ``plate_flatness_mm``, and sits on its existing board adapter. A tilt about H swings the half-height
-    (75 mm) toward the sensor, a tilt about V the half-width (100 mm); the planner's tilt-feasibility rule and the B-Z
-    ramp use these half extents."""
+    """Uniform matte plate (T2), the stage-1 calibration board: width (along H) x height (along V), mm; at least 6 mm thick,
+    flat to ``plate_flatness_mm``, on its board adapter. A tilt about H swings the half-height (75 mm) toward the sensor, a
+    tilt about V the half-width (100 mm); the tilt-feasibility rule of the planner and the B-Z ramp use these half extents.
+    It replaced the 400 x 400 mm noise plate (2026-10-08)."""
     edge_plate_size_mm: tuple[float, float] = (400.0, 400.0)
     """Back plate of T3a and front plate of T3b, width x height, mm. These plates carry a 160 mm square and must extend past
     it by the boundary band plus the shadow, so they do NOT follow the smaller T2 board: they keep the 400 x 400 mm size

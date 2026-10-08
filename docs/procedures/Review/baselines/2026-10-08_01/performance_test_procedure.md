@@ -644,7 +644,7 @@ Values marked with a dagger in the specification depend on VSX3000 datasheet or 
 | `LEGACY_METRIC_DEPTHS_MM` | 700, 1000 | Depths at which the legacy metrics are computed (Section 10, Step 12); series A adds them as extra noise stations to the ladder, captured at the center field position only. |
 | `STATION_MATCH_TOLERANCE_MM` | 0.5 | Two depths closer than this are the same station (the file-name rule rounds a station to 1 mm). |
 | `AUTOCORRELATION_THRESHOLD` | 0.3679 | The correlation length is the lag where the normalized autocorrelation first falls to this (1/e). |
-| `NOISE_PLATE_SIZE_MM` | 200, 150 | Uniform matte plate (T2), the stage-1 calibration board: width (along H) x height (along V), mm; at least 6 mm thick, flat to ``plate_flatness_mm``, on its board adapter. A tilt about H swings the half-height (75 mm) toward the sensor, a tilt about V the half-width (100 mm); the tilt-feasibility rule of the planner and the B-Z ramp use these half extents. It replaced the 400 x 400 mm noise plate (2026-10-08). |
+| `NOISE_PLATE_SIZE_MM` | 200, 150 | Uniform matte plate (T2), the stage-1 calibration board: width (along H) x height (along V), mm. Decision of the project owner, 2026-10-08: the former 400 x 400 mm noise plate is eliminated. The plate is at least 6 mm thick, matte and flat to ``plate_flatness_mm``, and sits on its existing board adapter. A tilt about H swings the half-height (75 mm) toward the sensor, a tilt about V the half-width (100 mm); the planner's tilt-feasibility rule and the B-Z ramp use these half extents. |
 | `EDGE_PLATE_SIZE_MM` | 400, 400 | Back plate of T3a and front plate of T3b, width x height, mm. These plates carry a 160 mm square and must extend past it by the boundary band plus the shadow, so they do NOT follow the smaller T2 board: they keep the 400 x 400 mm size that the noise plate had when the edge targets were defined. |
 | `PLATE_FLATNESS_MM` | 0.05 | Required flatness of every plate. |
 | `PLATE_FLATNESS_SIGMA_FRACTION` | 0.25 | The flatness must be at most this fraction of the smallest expected sigma_tot. |
@@ -720,7 +720,7 @@ The tools: `plan_stations` (§5), `register` (§4), `make_manifest` (§11), `che
 | `sensorperf/io/matcloud.py` | 404 | Reader/writer for Liberty Reach's ".mc" ("Matrix Cloud") file format. |
 | `sensorperf/io/qt_datastream.py` | 433 | A minimal reader/writer for Qt5's ``QDataStream`` binary encoding (default stream version, which is what ``MC::toFile``/``MC::fromFile`` use -- see ``MC.cpp`` i |
 | `sensorperf/io/session.py` | 143 | The session folder of Section 9 and the small JSON records it holds. |
-| `sensorperf/parameters.py` | 698 | Every arbitrary constant of the characterization procedure, as a named parameter (procedure document, Section 2), plus the five geometric relations of that sect |
+| `sensorperf/parameters.py` | 699 | Every arbitrary constant of the characterization procedure, as a named parameter (procedure document, Section 2), plus the five geometric relations of that sect |
 | `sensorperf/simulate/__init__.py` | 1 | sensorperf.simulate: see the package docstring and docs/design/code_design.md. |
 | `sensorperf/simulate/demo_plan.py` | 349 | A small but complete demonstration plan for the synthetic session writer (Sections 4 to 9 of the procedure, drastically reduced), a plausible registration to re |
 | `sensorperf/simulate/sensor_model.py` | 446 | INDICATIVE synthetic depth renderer of a :class:`~sensorperf.geometry.targets.TwoPlaneTarget` (design document, Section 5, "simulate/sensor_model.py"). |
