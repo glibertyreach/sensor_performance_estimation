@@ -124,15 +124,24 @@ def scaled_geometry(geometry: SensorGeometry, divisor: int) -> SensorGeometry:
         image_height_px=int(geometry.require("image_height_px")) // divisor)
 
 
+QUICK_NOISE_PLATE_SIZE_MM = (400.0, 400.0)
+"""Size (width, height, mm) of the T2 stand-in of the ``--quick`` demonstration sensor. The 200 x 150 mm calibration board is
+21 x 16 px on the 160 x 120 px quick sensor at 1600 mm, less than the 8 px boundary band that Analysis A shrinks its region of
+interest by on each side, so no pixel would be left to analyze. The quick sensor therefore keeps the 400 x 400 mm plate that
+the demonstration (and its tests) were built with; the full-size sensor always uses the 200 x 150 mm board of the parameters."""
+
+
 def scaled_parameters(params: CharacterizationParameters, divisor: int) -> CharacterizationParameters:
-    """The parameters for a sensor whose pixels are ``divisor`` times larger (:func:`scaled_geometry`): the width of the
-    boundary band (the ROI shrink of Analysis A, the field-fit margin of the planner), which is counted in pixels, is divided
-    by the same factor so that it covers the same millimeters of the target. Without this the 8 px band of the full-size sensor
-    would take 32 px of the --quick sensor and leave nothing of the 200 x 150 mm calibration board (T2), which is only 21 x 16
-    px there at 1600 mm. Every other parameter is kept."""
+    """The parameters for the demonstration sensor whose pixels are ``divisor`` times larger (:func:`scaled_geometry`). With
+    ``divisor`` 1 (the full-size sensor) they are returned unchanged. With a larger divisor (``--quick``) T2 becomes the
+    ``QUICK_NOISE_PLATE_SIZE_MM`` stand-in, because the 200 x 150 mm board would leave no pixels inside the boundary band on the
+    coarse sensor; every other parameter is kept. The planner, the target set and the session record all read the size from the
+    returned parameters, so the quick session is consistent with itself."""
     if divisor < 1:
         raise ValueError("divisor must be at least 1")
-    return replace(params, boundary_band_half_width_px=params.boundary_band_half_width_px / divisor)
+    if divisor == 1:
+        return params
+    return replace(params, noise_plate_size_mm=QUICK_NOISE_PLATE_SIZE_MM)
 
 
 def demo_registration() -> Registration:

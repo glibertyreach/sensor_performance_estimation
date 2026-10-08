@@ -15,9 +15,9 @@ so that the depth noise, the depth quantum and the minimum feature size in mm ar
 sensor (sigma_Z = sigma_d Z^2 / k and delta_Z = q Z^2 / k both keep their values; see
 ``SyntheticSensorModel.indicative_scaled``). The physical targets are always the
 standard set of the FULL-size indicative geometry, so a quick session uses the same targets as a full one
-and merely sees them with larger pixels. The pixel width of the boundary band is divided by the same factor
-(:func:`sensorperf.simulate.demo_plan.scaled_parameters`), so that it covers the same millimeters of the 200 x 150 mm T2
-board, which is only 21 x 16 px on the quick sensor at 1600 mm.
+and merely sees them with larger pixels. The one exception is T2: the 200 x 150 mm calibration board is only 21 x 16 px on the quick
+sensor at 1600 mm, too small for the 8 px boundary band of Analysis A, so ``--quick`` uses a 400 x 400 mm stand-in plate
+(:func:`sensorperf.simulate.demo_plan.scaled_parameters`).
 """
 from __future__ import annotations
 

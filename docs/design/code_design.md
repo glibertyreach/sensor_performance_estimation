@@ -464,13 +464,13 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
   1.55 to 50 mm at 1600 mm (the 50 mm rung moves the plate to 1650 mm, beyond Z_MAX; a planner note says so). 6 rungs x 10
   cycles x 2 visits x 3 stations = 360 poses, 3,600 frames. `plan_summary.txt` lists the millimeter rungs per station with the
   ratio of `robot_repeatability_mm` to each rung. Every visit is still approached from below.
-- *B-Z ramp* (`ramp_tilt_deg`, `ramp_pose`, `ramp_visible_height_mm`; parameters `ramp_quanta` = 4, `frames_per_ramp_pose` = 50;
+- *B-Z ramp* (`ramp_tilt_deg`, `ramp_pose`, `ramp_visible_height_mm`; parameters `ramp_quanta` = 2, `frames_per_ramp_pose` = 50;
   sub-series `ramp`, `SUBSERIES_RAMP`). At EVERY ladder station one pose of T2 tilted about H (parallel to the baseline, so each
   image row lies at one true depth) by asin(ramp_quanta dZ_q / visible height), the visible height being the smaller of the
-  plate height (400 mm) and the field height at Z0: 0.318, 0.379, 0.450, 0.629, 0.888, 1.255, 1.775, 2.511 and 3.555 deg at the
-  nine stations (0.3 deg at 400 mm, 3.6 deg at 1600 mm), 9 poses x 50 frames. The tilt is stored in the pose row and printed per
-  station. The tilt-feasibility rule below applies: the ramp tilts are small, but the near edge of the 400 mm plate, 200 mm from
-  the center, is Z - 200 sin(tilt) = 398.9 mm at Z0 = 400 mm, closer than Z_MIN (every other station is well beyond it); rather than drop the 400 mm ramp, the plate center is moved 1.11 mm farther (exactly the shortfall, so the near edge is
+  plate height (150 mm, always the smaller one) and the field height at Z0: 0.296, 0.419, 0.593, 0.838, 1.184, 1.674, 2.367,
+  3.349 and 4.742 deg at the nine stations (0.3 deg at 400 mm, 4.7 deg at 1600 mm), 9 poses x 50 frames. The tilt is stored in the pose row and printed per
+  station. The tilt-feasibility rule below applies: the ramp tilts are small, but the near edge of the 150 mm high plate, 75 mm from
+  the center, is Z - 75 sin(tilt) = 399.61 mm at Z0 = 400 mm, closer than Z_MIN (every other station is well beyond it); rather than drop the 400 mm ramp, the plate center is moved 0.39 mm farther (exactly the shortfall, so the near edge is
   at Z_MIN; `notes["ramp_center_shift_mm"]`, a planner note, a line of `plan_summary.txt`), and the station label stays 400. The far
   edge of the ramp at 1600 mm is 12 mm beyond Z_MAX, as the 1650 mm of the ladder.
 - *Optional B-Z staircase* (`plan_zstep_series(staircase=True)`, `plan_full_session(staircase=True)`, `plan_stations --staircase`).
@@ -519,10 +519,10 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
   (the totals stay 7,194 poses, 42,520 frames, 7.18 h), and `plan_summary.txt` says how many D poses were taken from C.
 - *Tilt feasibility* (`tilt_is_feasible`, `tilt_near_edge_mm`). The A tilt sub-series runs at the reduced stations, and a tilt
   is planned only where the plate's near edge stays at or beyond `z_min_mm`: Z - h sin(tilt) >= Z_MIN, h the half extent of
-  the plate across the tilt axis (200 mm for the 400 x 400 mm plate; the B-Z ramp uses the same rule, see above). Infeasible tilts are skipped and listed with the reason
+  the plate across the tilt axis (100 mm for a tilt about V and 75 mm for a tilt about H with the 200 x 150 mm plate; the B-Z ramp uses the same rule, see above). Infeasible tilts are skipped and listed with the reason
   under "Skipped poses" in `plan_summary.txt` (`PlanDiagnostics.skipped`); a sweep left with no real tilt (only the zero angle)
-  is skipped as a whole. With the 400 mm plate every tilt at 400 mm is skipped (15, 30 and 45 deg bring the edge to 348, 300
-  and 259 mm), leaving 800 and 1600 mm: 2 axes x 4 angles x 2 stations = 16 tilt poses instead of 24.
+  is skipped as a whole. With the 200 x 150 mm plate every tilt at 400 mm is skipped (15, 30 and 45 deg about V bring the edge to 374, 350
+  and 329 mm; about H to 381, 362 and 347 mm), leaving 800 and 1600 mm: 2 axes x 4 angles x 2 stations = 16 tilt poses instead of 24.
 - *Legacy depths at the center only* (`legacy_extra_stations_mm`). The legacy metrics are center-box metrics, so 700 and
   1000 mm are single center poses, not five-position stations (55 main poses before, 47 now).
 - *Drift sentinels on the mounted target* (`insert_sentinels`). A sentinel is captured on the front plane of the target that
@@ -752,3 +752,17 @@ standard demo plan renders 361 poses / 668 frames at 160 x 120 (`--quick`, 8 s) 
 (about 8 min; the 640 x 480 figures follow from the plan, the session was not re-rendered); the full-size session analyzes with a pooled cutout D_50 of about 9.6 px (inside the 8 to 12 px of the
 synthetic matcher) and writes `forward_model_parameters.json` with `d50_px` and `d10_px`. Not yet adapted: the build
 scripts of the technician procedure (`docs/procedures`) and the specification still quote the removed constants.
+
+**T2 becomes the 200 x 150 mm calibration board (2026-10-08, decision of the project owner).** The 400 x 400 mm noise plate is
+eliminated; T2 is now the stage-1 calibration board, 200 mm wide (H) by 150 mm high (V), at least 6 mm thick, matte, flat to
+0.05 mm, on its existing board adapter. `noise_plate_size_mm` was already a (width, height) pair and is now (200, 150); its
+consumers (`make_noise_plate`, the field fit, `tilt_near_edge_mm` with the half extent across the tilt axis, 100 mm about V
+and 75 mm about H, the ramp's visible height, the simulator and the procedure builder) read the pair and needed no new logic.
+`make_edge_target` sized the T3a back plate and the T3b front plate like T2, and a 200 x 150 mm plate would not extend past
+the 160 mm square by the boundary band, so those plates now come from the new `edge_plate_size_mm` (400, 400, unchanged).
+`ramp_quanta` goes from 4 to 2, which keeps about 32 image rows per quantum at 1600 mm (64.5 rows of board height) and gives
+tilts of 0.30 deg at 400 mm to 4.74 deg at 1600 mm. Tilts are feasible from 476 mm on (45 deg about V leaves the edge at
+405 mm), but the sub-series runs at the reduced stations, so the planned tilt stations stay 800 and 1600 mm and the budget is
+unchanged (7,194 poses, 42,520 frames, 7.18 h). Because the board is only 21 x 16 px at 1600 mm on the `--quick` sensor,
+`scaled_parameters` divides `boundary_band_half_width_px` by the pixel divisor there, and the test region of `test_simulate`
+shrank to 28 x 28 px.
