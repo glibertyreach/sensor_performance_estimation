@@ -120,6 +120,8 @@ const DARK_FOOTER_Y = SLIDE_H - MARGIN - DARK_FOOTER_H; // footer top
 // Typography (points)
 // ---------------------------------------------------------------------------------------------
 const TITLE_PT = 34; // content-slide title (titles are kept to about 54 characters so one line fits)
+const TITLE_MIN_PT = 30; // smallest content-slide title (a long title is stepped down to it)
+const TITLE_STEP_PT = 2; // step of that reduction
 const DARK_TITLE_PT = 44; // dark-slide title
 const DARK_SUBTITLE_PT = 22; // title-slide subtitle
 const FOOTER_PT = 14; // title-slide footer
@@ -199,13 +201,13 @@ const TITLE_ART = {
 };
 
 const PRODUCT = {
-	cardH: 2.8, // stat card height
+	cardH: 2.6, // stat card height (2.8 in the registration generator; the body paragraph needs the height)
 	badgeD: BADGE_D, // icon badge on each card
 	valueH: 0.9, // height of the stat value line
-	labelH: 0.6, // height of the stat label (two lines)
-	messageH: 0.7, // key-message row height
+	labelH: 0.8, // height of the stat label (three lines; 0.6 in the registration generator, whose labels ran to two)
+	messageH: 0.8, // key-message row height (two lines at 22 pt; 0.7 in the registration generator)
 	messageBadgeD: 0.6, // icon badge next to the message
-	bodyPt: 20, // body text size
+	bodyPt: BODY_PT, // body text size (20 in the registration generator; this deck's paragraph is longer)
 };
 
 const FLOW = {
@@ -244,7 +246,7 @@ const COST = {
 	cellPt: BODY_MIN_PT,
 	statValuePt: STAT_PRICE_LONG_PT,
 	statValueH: 0.6, // stat value line height
-	statLabelH: 0.6, // stat label height (two lines)
+	statLabelH: 0.8, // stat label height (three lines; 0.6 in the registration generator)
 };
 
 // Figures that stand bare on the slide (no white card around them) get a thin outline of their own size.
@@ -309,9 +311,9 @@ const PLATE_SPEC = {
 
 const ACCEPTANCE = {
 	listW: 8.7, // checklist column width (wide enough that the drawing number SC1-05 does not break at a hyphen)
-	textPt: BODY_PT,
+	textPt: BODY_MIN_PT, // 16 in the registration generator; eight items, one of them long, need 14 pt to stay on two lines
 	iconD: BADGE_SMALL_D,
-	rowGap: GAP_TIGHT, // gap between checklist rows (six items, most of two lines)
+	rowGap: 0.1, // gap between checklist rows (GAP_TIGHT in the registration generator, which had six items)
 	badgeD: 2.6, // large clipboard-check circle on the right
 };
 
@@ -345,13 +347,12 @@ const PLAN = {
 };
 
 const LOOP = {
-	cardH: 3.2, // step cards (tall enough for the longest step text: six lines at 14 pt in a narrow card)
-	headPt: 18,
+	cardH: 3.1, // step cards (tall enough for the longest step text: seven lines at 14 pt in a narrow card; the head sits beside the badge, which is why 3.2 in the registration generator can be less)
+	headPt: 16, // 18 in the registration generator; the head shares a line with the badge, and a long head wraps to two lines
 	textPt: BODY_MIN_PT,
-	headH: 0.35,
 	statValuePt: STAT_PRICE_PT, // 32 pt keeps '~30 min' on one line in the narrow stat box
 	statValueH: 0.6, // stat value line height
-	statLabelH: 0.6, // stat label height
+	statLabelH: 0.95, // stat label height (four lines in a narrow stat card; 0.6 in the registration generator)
 	rowH: 1.8, // lower row (stats and message)
 	messageBadgeD: ICON_BADGE_D,
 };
@@ -370,7 +371,8 @@ const CHECKS = {
 	headPt: CARD_HEAD_PT,
 	flagPt: BODY_PT,
 	textPt: BODY_MIN_PT, // four cards in a 2 x 2 grid, each with a head, a flag line and up to four lines of text: 14 pt fits
-	cardPad: GAP_TIGHT, // padding inside each card (tighter than CARD_PAD so the text fits)
+	cardPad: 0.15, // padding inside each card (GAP_TIGHT in the registration generator; tighter so the five-card slide fits)
+	gap: GAP_TIGHT, // gap between card rows and between the grid and the caption (GAP in the registration generator; the five-card slide needs the height)
 	perRow: { 4: [2, 2], 5: [3, 2] }, // cards per row, by card count (the grid was fixed at two columns in the registration generator)
 };
 // Icon and fill color (a THEME color key) of the cards of a checks slide, by slide id; a slide not listed gets warning triangles on accent4 (signal red, for things that go wrong).
@@ -381,20 +383,25 @@ const CHECKS_ICONS = {
 
 // Three columns of icon + head + bullets over one boxed key message (robot_program, prep).
 const COLUMNS_MESSAGE = {
-	iconD: ICON_BADGE_D,
-	headPt: HEAD_PT,
+	iconD: 0.55, // column icon circle (ICON_BADGE_D in the registration generator; the bullets need the height)
+	headPt: CARD_HEAD_PT, // 18 pt (HEAD_PT, 20, in the registration generator): a two-line head fits the head box
+	headH: 0.6, // height of the head box, beside the icon (two lines at 18 pt)
+	bulletGap: GAP_TIGHT / 2, // gap between the head row and the bullets (GAP_TIGHT in the registration generator)
 	messageIconD: ICON_BADGE_D,
+	bottomPad: 0.1, // padding under the bullets (CARD_PAD in the registration generator)
+	messageGap: GAP_TIGHT, // gap between the columns and the message box (GAP in the registration generator)
+	paraSpacePt: 4, // space after each bullet (PARA_SPACE_PT in the registration generator; this deck's columns have up to six bullets of two or three lines)
 };
 const ROBOT_PROGRAM = {
 	bulletPt: BODY_MIN_PT, // three narrow columns, the outputs column with 13 lines at 16 pt: 14 pt keeps every column inside its card
-	paraSpacePt: PARA_SPACE_PT, // tighter than the roomy default so the longest column fits
+	paraSpacePt: COLUMNS_MESSAGE.paraSpacePt, // tighter than the roomy default so the longest column fits
 	messageH: 0.8, // the message runs one line
 };
 
 // Preparation slide: three columns of icon + head + bullets over the boxed message (same helper as robot_program).
 const PREP = {
 	bulletPt: BODY_MIN_PT, // three narrow columns with up to five bullets: 14 pt keeps every column inside its card
-	paraSpacePt: PARA_SPACE_PT,
+	paraSpacePt: COLUMNS_MESSAGE.paraSpacePt,
 	messageH: 0.8, // message box height (the message runs two lines at 18 pt; a little less than the stage-1 0.9 gives the bullets room)
 };
 
@@ -739,7 +746,11 @@ async function buildDeck(contentJson, outputPptx) {
 
 	/** Title (placeholder) of a content or dark slide. */
 	function title(slide, str) {
-		slide.addText(str, { placeholder: "title" });
+		// Changed from the registration generator: a title that the text-width model puts on two lines at TITLE_PT is set a
+		// point or two smaller (down to TITLE_MIN_PT) so that it stays on one line, as the layout's title box is one line high.
+		let pt = TITLE_PT;
+		while (pt > TITLE_MIN_PT && countLines(str, CONTENT_W, pt, true) > 1) pt -= TITLE_STEP_PT;
+		slide.addText(pt === TITLE_PT ? str : [{ text: str, options: { fontSize: pt } }], { placeholder: "title" }); // run-level size: the placeholder ignores a size given in its own options
 	}
 
 	/**
@@ -1232,9 +1243,10 @@ async function buildDeck(contentJson, outputPptx) {
 			const x = CONTENT_X + i * (cardW + ARROW_GAP);
 			card(slide, `Step ${st.n} card`, x, CONTENT_TOP, cardW, l.cardH);
 			numberBadge(slide, `Step ${st.n} badge`, st.n, x + CARD_PAD, CONTENT_TOP + CARD_PAD, BADGE_D, C.accent1);
-			const hy = CONTENT_TOP + CARD_PAD + BADGE_D + GAP_TIGHT / 2;
-			text(slide, `Step ${st.n} head`, st.head, x + CARD_PAD, hy, cardW - 2 * CARD_PAD, l.headH, { fontSize: l.headPt, bold: true, color: C.text2 });
-			const ty = hy + l.headH;
+			// Changed from the registration generator: the head sits beside the number badge, as on the flow slide
+			const hx = x + CARD_PAD + BADGE_D + GAP_TIGHT;
+			text(slide, `Step ${st.n} head`, st.head, hx, CONTENT_TOP + CARD_PAD, x + cardW - CARD_PAD - hx, BADGE_D, { fontSize: l.headPt, bold: true, color: C.text2, valign: "middle" });
+			const ty = CONTENT_TOP + CARD_PAD + BADGE_D + GAP_TIGHT / 2;
 			text(slide, `Step ${st.n} text`, st.text, x + CARD_PAD, ty, cardW - 2 * CARD_PAD, CONTENT_TOP + l.cardH - CARD_PAD - ty, { fontSize: l.textPt });
 			if (i < n - 1) slide.addShape(R.chevron, { x: x + cardW + (ARROW_GAP - ARROW_W) / 2, y: CONTENT_TOP + (l.cardH - ARROW_H) / 2, w: ARROW_W, h: ARROW_H, fill: { color: C.accent2 }, line: { type: "none" }, objectName: `Arrow ${st.n} to ${st.n + 1}` });
 		});
@@ -1292,7 +1304,7 @@ async function buildDeck(contentJson, outputPptx) {
 		const icons = CHECKS_ICONS[s.id] || { icons: [], fill: "accent4" };
 		const captionH = captionHeightFor(s.caption, CONTENT_W);
 		const captionY = CONTENT_BOTTOM - captionH;
-		const gridH = captionY - GAP - CONTENT_TOP;
+		const gridH = captionY - k.gap - CONTENT_TOP;
 		// Positions: row r holds perRow[r] cards of equal width
 		const slots = [];
 		let idx = 0;
@@ -1304,10 +1316,10 @@ async function buildDeck(contentJson, outputPptx) {
 		const textW = (slot) => slot.cardW - 2 * k.cardPad - k.iconD - GAP_TIGHT;
 		const needH = s.cards.map((c, i) => Math.max(k.iconD, (k.headPt * BODY_LINE_FACTOR) / 72 * countLines(c.head, textW(slots[i]), k.headPt, true) + (k.flagPt * BODY_LINE_FACTOR) / 72 * countLines(c.flag, textW(slots[i]), k.flagPt, true) + textHeight(c.text, textW(slots[i]), k.textPt) + PARA_SPACE_PT / 72) + 2 * k.cardPad);
 		const rowNeed = perRow.map((_, r) => Math.max(...needH.filter((_, i) => slots[i].row === r)));
-		const extra = (gridH - (perRow.length - 1) * GAP - rowNeed.reduce((a, b) => a + b, 0)) / perRow.length;
-		if (extra < 0) console.warn(`WARNING: slide "${s.id}": the cards need ${(-extra * perRow.length).toFixed(2)} in more than the grid has`);
+		const extra = (gridH - (perRow.length - 1) * k.gap - rowNeed.reduce((a, b) => a + b, 0)) / perRow.length;
+		if (extra * perRow.length < -TABLE_FIT_TOLERANCE) console.warn(`WARNING: slide "${s.id}": the cards need ${(-extra * perRow.length).toFixed(2)} in more than the grid has`);
 		const rowH = rowNeed.map((n) => n + Math.max(0, extra));
-		const rowY = rowH.map((_, r) => CONTENT_TOP + rowH.slice(0, r).reduce((a, b) => a + b, 0) + r * GAP);
+		const rowY = rowH.map((_, r) => CONTENT_TOP + rowH.slice(0, r).reduce((a, b) => a + b, 0) + r * k.gap);
 		s.cards.forEach((c, i) => {
 			const { row, x, cardW } = slots[i];
 			const y = rowY[row];
@@ -1342,16 +1354,16 @@ async function buildDeck(contentJson, outputPptx) {
 		const d = o.sizes;
 		const n = s.columns.length;
 		const colW = (CONTENT_W - (n - 1) * GAP) / n;
-		const colsH = CONTENT_H - GAP - o.messageH;
+		const colsH = CONTENT_H - d.messageGap - o.messageH;
 		s.columns.forEach((col, i) => {
 			const x = CONTENT_X + i * (colW + GAP);
 			card(slide, `Column ${i + 1} card`, x, CONTENT_TOP, colW, colsH);
-			iconBadge(slide, `Column ${i + 1} icon`, col.icon, x + CARD_PAD, CONTENT_TOP + CARD_PAD, d.iconD, C.accent2);
-			text(slide, `Column ${i + 1} head`, col.head, x + CARD_PAD + d.iconD + GAP_TIGHT, CONTENT_TOP + CARD_PAD, colW - 2 * CARD_PAD - d.iconD - GAP_TIGHT, d.iconD, { fontFace: HEAD_FONT_REF, fontSize: d.headPt, bold: true, color: C.text2, valign: "middle" });
-			const by = CONTENT_TOP + CARD_PAD + d.iconD + GAP_TIGHT;
-			bullets(slide, `Column ${i + 1} points`, col.points, x + CARD_PAD, by, colW - 2 * CARD_PAD, CONTENT_TOP + colsH - CARD_PAD - by, { fontSize: o.bulletPt, paraSpacePt: o.paraSpacePt });
+			iconBadge(slide, `Column ${i + 1} icon`, col.icon, x + CARD_PAD, CONTENT_TOP + CARD_PAD + (d.headH - d.iconD) / 2, d.iconD, C.accent2);
+			text(slide, `Column ${i + 1} head`, col.head, x + CARD_PAD + d.iconD + GAP_TIGHT, CONTENT_TOP + CARD_PAD, colW - 2 * CARD_PAD - d.iconD - GAP_TIGHT, d.headH, { fontFace: HEAD_FONT_REF, fontSize: d.headPt, bold: true, color: C.text2, valign: "middle" });
+			const by = CONTENT_TOP + CARD_PAD + d.headH + d.bulletGap;
+			bullets(slide, `Column ${i + 1} points`, col.points, x + CARD_PAD, by, colW - 2 * CARD_PAD, CONTENT_TOP + colsH - d.bottomPad - by, { fontSize: o.bulletPt, paraSpacePt: o.paraSpacePt });
 		});
-		const my = CONTENT_TOP + colsH + GAP;
+		const my = CONTENT_TOP + colsH + d.messageGap;
 		slide.addShape(R.roundRect, { x: CONTENT_X, y: my, w: CONTENT_W, h: o.messageH, rectRadius: CARD_RADIUS, fill: { color: o.boxFill }, line: { color: o.boxLine, width: OUTLINE_PT * 2 }, objectName: "Message box" });
 		iconBadge(slide, "Message icon", o.boxIcon, CONTENT_X + CARD_PAD, my + (o.messageH - d.messageIconD) / 2, d.messageIconD, o.boxIconFill);
 		const mtx = CONTENT_X + CARD_PAD + d.messageIconD + GAP_TIGHT;
@@ -1378,6 +1390,7 @@ async function buildDeck(contentJson, outputPptx) {
 	builders.spoilers = (slide, s) => {
 		title(slide, s.title);
 		const sp = SPOILERS;
+		const rowH = (CONTENT_H - (sp.rowsFirstColumn - 1) * sp.rowGap) / sp.rowsFirstColumn;
 		const colW = (CONTENT_W - (sp.columns - 1) * GAP) / sp.columns;
 		const left = s.items.slice(0, sp.rowsFirstColumn);
 		const right = s.items.slice(sp.rowsFirstColumn);
@@ -1389,7 +1402,9 @@ async function buildDeck(contentJson, outputPptx) {
 				pt: sp.textPt,
 				badgeD: sp.iconD,
 				gap: sp.rowGap,
-				fillH: CONTENT_H, // both columns fill the content height (changed from the registration generator, where the shorter column ended early)
+				// The first column's rows are as tall as an equal share of the height; the shorter second column's rows share the whole
+				// content height, so both columns end together (changed from the registration generator, where the shorter column ended early)
+				...(ci === 0 ? { minRowH: rowH } : { fillH: CONTENT_H }),
 				cardKind: "tint",
 				cardPad: sp.cardPad,
 				badge: (i, item) => ({ kind: "icon", icon: item.icon, fill: C.accent4 }),
