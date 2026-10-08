@@ -333,7 +333,7 @@
           "head": "Outputs",
           "icon": "output",
           "points": [
-            "Trigger the row's frames through the capture software, named <proc>_<target>_G<gap>_Z<zzzz>_F<field>_P<pose>_f<frame>.mc",
+            "Trigger the row's frames through the capture software, named from the row by the rule of section 5 (procedure, target, gap, station, field, pose, frame; the example is on the next slide)",
             "Append the REPORTED flange pose, the temperatures and a time stamp to the pose log; note where it is written"
           ]
         }

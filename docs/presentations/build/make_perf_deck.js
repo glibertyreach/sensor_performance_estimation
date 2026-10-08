@@ -220,14 +220,18 @@ const FLOW = {
 // left, icon cards stacked at the right (figureWithCards). Card heights follow their text, so the right column's
 // width decides whether the text fits; figureCardW is what is left for the figure.
 const ICON_CARD_GAP = 0.15; // gap between stacked icon cards of fixtures and runout (0.2 in the registration generator; four long cards need the height)
-const FIGURE_CARD_STEP = 0.1; // step by which a figure card narrows when its icon cards' text does not fit (figureWithCards)
+const FIGURE_SHARE_WIDE = 0.55; // share of the content width taken by the figure column beside cards, points or steps (fixtures, runout, board_build, approach, board)
+const FIGURE_CARD_ICON_D = 0.55;
+const FIGURE_CARD_SIDE_PAD = 0.1;
+const ICON_CARD_GAP_STEP = 0.01; // step by which the gap between icon cards shrinks when their text needs the height (figureWithCards)
+const ICON_CARD_GAP_MIN = 0.05; // smallest gap between icon cards
 const FIXTURES = {
-	figureCardW: 7.0, // white card holding the figure and its caption (at most; it narrows to make the text fit)
-	figureCardMinW: 4.0, // narrowest the figure card gets
-	iconD: ICON_BADGE_D,
-	headPt: CARD_HEAD_PT,
+	stackGapMin: ICON_CARD_GAP_MIN,
+	iconD: FIGURE_CARD_ICON_D, // icon circle (ICON_BADGE_D in the registration generator; the wider figure column leaves the text less width)
+	sidePad: FIGURE_CARD_SIDE_PAD, // padding at the left of the icon, between icon and text, and at the right of the text (CARD_PAD and GAP_TIGHT in the registration generator)
+	headPt: 16, // card head (CARD_HEAD_PT, 18, in the registration generator; the four long cards of the targets slide need the line)
 	textPt: BODY_MIN_PT,
-	cardPad: 0.1, // padding inside each icon card
+	cardPad: 0.02, // padding above and below the text inside each card (0.1 in the registration generator; the wider figure column leaves the text less width, so more lines)
 	textRightPad: 0, // extra space at the right of the card text
 	stackGap: ICON_CARD_GAP, // gap between the icon cards
 };
@@ -257,12 +261,12 @@ const CAPTION_TWO_LINE_H = 0.5; // height of a two-line caption
 const STACK_GAP = GAP; // gap between stacked cards (step lists, card columns)
 
 const BOARD_BUILD = {
-	figureCardW: 5.4,
-	figureCardMinW: 4.0,
-	iconD: ICON_BADGE_D,
+	stackGapMin: ICON_CARD_GAP_MIN,
+	iconD: FIGURE_CARD_ICON_D, // icon circle (ICON_BADGE_D in the registration generator; the wider figure column leaves the text less width)
+	sidePad: FIGURE_CARD_SIDE_PAD, // padding at the left of the icon, between icon and text, and at the right of the text (CARD_PAD and GAP_TIGHT in the registration generator)
 	headPt: CARD_HEAD_PT,
 	textPt: BODY_MIN_PT,
-	cardPad: 0.1, // padding inside each of the four cards (tighter than CARD_PAD so four cards fit)
+	cardPad: 0.05, // padding above and below the text inside each card (0.1 in the registration generator; the wider figure column leaves the text less width, so more lines)
 	textRightPad: 0, // extra space at the right of the card text
 	stackGap: GAP_TIGHT,
 };
@@ -407,26 +411,26 @@ const PREP = {
 
 // Run-out fixture slide: the figure card at the left, four icon cards at the right (same composition as board_build).
 const RUNOUT = {
-	figureCardW: 7.0, // (at most; it narrows to make the text fit; 5.0 in the registration generator, where the figure was square)
-	figureCardMinW: 4.0, // narrowest the figure card gets
-	iconD: ICON_BADGE_D,
+	stackGapMin: ICON_CARD_GAP_MIN,
+	iconD: FIGURE_CARD_ICON_D, // icon circle (ICON_BADGE_D in the registration generator; the wider figure column leaves the text less width)
+	sidePad: FIGURE_CARD_SIDE_PAD, // padding at the left of the icon, between icon and text, and at the right of the text (CARD_PAD and GAP_TIGHT in the registration generator)
 	headPt: CARD_HEAD_PT,
 	textPt: BODY_MIN_PT,
-	cardPad: 0.1, // padding inside each of the four cards
+	cardPad: 0.05, // padding above and below the text inside each card (0.1 in the registration generator; the wider figure column leaves the text less width, so more lines)
 	textRightPad: 0, // extra space at the right of the card text
 	stackGap: ICON_CARD_GAP,
 };
 
 // Slides with a figure beside a list (approach, board, residuals): the figure at the full content height at the left,
 // or at this width when it is wide (the board figure is 2.6 times as wide as tall), the list beside it.
-const IMAGE_BESIDE_MAX_W = 6.8;
+const IMAGE_BESIDE_MAX_W = FIGURE_SHARE_WIDE * CONTENT_W; // the least width of the figure beside points (55 percent of the content width; 6.8 in the registration generator)
 
 // Figure with numbered steps beside it (approach).
 const IMAGE_STEP_W = 0.1; // step by which the figure beside the steps narrows when the steps do not fit
 const IMAGE_STEPS = {
-	figureMinW: 4.0, // narrowest the figure gets
+	stackGapMin: ICON_CARD_GAP_MIN,
 	stepPt: BODY_MIN_PT, // five steps, two of three lines: 14 pt keeps the stack inside the content height
-	rowCardPad: 0.1, // padding inside a step card
+	rowCardPad: 0.05, // padding inside a step card (0.1 in the registration generator; the wider figure leaves the steps less width)
 	stackGap: GAP_TIGHT, // gap between step cards (tighter than GAP so five cards fit)
 	get minRowH() {
 		return BADGE_D + 2 * this.rowCardPad; // minimum step-card height
@@ -838,19 +842,21 @@ async function buildDeck(contentJson, outputPptx) {
 	 */
 	function imageWithSteps(slide, s, o) {
 		const t = IMAGE_STEPS;
-		// Changed from the registration generator: the figure is IMAGE_BESIDE_MAX_W wide at most; when the steps need more height
-		// than the content area has, the figure narrows (in steps of IMAGE_STEP_W, down to t.figureMinW) until they fit.
-		const stepsFit = (figW) => {
+		// Changed again: the figure column is FIGURE_SHARE_WIDE of the content width (or the width that fills the content height,
+		// if that is less); the steps wrap in the rest and, when they need more height than the content area has, the gap between
+		// them shrinks (down to t.stackGapMin) before anything else. A column that still does not fit is reported; the font stays at stepPt.
+		const figW = FIGURE_SHARE_WIDE * CONTENT_W;
+		const stepsFit = (gap) => {
 			const textW = CONTENT_W - figW - GAP - CARD_PAD - BADGE_D - GAP_TIGHT;
 			const need = s.steps.map((st) => Math.max(t.minRowH, textHeight(st.text, textW, t.stepPt) + 2 * t.rowCardPad));
-			return { need, extra: (CONTENT_H - (s.steps.length - 1) * t.stackGap - need.reduce((a, b) => a + b, 0)) / s.steps.length };
+			return { need, gap, extra: (CONTENT_H - (s.steps.length - 1) * gap - need.reduce((a, b) => a + b, 0)) / s.steps.length };
 		};
-		let figW = IMAGE_BESIDE_MAX_W;
-		while (stepsFit(figW).extra < 0 && figW - IMAGE_STEP_W >= t.figureMinW - 1e-9) figW -= IMAGE_STEP_W;
+		let fit = stepsFit(t.stackGap);
+		while (fit.extra < 0 && fit.gap - ICON_CARD_GAP_STEP >= t.stackGapMin - 1e-9) fit = stepsFit(fit.gap - ICON_CARD_GAP_STEP);
 		const img = framedImage(slide, o.figureName, s.image, CONTENT_X, CONTENT_TOP, figW, CONTENT_H, "left");
 		const rx = img.x + img.w + GAP;
 		const rw = CONTENT_X + CONTENT_W - rx;
-		const { need, extra } = stepsFit(figW);
+		const { need, extra, gap } = fit;
 		if (extra < 0) console.warn(`WARNING: ${o.figureName}: steps need ${(-extra * s.steps.length).toFixed(2)} in more than the content height`);
 		let y = CONTENT_TOP;
 		s.steps.forEach((st, i) => {
@@ -859,7 +865,7 @@ async function buildDeck(contentJson, outputPptx) {
 			numberBadge(slide, `Step ${st.n} badge`, st.n, rx + CARD_PAD / 2, y + (rowH - BADGE_D) / 2, BADGE_D, C.accent1);
 			const tx = rx + CARD_PAD / 2 + BADGE_D + GAP_TIGHT;
 			text(slide, `Step ${st.n} text`, st.text, tx, y, rx + rw - CARD_PAD / 2 - tx, rowH, { fontSize: t.stepPt, valign: "middle" });
-			y += rowH + t.stackGap;
+			y += rowH + gap;
 		});
 	}
 
@@ -1057,21 +1063,23 @@ async function buildDeck(contentJson, outputPptx) {
 	 * A white card at the left holding a wide figure and its caption (centered vertically as a group), and icon
 	 * cards stacked to its right. Card heights follow the text they hold (head line plus wrapped text), scaled
 	 * together to fill the column; a column whose text needs more than the height available is reported.
-	 * o: sizes (figureCardW, iconD, headPt, textPt, cardPad, textRightPad, stackGap), icons[], figureName, partName
+	 * o: sizes (stackGap, stackGapMin, iconD, headPt, textPt, cardPad, textRightPad, stackGap), icons[], figureName, partName
 	 */
 	function figureWithCards(slide, s, o) {
 		const d = o.sizes;
-		// Changed from the registration generator: the figure card is d.figureCardW wide at most; when the icon cards'
-		// text needs more height than the column has, the card narrows (in steps of FIGURE_CARD_STEP, down to
-		// d.figureCardMinW) until the text fits, so the figure is as large as the text allows.
-		const cardsNeed = (cardW) => {
-			const rx = CONTENT_X + cardW + GAP;
-			const tw = CONTENT_X + CONTENT_W - CARD_PAD - d.textRightPad - (rx + CARD_PAD + d.iconD + GAP_TIGHT);
+		// Changed again: the figure column takes FIGURE_SHARE_WIDE of the content width (the registration generator, and the first
+		// version of this one, narrowed it to fit the text). The icon cards wrap their text in what is left; when they need more
+		// height than the column has, the gap between them shrinks (down to d.stackGapMin) before anything else; a column that
+		// still does not fit is reported, and the font is never taken below d.textPt.
+		const figureCardW = FIGURE_SHARE_WIDE * CONTENT_W;
+		const cardsNeed = (stackGap) => {
+			const rx = CONTENT_X + figureCardW + GAP;
+			const tw = CONTENT_X + CONTENT_W - d.sidePad - d.textRightPad - (rx + d.sidePad + d.iconD + d.sidePad);
 			const needH = s.cards.map((c) => 2 * d.cardPad + (d.headPt * BODY_LINE_FACTOR) / 72 + textHeight(c.text, tw, d.textPt));
-			return { needH, tw, scale: (CONTENT_H - (s.cards.length - 1) * d.stackGap) / needH.reduce((a, b) => a + b, 0) };
+			return { needH, tw, stackGap, scale: (CONTENT_H - (s.cards.length - 1) * stackGap) / needH.reduce((x, y) => x + y, 0) };
 		};
-		let figureCardW = d.figureCardW;
-		while (cardsNeed(figureCardW).scale < 1 && figureCardW - FIGURE_CARD_STEP >= d.figureCardMinW - 1e-9) figureCardW -= FIGURE_CARD_STEP;
+		let fit = cardsNeed(d.stackGap);
+		while (fit.scale < 1 && fit.stackGap - ICON_CARD_GAP_STEP >= d.stackGapMin - 1e-9) fit = cardsNeed(fit.stackGap - ICON_CARD_GAP_STEP);
 		const innerW = figureCardW - 2 * CARD_PAD;
 		card(slide, "Figure card", CONTENT_X, CONTENT_TOP, figureCardW, CONTENT_H, "white");
 		const info = imageInfo[s.image];
@@ -1082,16 +1090,16 @@ async function buildDeck(contentJson, outputPptx) {
 		caption(slide, "Figure caption", s.caption, CONTENT_X + CARD_PAD, gy + imgH + CAPTION_GAP, innerW, captionH);
 		const rx = CONTENT_X + figureCardW + GAP;
 		const rw = CONTENT_X + CONTENT_W - rx;
-		const tx = rx + CARD_PAD + d.iconD + GAP_TIGHT;
-		const { needH, tw, scale } = cardsNeed(figureCardW);
+		const tx = rx + d.sidePad + d.iconD + d.sidePad;
+		const { needH, tw, scale, stackGap } = fit;
 		if (scale < 1) console.warn(`WARNING: slide "${s.id}": ${o.partName} cards need ${(1 / scale).toFixed(2)} times the height available`);
 		let y = CONTENT_TOP;
 		s.cards.forEach((c, i) => {
 			const cardH = needH[i] * scale;
 			card(slide, `${o.partName} ${i + 1} card`, rx, y, rw, cardH);
-			iconBadge(slide, `${o.partName} ${i + 1} icon`, o.icons[i], rx + CARD_PAD, y + (cardH - d.iconD) / 2, d.iconD, C.accent2);
+			iconBadge(slide, `${o.partName} ${i + 1} icon`, o.icons[i], rx + d.sidePad, y + (cardH - d.iconD) / 2, d.iconD, C.accent2);
 			text(slide, `${o.partName} ${i + 1} text`, [{ text: c.head, options: { fontSize: d.headPt, bold: true, color: C.text2, breakLine: true } }, { text: c.text, options: { fontSize: d.textPt } }], tx, y + d.cardPad, tw, cardH - 2 * d.cardPad, { valign: "middle" });
-			y += cardH + d.stackGap;
+			y += cardH + stackGap;
 		});
 	}
 

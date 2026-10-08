@@ -462,7 +462,7 @@
       "builder": "board",
       "layout": "title_only",
       "section": "Mechanical build",
-      "title": "Standoff set PT-03: the body length is the gap",
+      "title": "Standoff set PT-03: the body sets the gap G",
       "image": "assets/PT-03_standoff_set.png",
       "points": [
         "Aluminum, 10 mm body; the body length is G minus the front part's thickness, so the step the sensor sees is G: 9 and 54 mm for the 6 mm front plates, 5 and 50 mm for the 10 mm raised square, plus or minus 0.05 mm",
