@@ -64,12 +64,18 @@ def disk_geometry(f) -> dict[str, float]:
     assert back_d > POST_DIAMETER_MM + 1.0, f"back face of {f.site_id} too small for the post"
     bore = t - DISK_BORE_FLOOR_MM
     return {"t": t, "run": run, "back_d": back_d, "bore": bore,
-            **{f"post_{g:g}": g + POST_HOLE_DEPTH_MM + bore for g in GAPS}}
+            **{f"free_{g:g}": g - t for g in GAPS},  # free post length: plate front face to the disk's back face
+            **{f"post_{g:g}": g - t + POST_HOLE_DEPTH_MM + bore for g in GAPS}}
+
+
+def post_only_free(gap: float) -> float:
+    """Free length of the post-only post: gap minus the SMALL disk's thickness (the longest free post of the plate)."""
+    return gap - DISK_THICKNESS_MM["small"]
 
 
 def post_only_length(gap: float) -> float:
-    """Post-only post: from the hole bottom to the plane of a disk's back face (gap + hole depth)."""
-    return gap + POST_HOLE_DEPTH_MM
+    """Post-only post: free length plus the seat in the plate; its tip lies where the small disk's back face would be."""
+    return post_only_free(gap) + POST_HOLE_DEPTH_MM
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +119,11 @@ def site_rows() -> list[list[str]]:
             feat = "none: plain plate"
         rows.append([f.site_id, f.kind, f"{f.x_mm:+.2f}", f"{f.y_mm:+.2f}", dia, feat])
     return rows
+
+
+def free_text(gap: float) -> str:
+    """Free post lengths of the small / medium / large disk at ``gap`` as text, e.g. '13 / 12 / 11'."""
+    return " / ".join(c.fmt(gap - DISK_THICKNESS_MM[n]) for n in LEVEL_NAMES)
 
 
 def build_sheet1(out_dir: str) -> list[str]:
@@ -173,9 +184,9 @@ def build_sheet1(out_dir: str) -> list[str]:
 
     # ---- section A-A through the largest disk (cropped) ----
     sec = View(sh, (SEC_ORIGIN_X, SEC_ORIGIN_Y), SEC_SCALE)
-    g = SHOWN_GAP_MM
     G = disk_geometry(LARGEST)
     t, R, run = G["t"], LARGEST.diameter_mm / 2, G["run"]
+    g = SHOWN_GAP_MM - t  # free post length: plate front face to the disk's back face (G minus the disk thickness)
     u_l, u_r = -SEC_HALF, SEC_HALF  # relative to the disk axis (section u = x - disk x)
     hole_r = POST_DIAMETER_MM / 2
     # plate with the blind hole in its front face
@@ -196,13 +207,14 @@ def build_sheet1(out_dir: str) -> list[str]:
     sec.dim_h(-R, R, top, top, 7.0, f"Ø{c.fmt2(LARGEST.diameter_mm)} ±{c.fmt(DISK_DIAMETER_TOL_MM)}")
     sec.dim_v(R, R - run, top, g, 8.0, c.fmt(t))
     sec.dim_v(hole_r, hole_r, 0.0, g, 18.0, c.fmt(g))
+    sec.dim_v(R, R, 0.0, top, 20.0, c.fmt(SHOWN_GAP_MM), base_u=R)  # G: plate front face to the disk's front face
     sec.dim_v(u_r, u_r, 0.0, -PLATE_T, 8.0, c.fmt(PLATE_T))
     sec.dim_v(-hole_r, -hole_r, -POST_HOLE_DEPTH_MM, 0.0, -18.0, c.fmt(POST_HOLE_DEPTH_MM))
     sec.leader((-hole_r, g / 2), f"POST \u00d8{c.fmt(POST_DIAMETER_MM)} {POST_ROD_TOL}", -26.0, 4.0, terminator="dot")
     sh.text(SEC_ORIGIN_X, SEC_ORIGIN_Y - PLATE_T * SEC_SCALE - 11.0,
             "SECTION A-A   SCALE 1:1", size=d.FONT_LABEL, ha="center", weight="bold")
     sh.text(SEC_ORIGIN_X, SEC_ORIGIN_Y - PLATE_T * SEC_SCALE - 16.5,
-            f"through disk_02 (largest) with its post, {c.fmt(g)} mm set", size=d.FONT_NOTE, ha="center")
+            f"through disk_02 (largest) with its post, G = {c.fmt(SHOWN_GAP_MM)}", size=d.FONT_NOTE, ha="center")
 
     notes = [
         f"Back plate {c.fmt(PLATE_W)} × {c.fmt(PLATE_H)} × {c.fmt(PLATE_T)} (outline rounded up to whole mm from "
@@ -212,10 +224,11 @@ def build_sheet1(out_dir: str) -> list[str]:
         f"front face, square to it. Posts (sheet 2) are a slip fit, secured with low-strength removable retaining compound; "
         f"swap the posts to change the gap. Thin circles are the disks (sheet 2); phantom circles are blank sites: no "
         f"feature, keep free of marks.",
-        c.NOTE_FINISH + " " + c.NOTE_FLATNESS + " Blast the plate face with the disks and posts in the same batch.",
+        c.NOTE_FINISH + " " + c.NOTE_FLATNESS + " Posts as drawn, dull: do not blast.",
         c.NOTE_SPIGOT,
-        f"Gap G ({c.fmt(GAP_SMALL_MM)} or {c.fmt(GAP_LARGE_MM)} mm) is measured from the plate's front face to the back "
-        f"face of the disk. The plate carries no standoffs.",
+        f"G ({c.fmt(GAP_SMALL_MM)} or {c.fmt(GAP_LARGE_MM)} mm) is the depth step from the plate's front face to the disk's front face, so "
+        f"the free post is G minus the disk thickness ({free_text(GAP_SMALL_MM)} mm at G = {c.fmt(GAP_SMALL_MM)}; {free_text(GAP_LARGE_MM)} at "
+        f"G = {c.fmt(GAP_LARGE_MM)}). No standoffs. The post is drawn 2.0 mm against the code's {POSTS[0].diameter_mm:.3f}: drafter's rounding.",
     ]
     bottom = sh.notes_block(NOTES_X, NOTES_TOP, NOTES_W, notes, size=c.NOTE_SIZE)
     assert bottom > d.FRAME_BOTTOM, f"notes overflow the sheet (bottom {bottom:.1f})"
@@ -245,14 +258,15 @@ MEDIUM_DISK_R_MM = 12.0  # disks smaller than this take their back diameter text
 SMALL_DISK_R_MM = 5.0  # disks smaller than this take their diameter text outside the dimension
 S2_BORE_LEADER_DROP = 18.0  # the bore leader's elbow lies this far below the disk's back face (paper)
 S2_SMALL_SIDE_DIM = 36.0  # offset of the gap and seat dimension lines of the small disk (paper)
+S2_G_DIM_STEP = 11.0  # the G dimension line lies this far outside the free-length line (paper)
 S2_DIM_ROW = 8.0  # offset of dimension lines from the feature (paper)
 
 
 def draw_assembly(sh: Sheet, f, cx: float) -> None:
     """Section of one disk with its post (15 mm set), the plate front face and the post hole in phantom."""
     G = disk_geometry(f)
-    g = SHOWN_GAP_MM
     t, R, run, bore = G["t"], f.diameter_mm / 2, G["run"], G["bore"]
+    g = SHOWN_GAP_MM - t  # free post length: plate front face to the disk's back face
     rp = POST_DIAMETER_MM / 2
     v = View(sh, (cx, S2_Z0_Y), S2_SCALE)
     top = g + t
@@ -276,6 +290,7 @@ def draw_assembly(sh: Sheet, f, cx: float) -> None:
     side_off = S2_SMALL_SIDE_DIM if small else S2_DIM_ROW + 2.0  # the small disk's diameter text sits left of this line
     v.dim_v(rp, rp, 0.0, g, side_off, c.fmt(g), base_u=R - run + 1.0)
     v.dim_v(rp, rp, -POST_HOLE_DEPTH_MM, 0.0, side_off, c.fmt(POST_HOLE_DEPTH_MM), base_u=R - run + 1.0)
+    v.dim_v(rp, rp, 0.0, top, side_off + S2_G_DIM_STEP, c.fmt(SHOWN_GAP_MM), base_u=R - run + 1.0)  # G
     v.leader((-rp, g + bore / 2), f"BORE \u00d8{c.fmt(POST_DIAMETER_MM)} {POST_HOLE_TOL}\n\u00d7 {c.fmt(bore)} DEEP", -20.0,
              -(S2_BORE_LEADER_DROP + bore), terminator="dot")
     low = S2_Z0_Y - POST_HOLE_DEPTH_MM * S2_SCALE
@@ -287,7 +302,7 @@ def draw_assembly(sh: Sheet, f, cx: float) -> None:
 
 def draw_post_only(sh: Sheet) -> None:
     """The post-only post in place, G = 15 (the 60 mm post is the same part, longer)."""
-    g = SHOWN_GAP_MM
+    g = post_only_free(SHOWN_GAP_MM)  # free length: tip at the plane of the small disk's back face
     rp = POST_DIAMETER_MM / 2
     v = View(sh, S2_POST_ONLY, S2_SCALE)
     half = 8.0
@@ -298,28 +313,29 @@ def draw_post_only(sh: Sheet) -> None:
     v.center_v(-POST_HOLE_DEPTH_MM - 3.0, g + 3.0, 0.0)
     v.dim_v(rp, rp, 0.0, g, 8.0, c.fmt(g), base_u=rp)
     v.dim_v(rp, rp, -POST_HOLE_DEPTH_MM, 0.0, 8.0, c.fmt(POST_HOLE_DEPTH_MM), base_u=rp)
-    L = post_only_length(g)
+    L = g + POST_HOLE_DEPTH_MM  # post-only length: free length + seat
     v.dim_v(rp, rp, -POST_HOLE_DEPTH_MM, g, 18.0, f"L = {c.fmt(L)}", base_u=rp)
     x0 = S2_POST_ONLY[0] + 24.0
     y0 = S2_POST_ONLY[1] + g * S2_SCALE
     sh.text(x0, y0 - 1.0, f"POST-ONLY POST (site {POSTS[0].site_id})", size=d.FONT_NOTE, weight="bold")
     sh.text(x0, y0 - 5.8, f"\u00d8{c.fmt(POST_DIAMETER_MM)} {POST_ROD_TOL} stainless drill rod", size=d.FONT_NOTE)
-    sh.text(x0, y0 - 10.6, f"L = G + {c.fmt(POST_HOLE_DEPTH_MM)}: {c.fmt(post_only_length(GAP_SMALL_MM))} (G {c.fmt(GAP_SMALL_MM)}),",
+    sh.text(x0, y0 - 10.6, f"free = G \u2212 {c.fmt(DISK_THICKNESS_MM['small'])}: {c.fmt(post_only_free(GAP_SMALL_MM))} / {c.fmt(post_only_free(GAP_LARGE_MM))}",
             size=d.FONT_NOTE)
-    sh.text(x0, y0 - 15.4, f"{c.fmt(post_only_length(GAP_LARGE_MM))} (G {c.fmt(GAP_LARGE_MM)}), same part", size=d.FONT_NOTE)
+    sh.text(x0, y0 - 15.4, f"L = {c.fmt(post_only_length(GAP_SMALL_MM))} (G {c.fmt(GAP_SMALL_MM)}), {c.fmt(post_only_length(GAP_LARGE_MM))} (G {c.fmt(GAP_LARGE_MM)})", size=d.FONT_NOTE)
     sh.text(S2_POST_ONLY[0], S2_POST_ONLY[1] - POST_HOLE_DEPTH_MM * S2_SCALE - S2_LABEL_DY,
             "POST-ONLY SITE, 15 mm SET   SCALE 2:1", size=d.FONT_LABEL, ha="center", weight="bold")
 
 
 def parts_rows() -> list[list[str]]:
-    rows = [["Part", "G", "Front \u00d8 \u00b10.02", "t", "Back \u00d8", "Bore", "Post L"]]
+    rows = [["Part", "G", "Front \u00d8 \u00b10.02", "t", "Back \u00d8", "Bore", "Free", "Post L"]]
     for f in sorted(DISKS, key=lambda f: -f.level_index):
         G = disk_geometry(f)
         for gap in GAPS:
             rows.append([f"{f.site_id} + post", c.fmt(gap), c.fmt2(f.diameter_mm), c.fmt(G["t"]), c.fmt2(G["back_d"]),
-                         c.fmt(G["bore"]), c.fmt(G[f"post_{gap:g}"])])
+                         c.fmt(G["bore"]), c.fmt(G[f"free_{gap:g}"]), c.fmt(G[f"post_{gap:g}"])])
     for gap in GAPS:
-        rows.append([f"{POSTS[0].site_id} (post only)", c.fmt(gap), "-", "-", "-", "-", c.fmt(post_only_length(gap))])
+        rows.append([f"{POSTS[0].site_id} (post only)", c.fmt(gap), "-", "-", "-", "-", c.fmt(post_only_free(gap)),
+                     c.fmt(post_only_length(gap))])
     return rows
 
 
@@ -329,7 +345,7 @@ def build_sheet2(out_dir: str) -> list[str]:
     for f in DISKS:
         draw_assembly(sh, f, S2_COLUMNS_X[f.level_index])
     draw_post_only(sh)
-    sh.table(S2_TABLE[0], S2_TABLE[1], [32.0, 10.0, 28.0, 10.0, 18.0, 13.0, 17.0], parts_rows(),
+    sh.table(S2_TABLE[0], S2_TABLE[1], [32.0, 10.0, 28.0, 9.0, 17.0, 12.0, 12.0, 15.0], parts_rows(),
              "PARTS: 6 DISK + POST ASSEMBLIES, 2 POST-ONLY POSTS", size=d.FONT_MIN)
     c.draw_edge_detail(sh, S2_DET_ORIGIN, S2_DET_SCALE, DISK_THICKNESS_MM["large"], material_side=-1,
                        title="DETAIL A   SCALE 4:1", subtitle="disk edge, 4 mm disk shown; 2 and 3 mm disks the same")
@@ -342,16 +358,21 @@ def build_sheet2(out_dir: str) -> list[str]:
         f"\u00d8{c.fmt(POST_DIAMETER_MM)} {POST_HOLE_TOL} (depth = t \u2212 {c.fmt(DISK_BORE_FLOOR_MM)}, from the back) with structural adhesive; keep the "
         f"adhesive off the front face. The free end seats in the plate's blind hole (sheet 1), slip fit, secured with low-strength "
         f"removable retaining compound.",
-        f"Post length L = G + {c.fmt(POST_HOLE_DEPTH_MM)} (seat in the plate) + bore depth. The post-only post has no disk: L = G + "
-        f"{c.fmt(POST_HOLE_DEPTH_MM)}, its free end at the plane of a disk's back face.",
-        f"G ({c.fmt(GAP_SMALL_MM)} or {c.fmt(GAP_LARGE_MM)} mm) is the distance from the plate's front face to the back face of the disk. "
-        f"Both gap sets are delivered; the plate (sheet 1) is shared.",
-        c.NOTE_FINISH + " Blast the front faces of the disks with the plate.",
+        f"Post length L = free length + {c.fmt(POST_HOLE_DEPTH_MM)} (seat in the plate) + bore depth = G + {c.fmt(POST_HOLE_DEPTH_MM - DISK_BORE_FLOOR_MM)} "
+        f"for every disk ({c.fmt(GAPS[0] + POST_HOLE_DEPTH_MM - DISK_BORE_FLOOR_MM)} at G = {c.fmt(GAPS[0])}, {c.fmt(GAPS[1] + POST_HOLE_DEPTH_MM - DISK_BORE_FLOOR_MM)} at "
+        f"G = {c.fmt(GAPS[1])}), because bore = t \u2212 {c.fmt(DISK_BORE_FLOOR_MM)}. The post-only post has no disk: free length G \u2212 "
+        f"{c.fmt(DISK_THICKNESS_MM['small'])} (the small disk's thickness; the longest free post), L = free + {c.fmt(POST_HOLE_DEPTH_MM)}; its tip lies "
+        f"where the small disk's back face would be.",
+        f"G ({c.fmt(GAP_SMALL_MM)} or {c.fmt(GAP_LARGE_MM)} mm) is the depth step from the plate's front face to the disk's front face; the free post "
+        f"is G minus the disk thickness ({free_text(GAP_SMALL_MM)} mm at G = {c.fmt(GAP_SMALL_MM)}; {free_text(GAP_LARGE_MM)} at G = {c.fmt(GAP_LARGE_MM)}). "
+        f"Both sets are delivered; the plate (sheet 1) is shared.",
+        c.NOTE_FINISH + " Blast the front faces of the disks with the plate. Posts as drawn, dull: do not blast. The post is drawn 2.0 mm "
+        f"against the code's {POSTS[0].diameter_mm:.3f}: drafter's rounding.",
     ]
     bottom = sh.notes_block(NOTES_X, S2_NOTES_TOP, S2_NOTES_W, notes, size=c.NOTE_SIZE)
     assert bottom > d.FRAME_BOTTOM, f"notes overflow the sheet (bottom {bottom:.1f})"
     sh.title_block(TitleInfo("PT-06 sheet 2/2", "T4 disks and posts", "6 disks + 8 posts",
-                             "Disks 6061-T6 turned; posts stainless drill rod", "Disk front faces fine glass-bead blast",
+                             "Disks 6061-T6 turned; posts stainless drill rod", "Disk fronts glass-bead blast; posts dull, as drawn",
                              "2:1, 4:1"))
     path = os.path.join(out_dir, "PT-06_T4_disk_plate_sheet2.png")
     issues = sh.save(path)
@@ -370,7 +391,7 @@ def print_checks() -> None:
     for f in DISKS:
         G = disk_geometry(f)
         print(f"PT-06 {f.site_id}: front D {f.diameter_mm:.3f}, t {G['t']:g}, back D {G['back_d']:.3f}, bore {G['bore']:g}, "
-              f"post lengths {G['post_15']:g} / {G['post_60']:g}")
+              f"free {G['free_15']:g} / {G['free_60']:g}, post lengths {G['post_15']:g} / {G['post_60']:g}")
     for g in GAPS:
         print(f"PT-06 post-only length at gap {g:g}: {post_only_length(g):g}")
 
