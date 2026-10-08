@@ -153,10 +153,41 @@ def hidden_threshold_mm(gap_mm: float) -> float:
     return gap_mm * math.tan(math.radians(HIDE_RAY_ANGLE_DEG)) + HIDE_MARGIN_MM
 
 
-def hidden_threshold_strict_mm(gap_mm: float, front_thickness_mm: float) -> float:
-    """Stricter form of the check: the ray that grazes the front-face edge of the opening drops the front part's
-    thickness as well, so it is ((gap + thickness) x tan 30 + 5 mm) from the opening edge at the back plate."""
-    return (gap_mm + front_thickness_mm) * math.tan(math.radians(HIDE_RAY_ANGLE_DEG)) + HIDE_MARGIN_MM
+def standoff_body_length(gap_mm: float, front_thickness_mm: float) -> float:
+    """Body length of the PT-03 standoff for a depth step ``gap_mm`` and a front part of the given thickness.
+    Read from PT-03's ``STANDOFF_BODY_LENGTHS_MM`` when it exists; otherwise computed as gap minus thickness."""
+    try:
+        import part_03_standoffs as p3
+
+        table = getattr(p3, "STANDOFF_BODY_LENGTHS_MM", None)
+    except ImportError:
+        table = None
+    if table and (gap_mm, front_thickness_mm) in table:
+        return float(table[(gap_mm, front_thickness_mm)])
+    return gap_mm - front_thickness_mm
+
+
+def body_length_source() -> str:
+    """Say where standoff body lengths come from (for the printed checks)."""
+    try:
+        import part_03_standoffs as p3
+
+        return "PT-03 STANDOFF_BODY_LENGTHS_MM" if getattr(p3, "STANDOFF_BODY_LENGTHS_MM", None) else "computed here as G - thickness (PT-03 has no STANDOFF_BODY_LENGTHS_MM yet)"
+    except ImportError:
+        return "computed here as G - thickness"
+
+
+def standoff_label(gap_small: float, gap_large: float, front_thickness_mm: float) -> str:
+    """Section label of a standoff: body length for both gaps, with G the face-to-face step."""
+    return (f"BODY {fmt(standoff_body_length(gap_small, front_thickness_mm))} (G = {fmt(gap_small)}); "
+            f"{fmt(standoff_body_length(gap_large, front_thickness_mm))} FOR G = {fmt(gap_large)}")
+
+
+def gap_convention_note(front_thickness_mm: float, gap_small: float, gap_large: float) -> str:
+    """The note that states the meaning of G on a sheet."""
+    return (f"G ({fmt(gap_small)} or {fmt(gap_large)} mm) is the depth step between the front face of the front part and the front face of "
+            f"the back plate; the standoff body is G minus the front part's {fmt(front_thickness_mm)} mm: "
+            f"{fmt(standoff_body_length(gap_small, front_thickness_mm))} or {fmt(standoff_body_length(gap_large, front_thickness_mm))} mm.")
 
 
 def distance_to_square(point: tuple[float, float], side: float, rot_deg: float,
@@ -290,7 +321,8 @@ def standoff_piece(u0: float, gap: float) -> list[tuple[float, float]]:
 # ---------------------------------------------------------------------------
 def draw_edge_detail(sh: Sheet, origin: tuple[float, float], scale: float, thickness: float, material_side: int,
                      title: str, subtitle: str = "", face_label: str = "FRONT FACE (SENSOR SIDE)",
-                     land_label: str | None = None, extra_mm: float = EDGE_DETAIL_EXTRA_MM) -> dict[str, float]:
+                     land_label: str | None = None, extra_mm: float = EDGE_DETAIL_EXTRA_MM,
+                     land_dy: float = 8.0) -> dict[str, float]:
     """Draw a section through one knife edge, perpendicular to the edge.
 
     ``origin`` is the paper position of the front-face edge point (u = 0, z = 0).  ``material_side`` is +1
@@ -318,7 +350,7 @@ def draw_edge_detail(sh: Sheet, origin: tuple[float, float], scale: float, thick
     # horizontal run of the bevel, below the back face
     v.dim_h(0.0, m * run, -thickness, -thickness, -9.0, fmt(round(run, 2)), ext0=True, ext1=True)
     # the land: leader to the land with its tolerance
-    v.leader((0.0, -EDGE_LAND_MM / 2), land_label or f"LAND {LAND_TEXT}", open_sgn * 16.0, 8.0, terminator="dot")
+    v.leader((0.0, -EDGE_LAND_MM / 2), land_label or f"LAND {LAND_TEXT}", open_sgn * 16.0, land_dy, terminator="dot")
     # bevel angle from the plate normal
     ang0 = -90.0
     ang1 = math.degrees(math.atan2(-(thickness - EDGE_LAND_MM), m * run))

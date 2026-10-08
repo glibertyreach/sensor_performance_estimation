@@ -73,8 +73,11 @@ DOWEL_HEIGHT_MM = 6.0                     # of the dowel axis above the spigot f
 BACK_PLATE_THICKNESS_MM = 8.0
 FRONT_PLATE_THICKNESS_MM = 6.0
 STANDOFF_DIAMETER_MM = 10.0               # PT-03
-GAP_SHOWN_MM = PARAMS.gap_small_mm        # the standoff length drawn
+GAP_SHOWN_MM = PARAMS.gap_small_mm        # the gap G drawn: the step between the two faces the sensor sees
 GAP_OTHER_MM = PARAMS.gap_large_mm
+# The standoff body is the gap less the front plate's thickness, so that the front FACE stands G above the back plate.
+STANDOFF_BODY_SHOWN_MM = GAP_SHOWN_MM - FRONT_PLATE_THICKNESS_MM
+STANDOFF_BODY_OTHER_MM = GAP_OTHER_MM - FRONT_PLATE_THICKNESS_MM
 
 # Layout of the sketch.
 PLATE_HALF_WIDTH_DRAWN_MM = 80.0          # the plates are cut off with break lines at this half width
@@ -122,7 +125,7 @@ def main() -> None:
 
     # Axial coordinates, up the page: the front face of the front plate is 0, the robot is at the top.
     front_bottom, front_top = 0.0, FRONT_PLATE_THICKNESS_MM
-    back_bottom = front_top + gap
+    back_bottom = front_bottom + gap               # G is measured from the front FACE to the back plate
     back_top = back_bottom + BACK_PLATE_THICKNESS_MM
     sflange_bottom, sflange_top = back_top, back_top + SPIGOT_FLANGE_THICKNESS_MM
     adapter_bottom = sflange_top                       # the spigot flange seats against the adapter's face
@@ -183,12 +186,12 @@ def main() -> None:
 
     # The gap G as a dimension, to the left of the plates.
     x_dim = -PLATE_HALF_WIDTH_DRAWN_MM - 12.0
-    ax.annotate("", xy=(x_dim, front_top), xytext=(x_dim, back_bottom),
+    ax.annotate("", xy=(x_dim, front_bottom), xytext=(x_dim, back_bottom),
                 arrowprops=dict(arrowstyle="<->", lw=1.2, color=VERMILLION, shrinkA=0, shrinkB=0))
-    for y in (front_top, back_bottom):
+    for y in (front_bottom, back_bottom):
         ax.plot([x_dim - 4.0, -PLATE_HALF_WIDTH_DRAWN_MM + 4.0], [y, y], color=VERMILLION, lw=0.7, linestyle=":")
-    ax.text(x_dim - 6.0, (front_top + back_bottom) / 2.0,
-            f"gap G\n{gap:g} mm shown\n({GAP_OTHER_MM:g} mm with the\nlong standoffs)", fontsize=LABEL_FONT_SIZE,
+    ax.text(x_dim - 6.0, (front_bottom + back_bottom) / 2.0,
+            f"gap G, face to face\n{gap:g} mm shown\n({GAP_OTHER_MM:g} mm with the\nlong standoffs)", fontsize=LABEL_FONT_SIZE,
             color=VERMILLION, ha="right", va="center", fontweight="bold")
 
     # Part numbers on the drawing (the key at the right names them), the datum and the axis.
@@ -221,8 +224,8 @@ def main() -> None:
             f"plate (4 x M5). One per feature target."),
         (5, f"Dowel, {DOWEL_DIAMETER_MM:g} mm, radial on the spigot, in the keyway: it sets the target's orientation."),
         (6, f"Back plate, {BACK_PLATE_THICKNESS_MM:g} mm."),
-        (7, f"Standoffs PT-03, {STANDOFF_DIAMETER_MM:g} mm diameter, {gap:g} mm long as drawn ({GAP_OTHER_MM:g} mm for "
-            "the large gap); one at each corner of the plate, two shown."),
+        (7, f"Standoffs PT-03, {STANDOFF_DIAMETER_MM:g} mm diameter; the body is G less the front plate's thickness, "
+            f"{STANDOFF_BODY_SHOWN_MM:g} mm as drawn ({STANDOFF_BODY_OTHER_MM:g} mm for the large gap); one at each corner of the plate, two shown."),
         (8, f"Front plate, {FRONT_PLATE_THICKNESS_MM:g} mm: the face the sensor sees."),
     ]
     y = robot_flange_top + 28.0

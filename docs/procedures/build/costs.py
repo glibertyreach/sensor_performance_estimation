@@ -48,9 +48,10 @@ BUILD_ITEMS = (
              "Flange plate with the spigot bore and the cross-pin hole; ISO 9409-1-50-4-M6 interface", "PT-01"),
     CostItem("Target spigots", "4", 240, 600,
              "One per feature target: turned spigot with its orientation dowel and mounting flange", "PT-02"),
-    CostItem("Standoff sets, 15 mm and 60 mm gaps", "3 sets of 8, plus 4 spares", 120, 360,
-             "Set the gap G: between the front and back plates of T3b and T5, and hidden behind the raised square of T3a;"
-             " T4's disks stand on their own 2 mm posts", "PT-03"),
+    CostItem("Standoff sets, 15 mm and 60 mm gaps", "4 lengths, 32 pieces with spares", 150, 450,
+             "Set the gap G (the step the sensor sees) between the front and back plates of T3b and T5, and hidden"
+             " behind the raised square of T3a; the body is G minus the front part's thickness; T4's disks stand on"
+             " their own 2 mm posts", "PT-03"),
     CostItem("T3a, raised square", "1", 350, 900,
              "Back plate, knife-edged 160 mm square on hidden standoffs, back-beveled; bead-blast finish", "PT-04"),
     CostItem("T3b, square window", "1", 350, 900,

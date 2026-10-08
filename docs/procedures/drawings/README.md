@@ -9,6 +9,10 @@ landscape) with its views at one stated scale, a notes block and a title block.
 | PT-01 | Target adapter (120 x 120 x 30 plate; ISO 9409-1-50-4-M6 flange side; Ø40 H7 bore, keyway, cross hole) | 1 | Aluminum 6061-T6 | 1:1 | `PT-01_target_adapter.png` |
 | PT-02 | Target spigot (Ø40 h6 body, Ø80 flange, dowel, cross hole; detail M, mating pattern on each target back plate) | 4 | 303 or 17-4 PH stainless | 1:1 | `PT-02_target_spigot.png` |
 | PT-03 | Standoff set (Ø10 body; M5 x 8 back stud, M5 x 5.5 front stud, front end marked by a groove; L = 15 and L = 60) | 28 (14 + 14) | Aluminum 6061-T6 | 2:1 | `PT-03_standoff_set.png` |
+| PT-04 | T3a raised square (300 x 300 x 8 back plate with the spigot pattern; 160 x 160 x 10 square, slanted 5 deg, knife edges beveled from the back; four PT-03 standoffs on a 60 mm square) | 1 plate + 1 square | Aluminum tooling plate (MIC-6 or 6061-T6) | 1:2, 1:1, 4:1 | `PT-04_T3a_raised_square.png` |
+| PT-05 | T3b square window (300 x 300 x 6 front plate with the 160 mm window, slanted 5 deg, countersunk from the back; 300 x 300 x 8 plain back plate with the spigot pattern; four standoffs at the corners) | 1 front + 1 back plate | Aluminum tooling plate | 1:2, 1:1, 4:1 | `PT-05_T3b_square_window.png` |
+| PT-06 | T4 disk plate, two sheets (sheet 1: 336 x 198 x 8 back plate with the post holes and the site table; sheet 2: disks with posts, 6 assemblies, and the 2 post-only posts) | 1 plate; 6 disks + 8 posts | Plate aluminum tooling plate; disks 6061-T6; posts stainless drill rod 2 h6 | 1:2, 1:1; 2:1, 4:1 | `PT-06_T4_disk_plate_sheet1.png`, `PT-06_T4_disk_plate_sheet2.png` |
+| PT-07 | T5 cutout plate (336 x 198 x 6 front plate with three countersunk cutouts, 336 x 198 x 8 removable back plate, edge bracket with the spigot extension) | 1 + 1 + 1 | Aluminum tooling plate | 1:2, 1:1, 4:1 | `PT-07_T5_cutout_plate.png` |
 
 PT-01 carries the flange-interface note (ISO 9409-1-50-4-M6, to be confirmed against the chosen robot's
 flange drawing before machining). The dowel of PT-02 and the keyway of PT-01 fix the target's roll; the
@@ -33,6 +37,12 @@ outside its cell). The exit status is 1 if any sheet has a layout problem or a g
 | `part_01_target_adapter.py` | PT-01: plan, section A-A, turned section B-B; `geometry_checks()` |
 | `part_02_target_spigot.py` | PT-02: end view, aligned section A-A, detail M; `consistency_checks()` against PT-01 |
 | `part_03_standoffs.py` | PT-03: end view and elevations of both lengths |
+| `spigot_pattern.py` | Mounting constants shared by the plate drawings (spigot hole pattern, flange diameter, dowel direction, orientation mark, standoff studs); PT-02 and PT-03 compare their own constants with it |
+| `target_drawing_common.py` | Shared by PT-04 to PT-07: the specification rules (45 degree back bevel, 0.1 mm land, plate thicknesses, finish), target loading, rounding rule, the 4:1 knife-edge detail, standoff joint sections, hidden-standoff check; `check_against_part_scripts()` cross-checks PT-02 and PT-03 |
+| `part_04_t3a_raised_square.py` | PT-04: plan, section A-A through two standoffs (plane parallel to the square's edges), 4:1 knife-edge detail |
+| `part_05_t3b_square_window.py` | PT-05: plan, offset section A-A, 4:1 knife-edge detail, hidden-standoff check |
+| `part_06_t4_disk_plate.py` | PT-06: sheet 1 (plate, site table, section through the largest disk) and sheet 2 (disk and post assemblies, post-only post, 4:1 disk edge) |
+| `part_07_t5_cutout_plate.py` | PT-07: plan, offset section A-A, 4:1 countersink detail, site table, edge bracket (plan and side view), hidden-standoff check |
 | `make_all.py` | Runs the sheets above |
 
 Every dimension, tolerance, font size, line width and layout coordinate is a named constant with a comment
@@ -55,6 +65,16 @@ at the top of the module that uses it; derived values are computed.
 plate drawings) and stop with an error if the two disagree.
 
 ## Points the shop must confirm (also on the sheets)
+
+PT-04 to PT-07 (target plates):
+
+- Gap G (15 or 60 mm) is taken as the standoff length and the post free length, so the front face of a front plate or disk stands G + its thickness (6, or 10 for the T3a square, or the disk thickness) above the back plate. The code's `gap_mm` is measured from the front face to the back plate: if the code's gap must hold exactly, the standoffs become G - 6 (and G - 10 for T3a), or the planner's gap values become G + thickness.
+- The brief's 6 mm blind M5 holes cannot be made in a 6 mm plate: front plates (PT-05, PT-07) have M5 through-tapped holes with the 5.5 mm front stud ending 0.5 mm below the front face (the plate is bead-blasted before assembly, so the open holes stay in the blasted face); the T3a square is 10 mm thick with blind M5 holes, thread 6 deep, drilled 7.5 deep to the tip of a 118 degree point (full diameter to 6.24 mm, so the thread leaves only 0.24 mm of full-diameter drill below it; floor under the tip 2.5 mm).
+- PT-04: the standoff holes of the back plate lie at r = 42.4 mm, so the rim of the 80 mm spigot flange (r = 40) just touches the M5 thread (r = 2.5): the 8 mm back studs must not stand proud of the back face.
+- PT-06: disk post bores are 2 H7, depth = disk thickness - 0.5 mm (1.5 / 2.5 / 3.5), so the posts are gap + 6 + bore long (22.5 to 69.5 mm); the post-only post is gap + 6 long. The posts are not blasted unless the engineer asks for it.
+- PT-06: the post feature in the code has a diameter of 2.034 mm; the post is made from 2.0 mm rod.
+- PT-07: four standoffs (x = +156 and x = -120, y = +/-87), not six; the bracket carries three M5 x 8 DIN 7984 screws (M5 x 10 would protrude 0.5 mm), and the front face of the bracket extension is bead-blasted because the sensor can see it. The engraved orientation arrow is on the bar's back face (x = -148), not on the extension (too narrow).
+- PT-07: nearest hole (standoff or bracket screw) to a blank site is 7.1 mm; the front plate is 6 mm thick, the bracket screws have only 4.5 mm of thread engagement.
 
 - PT-01: the Ø11 counterbores of the flange screws reach r = 19.5, 0.5 inside the Ø40 bore (four notches,
   6.5 deep); the M6 heads (Ø10) just touch the bore radius.

@@ -1,23 +1,34 @@
 "use strict";
 /**
- * Stage-1 deck generator: builds the two stage-1 decks from their content files.
+ * Performance-testing deck generator: builds the two decks of the VSX3000 performance-testing procedure
+ * from their content files. Adapted from the registration generator (make_registration_deck.js of
+ * plane_plane_registration_ro), which was itself adapted from the stage-1 generator of
+ * depth_calibration_from_spherical_target.
  *
- *   procurement and build deck : build/stage1_build_deck_content.json     -> stage1_procurement_build.pptx
- *   test procedure deck        : build/stage1_procedure_deck_content.json -> stage1_test_procedure.pptx
+ *   procurement and build deck : build/perf_build_deck_content.json     -> vsx3000_procurement_build.pptx
+ *   test procedure deck        : build/perf_procedure_deck_content.json -> vsx3000_test_procedure.pptx
  *
  * Each content JSON is the single source of truth for that deck's text and speaker notes; the figures
- * are read from docs/presentations/assets/*.png (pixel sizes are read at build time).
+ * are read from docs/presentations/assets/*.png (made by build/make_assets.py; pixel sizes are read at
+ * build time; a figure file that is absent is drawn as a labeled placeholder, see loadImage). The only text in this script is the few labels of EXTRA_LABELS (diagram legends) and the
+ * figures' alternative text.
  *
  * Run from the repository root:
  *     NODE_PATH=<folder with node_modules for pptxgenjs, react-icons, react, react-dom, sharp> \
- *         node docs/presentations/build/make_stage1_deck.js                      # builds both decks
- *     NODE_PATH=... node docs/presentations/build/make_stage1_deck.js <content.json> <output.pptx>   # builds one
+ *         node docs/presentations/build/make_perf_deck.js                      # builds both decks
+ *     NODE_PATH=... node docs/presentations/build/make_perf_deck.js <content.json> <output.pptx>   # builds one
  *
  * Structure (see the pptx skill, "Structured decks"):
- *   - a named theme ("Stage-1 Capture") whose colors are written into the file by applyTheme();
+ *   - a named theme ("VSX3000 Performance") whose colors are written into the file by applyTheme();
  *   - every color is a theme (scheme) color, except inside rasterized icons (images need hex);
  *   - two layouts: TITLE_DARK and TITLE_ONLY, with named placeholders that slides fill by name;
  *   - one section per topic (each slide's "section" field); speaker notes on every slide.
+ *
+ * Slides are built by the "builder" field of each slide in the content JSON (falling back to its "id"; see
+ * `builders` below). Several slides share one builder: fixtures and runout (figure card and icon cards),
+ * board (image and check rows), approach (image and numbered steps), plate_spec (table, with the plate
+ * drawing only beside a two-column table), checks, loop, robot_program and prep (columns over a message),
+ * and "pair" (two drawings side by side, new in this generator).
  *
  * All sizes are inches unless a name says "PT" (points). Nothing is hard-coded in the slide
  * builders: every dimension, font size, spacing and color comes from the constants below.
@@ -37,8 +48,8 @@ const fa = require("react-icons/fa");
 const PRESENTATIONS_DIR = path.join("docs", "presentations");
 // The two decks built when no command-line arguments are given: [content JSON, output pptx].
 const DECKS = [
-	[path.join(PRESENTATIONS_DIR, "build", "stage1_build_deck_content.json"), path.join(PRESENTATIONS_DIR, "stage1_procurement_build.pptx")],
-	[path.join(PRESENTATIONS_DIR, "build", "stage1_procedure_deck_content.json"), path.join(PRESENTATIONS_DIR, "stage1_test_procedure.pptx")],
+	[path.join(PRESENTATIONS_DIR, "build", "perf_build_deck_content.json"), path.join(PRESENTATIONS_DIR, "vsx3000_procurement_build.pptx")],
+	[path.join(PRESENTATIONS_DIR, "build", "perf_procedure_deck_content.json"), path.join(PRESENTATIONS_DIR, "vsx3000_test_procedure.pptx")],
 ];
 // Folder of the pptx skill's scripts; only apply_theme.js is used from it.
 const SKILL_SCRIPTS_DIR =
@@ -50,7 +61,7 @@ const { applyTheme } = require(path.join(SKILL_SCRIPTS_DIR, "apply_theme.js"));
 // Theme
 // ---------------------------------------------------------------------------------------------
 const THEME = {
-	name: "Stage-1 Capture",
+	name: "VSX3000 Performance",
 	headFontFace: "Cambria", // headings
 	bodyFontFace: "Calibri", // everything else
 	colors: {
@@ -70,9 +81,10 @@ const THEME = {
 };
 
 // Theme font references, so that text follows the theme instead of naming a font.
-const DECK_SUBJECT = "Stage-1 depth-sensor calibration captures"; // document property shared by both decks
+const DECK_SUBJECT = "VSX3000 performance testing"; // document property shared by both decks
+const DECK_AUTHOR = "Sensor performance estimation"; // document property shared by both decks
 const HEAD_FONT_REF = "+mj-lt"; // theme heading font (Cambria)
-const MONO_FONT = "Courier New"; // the one explicitly named font: the pose-log example line
+const MONO_FONT = "Courier New"; // the one explicitly named font: the pose-log example line (manifest slide)
 
 // ---------------------------------------------------------------------------------------------
 // Page geometry
@@ -107,7 +119,7 @@ const DARK_FOOTER_Y = SLIDE_H - MARGIN - DARK_FOOTER_H; // footer top
 // ---------------------------------------------------------------------------------------------
 // Typography (points)
 // ---------------------------------------------------------------------------------------------
-const TITLE_PT = 34; // content-slide title
+const TITLE_PT = 34; // content-slide title (titles are kept to about 54 characters so one line fits)
 const DARK_TITLE_PT = 44; // dark-slide title
 const DARK_SUBTITLE_PT = 22; // title-slide subtitle
 const FOOTER_PT = 14; // title-slide footer
@@ -123,11 +135,12 @@ const BOX_MESSAGE_PT = 18; // key message inside a box
 const BADGE_NUM_PT = 18; // number inside a numbered circle
 const SMALL_BADGE_NUM_PT = 14; // number inside a small numbered circle
 const DIAGRAM_LABEL_PT = 12; // labels inside the bootstrap diagram
-const MONO_PT = 13; // pose-log example line
+const MONO_PT = 14; // pose-log example line (14 pt: the 88-character example still fits on one line)
 const STAT_PT = 54; // large stat value
 const STAT_MED_PT = 44; // medium stat value
 const STAT_SMALL_PT = 36; // small stat value
 const STAT_PRICE_PT = 32; // stat value that is a price range
+const STAT_PRICE_LONG_PT = 26; // a price range of two four-figure amounts, which must stay on one line in its box
 const BODY_LINE_FACTOR = 1.2; // line height as a multiple of the font size
 const BULLET_INDENT_PT = 14; // hanging indent of bullets
 const PARA_SPACE_PT = 6; // space after each bullet paragraph (default)
@@ -165,18 +178,24 @@ const TABLE_BORDER_PT = 0.5; // table rule weight
 // ---------------------------------------------------------------------------------------------
 // Per-slide settings
 // ---------------------------------------------------------------------------------------------
-// Title slide graphic (sphere B, sphere A and board, bottom-aligned): sizes in inches
+// Title slide graphic: sensor and three tilted boards at three standoffs (see TITLE_ART below)
 const TITLE_ART = {
-	sphereBD: 2.7, // large sphere diameter (sized so the graphic fits between subtitle and footer)
-	sphereAD: 1.35, // small sphere diameter
-	boardW: 2.1, // board width
-	boardH: 1.5, // board height
-	gapBelowSubtitle: GAP, // gap between subtitle and the top of the graphic
+	// Schematic side view of the capture geometry: the sensor at the left looking right at a target (a thin plate seen
+	// edge-on) at three distances, tilted 0, 15 and 30 degrees, as the plan's stations and tilts do (kept from the
+	// registration deck; it illustrates the geometry, it is not to scale). All sizes in inches.
+	sensorW: 1.1, // sensor body width
+	sensorH: 1.5, // sensor body height
+	lensD: 0.5, // lens circle diameter
+	lensInset: 0.15, // distance of the lens circle from the sensor's right face
+	plateW: 0.14, // board thickness as drawn (edge-on)
+	plateH: 2.3, // board height as drawn
+	standoffsMm: [550, 750, 950], // the plan's three standoffs (mm), from the sensor's right face
+	tiltsDeg: [0, 15, 30], // tilt of the board at each standoff (degrees)
+	inchesPerMm: 0.0042, // drawing scale along the viewing direction
+	originD: 0.24, // diameter of the tool-frame origin dot at each board's center
 	bottomGap: GAP, // gap between graphic baseline and footer
 	outlinePt: 2, // outline weight of the shapes
-	boardRadius: 0.1, // board corner radius
-	crossLen: 0.45, // length of the TCP cross inside the large sphere
-	crossThick: 0.05, // thickness of the TCP cross
+	plateRadius: 0.04, // board corner radius
 };
 
 const PRODUCT = {
@@ -196,15 +215,24 @@ const FLOW = {
 	headH: 0.35,
 };
 
+// Fixtures, board_build and runout share one composition: a white card with the wide figure and its caption at the
+// left, icon cards stacked at the right (figureWithCards). Card heights follow their text, so the right column's
+// width decides whether the text fits; figureCardW is what is left for the figure.
+const ICON_CARD_GAP = 0.15; // gap between stacked icon cards of fixtures and runout (0.2 in the registration generator; four long cards need the height)
+const FIGURE_CARD_STEP = 0.1; // step by which a figure card narrows when its icon cards' text does not fit (figureWithCards)
 const FIXTURES = {
-	imageCardW: 7.6, // white card holding the figure and its caption
-	captionH: 0.5, // caption box height (two lines at CAPTION_PT)
+	figureCardW: 7.0, // white card holding the figure and its caption (at most; it narrows to make the text fit)
+	figureCardMinW: 4.0, // narrowest the figure card gets
 	iconD: ICON_BADGE_D,
 	headPt: CARD_HEAD_PT,
 	textPt: BODY_MIN_PT,
+	cardPad: 0.1, // padding inside each icon card
+	textRightPad: 0, // extra space at the right of the card text
+	stackGap: ICON_CARD_GAP, // gap between the icon cards
 };
 
-// Shared by every table slide (cost, suppliers, build_list, buy_list, sphere_spec, plate_spec).
+// Shared by every table slide (cost, suppliers, build_list, buy_list, plate_spec).
+const TABLE_MIN_PT = 13; // smallest table text allowed (tables may be a point smaller than body text; used where a long table must fit)
 const TABLE_HEAD_H = 0.5; // header row height
 const TABLE_CELL_MARGIN = [0.05, 0.12, 0.05, 0.12]; // cell margins: top, right, bottom, left (inches)
 const TABLE_ROW_LINE_FACTOR = BODY_LINE_FACTOR; // row height per text line, as a multiple of the font size
@@ -215,16 +243,9 @@ const COST = {
 	tableW: 7.9, // table width
 	colW: [5.6, 2.3], // table column widths (sum to tableW)
 	cellPt: BODY_MIN_PT,
-	statValuePt: STAT_PRICE_PT,
+	statValuePt: STAT_PRICE_LONG_PT,
 	statValueH: 0.6, // stat value line height
 	statLabelH: 0.6, // stat label height (two lines)
-};
-
-const SPHERES = {
-	iconD: ICON_BADGE_D,
-	headPt: HEAD_PT,
-	headH: 0.4,
-	bulletPt: BODY_PT,
 };
 
 // Figures that stand bare on the slide (no white card around them) get a thin outline of their own size.
@@ -234,67 +255,15 @@ const CAPTION_LINE_H = 0.3; // height of a one-line caption (12 pt)
 const CAPTION_TWO_LINE_H = 0.5; // height of a two-line caption
 const STACK_GAP = GAP; // gap between stacked cards (step lists, card columns)
 
-const MOUNTING = {
-	captionH: CAPTION_TWO_LINE_H, // caption height (bottom of the right column)
-	pointsPt: BODY_PT,
-};
-
-const SPHERE_END = {
-	labelPt: BODY_PT, // bold label under each image
-	labelH: 0.35, // label height (one line)
-	labelGap: GAP_TIGHT, // gap between an image and its label
-};
-
-const TCP = {
-	stepPt: BODY_PT,
-	rowCardPad: 0.1, // padding inside a step card (tight so five cards fit with GAP between them)
-	get minRowH() {
-		return BADGE_D + 2 * this.rowCardPad; // minimum step-card height
-	},
-};
-
-const BOARD = {
-	pointPt: BODY_PT,
-	rowGap: GAP, // gap between rows
-};
-
 const BOARD_BUILD = {
+	figureCardW: 5.4,
+	figureCardMinW: 4.0,
 	iconD: ICON_BADGE_D,
 	headPt: CARD_HEAD_PT,
 	textPt: BODY_MIN_PT,
 	cardPad: 0.1, // padding inside each of the four cards (tighter than CARD_PAD so four cards fit)
 	textRightPad: 0, // extra space at the right of the card text
-};
-
-// Three-ball nest diagram (native shapes). Dimensions in inches, true to scale with each other:
-// the sphere rests on the three balls, so its height above them follows from the other sizes.
-const NEST = {
-	cardW: 6.6, // white card holding both views
-	baseW: 2.9, // base plate width in the side view, and the base outline's side in the top view
-	plateH: 0.28, // base plate thickness in the side view
-	sphereD: 2.3, // large sphere diameter
-	ballD: 0.6, // nest ball diameter
-	triangleR: 0.72, // distance of each ball center from the nest axis (top view)
-	viewGap: GAP, // gap between the two views
-	labelPt: BODY_MIN_PT, // "Side view" / "Top view" labels
-	labelH: 0.35,
-	labelGap: GAP_TIGHT,
-	crossLen: 0.4, // red center cross, arm to arm
-	crossPt: 3, // red cross line weight
-	dashedPt: 2, // dashed sphere outline weight (top view)
-	outlinePt: 1.5, // outline weight of balls and sphere
-	baseRadius: 0.08, // corner radius of the base outline (top view)
-	pointPt: BODY_PT,
-	iconD: BADGE_SMALL_D,
-	get sphereR() { return this.sphereD / 2; },
-	get ballR() { return this.ballD / 2; },
-	// Height of the sphere center above the ball centers: sphere and ball touch, so
-	// (sphereR + ballR)^2 = triangleR^2 + rise^2
-	get rise() { return Math.sqrt((this.sphereR + this.ballR) ** 2 - this.triangleR ** 2); },
-	// Horizontal offset of the two visible balls in the side view (one edge of the triangle faces the viewer)
-	get ballOffsetX() { return this.triangleR * Math.cos(Math.PI / 6); },
-	// Height of the side-view drawing from the sphere's top to the plate's bottom
-	get sideH() { return this.sphereR + this.rise + this.ballR + this.plateH; },
+	stackGap: GAP_TIGHT,
 };
 
 const SUPPLIERS = {
@@ -304,26 +273,25 @@ const SUPPLIERS = {
 
 // "What must be built": table on the left, a tint card with a large toolbox icon on the right.
 const BUILD_LIST = {
-	colW: [5.2, 1.2, 2.6], // Item, Quantity, Drawing
-	cellPt: BODY_MIN_PT,
+	colW: [4.9, 2.1, 1.6, 0.9], // Item, Quantity, Drawing, From (the registration generator had 4.6, 1.2, 1.9, 1.5: ten rows and a two-line caption leave 4.35 in, which only 13 pt and mostly one-line rows fit)
+	cellPt: TABLE_MIN_PT, // 13 pt: ten rows at 14 pt need more height than the slide has
 	iconD: 1.6, // large teal icon circle in the visual card
 };
 
 // "What must be bought": the full content width; the cost column is right-aligned.
 const BUY_LIST = {
-	colW: [4.7, 5.7, 1.933], // Item, Purpose, Estimated cost (sums to CONTENT_W)
+	colW: [4.2, 4.333, 2.3, 1.5], // Item, Purpose, Estimated cost (USD), From stage 1 (sums to CONTENT_W)
 	cellPt: BODY_MIN_PT,
 };
 
-// Sphere purchase specification: long text, full content width, requirement column in bold.
-const SPHERE_SPEC = {
-	colW: [2.3, 5.4, 4.633], // Requirement, Sphere A, Sphere B (sums to CONTENT_W)
-	cellPt: BODY_MIN_PT,
-};
-
-// Plate purchase specification: table on the left, a native-shape drawing of the plate on the right.
+// Plate purchase specification. Changed from the registration generator: the column widths depend on the number of
+// table columns. A two-column table (Requirement, one plate) keeps the native-shape drawing of the plate beside it;
+// a three-column table (Requirement, two kinds of target: the feature targets) takes the full content width and has
+// no drawing, because the board-shaped plate drawing would not describe those targets.
 const PLATE_SPEC = {
-	colW: [1.7, 6.7], // Requirement, Flat plate
+	colW: [1.7, 6.7], // Requirement, plate (two-column table, with the drawing)
+	cellWidePt: TABLE_MIN_PT, // text size of the three-column table: seven rows of up to three lines do not fit the height at 14 pt
+	colWWide: [2.0, 5.2, 5.133], // Requirement, first target group, second target group (three-column table, sums to CONTENT_W)
 	cellPt: BODY_MIN_PT,
 	scale: 0.015, // drawing scale in inches per mm (the 200 x 150 mm plate is drawn 3.0 x 2.25 in)
 	plateWmm: 200, // plate width in the drawing (mm; the long edge)
@@ -341,32 +309,36 @@ const PLATE_SPEC = {
 };
 
 const ACCEPTANCE = {
-	listW: 8.7, // checklist column width (wide enough that the drawing numbers SC1-01 to SC1-06 do not break at a hyphen)
+	listW: 8.7, // checklist column width (wide enough that the drawing number SC1-05 does not break at a hyphen)
 	textPt: BODY_PT,
 	iconD: BADGE_SMALL_D,
-	rowGap: GAP_TIGHT, // gap between checklist rows (seven items, some of two lines)
+	rowGap: GAP_TIGHT, // gap between checklist rows (six items, most of two lines)
 	badgeD: 2.6, // large clipboard-check circle on the right
 };
 
+// Six bootstrap captures: the sensor at the left, then the six frames in a grid of rows x columns, each frame
+// with its text beside it (six frames in one row would leave about 1.5 in for each text).
 const BOOTSTRAP = {
-	frameH: 2.0, // height of each mini image frame
-	sensorW: 1.4, // sensor rectangle width
-	bigD: 0.95, // circle diameter when the sphere is near
-	farD: 0.7, // circle diameter when the sphere is farther (drawn smaller)
-	offsetX: 0.6, // horizontal shift of the "left" circle from the frame center
-	offsetY: 0.35, // vertical shift of the "up" circle from the frame center
+	columns: 3, // frames per row (six frames: two rows of three)
+	frameW: 1.3, // width of each mini image frame
+	frameH: 1.4, // height of each mini image frame
+	rowGap: GAP_TIGHT, // gap between the two rows of frames
+	textGap: GAP_TIGHT, // gap between a frame and its text
+	sensorW: 1.2, // sensor rectangle width (as tall as the frame grid)
+	bigD: 0.95, // circle diameter when the board faces the sensor
+	farD: 0.7, // circle diameter when the board is farther (drawn smaller)
+	tiltRatio: 0.7, // a tilted board is drawn this much narrower (schematic: a real 20 degree tilt foreshortens by only 6 percent)
 	textPt: BODY_MIN_PT,
-	textH: 0.6, // two lines of text under each frame
 	crossPt: 1, // weight of the crosshair lines in each frame
-	pointsPt: 18,
+	pointsPt: BODY_PT,
 	sensorPt: 16, // "Sensor" label size
 	lensD: 0.45, // lens circle on the sensor
-	frameLineGap: 0.25, // margin of the crosshair from the frame edge
+	frameLineGap: 0.2, // margin of the crosshair from the frame edge
 };
 
 const PLAN = {
-	imageTargetW: 9.5, // wanted figure width; the height available may allow less
-	captionH: CAPTION_LINE_H, // one-line caption under the figure
+	imageTargetW: 8.6, // wanted figure width; the height available may allow less (a narrower figure leaves the stat labels room for three lines)
+	captionH: CAPTION_TWO_LINE_H, // two-line caption under the figure
 	valuePt: STAT_SMALL_PT,
 	valueH: 0.6, // stat value line height
 	labelPt: LABEL_PT,
@@ -374,11 +346,11 @@ const PLAN = {
 };
 
 const LOOP = {
-	cardH: 2.7, // step cards
+	cardH: 3.2, // step cards (tall enough for the longest step text: six lines at 14 pt in a narrow card)
 	headPt: 18,
 	textPt: BODY_MIN_PT,
 	headH: 0.35,
-	statValuePt: STAT_SMALL_PT,
+	statValuePt: STAT_PRICE_PT, // 32 pt keeps '~30 min' on one line in the narrow stat box
 	statValueH: 0.6, // stat value line height
 	statLabelH: 0.6, // stat label height
 	rowH: 1.8, // lower row (stats and message)
@@ -388,47 +360,74 @@ const LOOP = {
 const MANIFEST = {
 	headBarH: 0.7, // filled header block inside each card
 	headPt: CARD_HEAD_PT,
-	bulletPt: 18,
+	bulletPt: BODY_PT, // two columns with five and six bullets: 16 pt with the tighter paragraph spacing keeps both inside their cards
+	paraSpacePt: PARA_SPACE_PT,
 	exampleBoxH: 0.8,
 	exampleBadgeD: BADGE_SMALL_D + 0.1,
 };
 
 const CHECKS = {
 	iconD: ICON_BADGE_D,
-	headPt: HEAD_PT,
-	flagPt: 18,
-	textPt: BODY_PT,
+	headPt: CARD_HEAD_PT,
+	flagPt: BODY_PT,
+	textPt: BODY_MIN_PT, // four cards in a 2 x 2 grid, each with a head, a flag line and up to four lines of text: 14 pt fits
+	cardPad: GAP_TIGHT, // padding inside each card (tighter than CARD_PAD so the text fits)
 	captionH: 0.3,
 };
 
-// Three or two columns of icon + head + bullets over one boxed key message (independent, robot_program).
+// Three columns of icon + head + bullets over one boxed key message (robot_program, prep).
 const COLUMNS_MESSAGE = {
 	iconD: ICON_BADGE_D,
 	headPt: HEAD_PT,
-	bulletPt: 18,
-	messageH: 1.3, // message box height
 	messageIconD: ICON_BADGE_D,
 };
 const ROBOT_PROGRAM = {
-	bulletPt: BODY_PT, // three narrow columns: 16 pt keeps the longest column inside its card
+	bulletPt: BODY_MIN_PT, // three narrow columns, the outputs column with 13 lines at 16 pt: 14 pt keeps every column inside its card
 	paraSpacePt: PARA_SPACE_PT, // tighter than the roomy default so the longest column fits
-	messageH: 1.0,
+	messageH: 0.8, // the message runs one line
 };
 
 // Preparation slide: three columns of icon + head + bullets over the boxed message (same helper as robot_program).
 const PREP = {
 	bulletPt: BODY_MIN_PT, // three narrow columns with up to five bullets: 14 pt keeps every column inside its card
 	paraSpacePt: PARA_SPACE_PT,
-	messageH: 0.9, // message box height (the message runs one or two lines)
+	messageH: 0.8, // message box height (the message runs two lines at 18 pt; a little less than the stage-1 0.9 gives the bullets room)
 };
 
-// Run-out fixture slide: the board figure at the left, four icon cards at the right (same composition as board_build).
+// Run-out fixture slide: the figure card at the left, four icon cards at the right (same composition as board_build).
 const RUNOUT = {
+	figureCardW: 7.0, // (at most; it narrows to make the text fit; 5.0 in the registration generator, where the figure was square)
+	figureCardMinW: 4.0, // narrowest the figure card gets
 	iconD: ICON_BADGE_D,
 	headPt: CARD_HEAD_PT,
 	textPt: BODY_MIN_PT,
 	cardPad: 0.1, // padding inside each of the four cards
-	textRightPad: 0.45, // extra space at the right of the card text: wraps the model number DG-61003 as a whole instead of at its hyphen
+	textRightPad: 0, // extra space at the right of the card text
+	stackGap: ICON_CARD_GAP,
+};
+
+// Slides with a figure beside a list (approach, board, residuals): the figure at the full content height at the left,
+// or at this width when it is wide (the board figure is 2.6 times as wide as tall), the list beside it.
+const IMAGE_BESIDE_MAX_W = 6.8;
+
+// Figure with numbered steps beside it (approach).
+const IMAGE_STEP_W = 0.1; // step by which the figure beside the steps narrows when the steps do not fit
+const IMAGE_STEPS = {
+	figureMinW: 4.0, // narrowest the figure gets
+	stepPt: BODY_MIN_PT, // five steps, two of three lines: 14 pt keeps the stack inside the content height
+	rowCardPad: 0.1, // padding inside a step card
+	stackGap: GAP_TIGHT, // gap between step cards (tighter than GAP so five cards fit)
+	get minRowH() {
+		return BADGE_D + 2 * this.rowCardPad; // minimum step-card height
+	},
+};
+
+// Figure with check rows beside it (board, residuals).
+const IMAGE_POINTS = {
+	pointPt: BODY_PT, // the size tried first; the next smaller one in pointPtFallbacks is used when the rows do not fit the height (changed from the registration generator, whose rows all fit at 16 pt)
+	figureMaxW: 8.4, // widest the figure gets (changed from the registration generator, where it was IMAGE_BESIDE_MAX_W)
+	pointPtFallbacks: [BODY_MIN_PT], // sizes tried after pointPt, largest first (never below the body minimum)
+	rowGap: GAP_TIGHT, // gap between rows (five rows, some of three lines)
 };
 
 const SPOILERS = {
@@ -437,23 +436,57 @@ const SPOILERS = {
 	textPt: BODY_PT,
 	iconD: BADGE_D + 0.1,
 	cardPad: GAP_TIGHT, // padding inside each item card (smaller than CARD_PAD so four rows fit)
+	rowGap: GAP_TIGHT, // gap between rows (the left column's first two items run to three lines)
 };
 
 const DELIVERABLES = {
-	listW: 7.5, // checklist column width
-	textPt: BODY_PT,
+	listW: 8.3, // checklist column width
+	textPt: BODY_MIN_PT, // seven items, one of three lines: 14 pt keeps the list inside the content height
 	iconD: BADGE_SMALL_D,
-	rowGap: GAP_TIGHT, // gap between checklist rows (seven items, one of three lines)
+	rowGap: GAP_TIGHT, // gap between checklist rows
 	headPt: HEAD_PT,
 	softwareIconD: ICON_BADGE_D,
 	bulletPt: BODY_PT,
 };
 
+// Icons and figure alternative texts that are not content but belong to a slide, by slide id (the content files carry
+// no icon for the cards of the figure-with-cards slides). A slide id that is not listed gets the default icons.
+const CARD_ICONS = {
+	targets: ["board", "layers", "crosshairs", "ruler"], // T2, T3a/T3b, T4/T5, the two gaps
+	edges: ["crosshairs", "ruler", "layers", "paint"], // bevel, land, posts, finish
+	mounting: ["wrench", "layers", "tool", "crosshairs"], // adapter, spigot, ball-lock pin, datum
+	fixtures_bought: ["gauge", "layers", "wrench", "clock"], // run-out fixture, drift-run stand, ball-lock pins, temperature loggers
+};
+const DEFAULT_CARD_ICONS = ["board", "layers", "crosshairs", "ruler"];
+const FIGURE_ALT = {
+	targets: "Front views of the five targets T2, T3a, T3b, T4 and T5 to one scale",
+	edges: "Cross-section of a cutout and of a disk on its post with the bevel at the knife edge",
+	mounting: "Cross-section of the mounting stack: flange, adapter, spigot, ball-lock pin, back plate, standoffs, front plate",
+	fixtures_bought: "The setup: the sensor on its rigid stand and the robot carrying a target on the adapter",
+	adapter_drawing: "Drawing PT-01, the target adapter",
+	spigot_drawing: "Drawing PT-02, the target spigot and its mating pattern",
+	standoff_drawing: "Drawing PT-03, the standoff set",
+	setup: "The setup: the sensor on its rigid stand and the robot carrying a target on the adapter",
+	mount_check: "Cross-section of the mounting stack: flange, adapter, spigot, ball-lock pin, back plate, standoffs, front plate",
+	stations: "The nine stations along Z and the series that visit each of them",
+	series_z: "Series Z: the step ladder and the ramp, with the approach from below",
+};
+const DEFAULT_FIGURE_ALT = "Figure";
+// Icon of the boxed key message of the three-column slides (columnsWithMessage), by slide id.
+const MESSAGE_ICONS = { purpose: "table", prep: "tool", robot_program: "robot", series_cd: "crosshairs" };
+
+// Two drawings side by side ("pair"): the gap between them. Drawings are 3300 x 2100 px; a drawing file that does
+// not exist yet is drawn as a placeholder of this pixel size.
+const PAIR = {
+	gap: GAP, // gap between the two drawings
+};
+const DRAWING_PX_W = 3300; // pixel size assumed for a placeholder (the size of every procedure drawing)
+const DRAWING_PX_H = 2100;
+
 // Labels that are not content from the JSON but are needed to read a diagram.
 const EXTRA_LABELS = {
+	drawingPending: "drawing pending", // placeholder of a drawing file that does not exist yet, after its part number
 	sensor: "Sensor", // bootstrap diagram
-	sideView: "Side view", // nest diagram
-	topView: "Top view", // nest diagram
 	locatingEdges: "Locating edges", // plate drawing legend (the two edges that rest on the adapter's edge pins)
 	supportPads: "Support pads", // plate drawing legend (the adapter's three support pads)
 };
@@ -516,7 +549,7 @@ async function buildDeck(contentJson, outputPptx) {
 	pres.layout = "LAYOUT_WIDE";
 	pres.theme = { headFontFace: THEME.headFontFace, bodyFontFace: THEME.bodyFontFace };
 	pres.title = content.slides[0].title; // the title slide's title names the deck
-	pres.author = "Depth calibration from spherical target";
+	pres.author = DECK_AUTHOR;
 	pres.subject = DECK_SUBJECT;
 	const C = pres.SchemeColor; // scheme colors: text1 dk1, text2 dk2, background1 lt1, background2 lt2, accent1..6
 
@@ -569,17 +602,27 @@ async function buildDeck(contentJson, outputPptx) {
 
 	// ---- Images: read pixel sizes so aspect ratios are exact ---------------------------------
 	const imageInfo = {};
+	// Changed from the registration generator: a file that does not exist (a drawing still being made) is not an
+	// error; it is recorded as missing, with the pixel size of the procedure drawings and a label made of its part
+	// number, and fitImage draws a labeled placeholder box in its slot. A message is printed so that it is not missed.
 	async function loadImage(relPath) {
 		if (!imageInfo[relPath]) {
 			const full = path.join(PRESENTATIONS_DIR, relPath);
-			const meta = await sharp(full).metadata();
-			imageInfo[relPath] = { full, w: meta.width, h: meta.height };
+			if (!fs.existsSync(full)) {
+				const partNumber = path.basename(relPath).split("_")[0]; // "PT-07_T5_cutout_plate.png" -> "PT-07"
+				imageInfo[relPath] = { full, w: DRAWING_PX_W, h: DRAWING_PX_H, missing: true, label: `${partNumber}: ${EXTRA_LABELS.drawingPending}` };
+				console.warn(`NOTE: ${relPath} is missing; a placeholder "${imageInfo[relPath].label}" is drawn in its slot`);
+			} else {
+				const meta = await sharp(full).metadata();
+				imageInfo[relPath] = { full, w: meta.width, h: meta.height };
+			}
 		}
 		return imageInfo[relPath];
 	}
 	for (const s of content.slides) {
 		if (s.image) await loadImage(s.image);
 		if (s.image2) await loadImage(s.image2);
+		for (const rel of s.images || []) await loadImage(rel); // the "pair" builder
 	}
 
 	// ---- Layouts -----------------------------------------------------------------------------
@@ -657,7 +700,12 @@ async function buildDeck(contentJson, outputPptx) {
 		}
 		const x = align === "left" ? bx : bx + (bw - w) / 2;
 		const y = bottomAligned(align) ? by + bh - h : by + (bh - h) / 2;
-		slide.addImage({ path: info.full, x, y, w, h, altText: name, objectName: name });
+		if (info.missing) {
+			// Placeholder for a drawing that does not exist yet: a tint box with its label, in the slot the drawing will have
+			slide.addText(info.label, { x, y, w, h, shape: R.rect, fill: { color: C.background2 }, line: { color: C.accent5, width: FIGURE_FRAME_PT, dashType: "dash" }, color: C.accent5, fontSize: HEAD_PT, bold: true, align: "center", valign: "middle", margin: 0, isTextBox: true, objectName: name + " placeholder" });
+		} else {
+			slide.addImage({ path: info.full, x, y, w, h, altText: name, objectName: name });
+		}
 		return { x, y, w, h };
 	}
 	function bottomAligned(a) {
@@ -761,9 +809,69 @@ async function buildDeck(contentJson, outputPptx) {
 		const shortH = (bodyH - tallNeeds.reduce((a, b) => a + b, 0)) / (s.table.rows.length - tallNeeds.length);
 		const rowHs = needHs.map((n) => (n > evenH ? n : shortH));
 		const totalH = TABLE_HEAD_H + rowHs.reduce((a, b) => a + b, 0);
-		if (shortH < Math.max(...needHs.filter((n) => n <= evenH)) - TABLE_FIT_TOLERANCE) console.warn(`WARNING: ${o.name} does not fit in ${o.h.toFixed(2)} in`);
+		// Changed from the registration generator, which compared only the short rows and so missed a table whose rows are all
+		// taller than an even share: a table that is taller than its box is reported whatever the rows.
+		if (totalH > o.h + TABLE_FIT_TOLERANCE || (tallNeeds.length < s.table.rows.length && shortH < Math.max(...needHs.filter((n) => n <= evenH)) - TABLE_FIT_TOLERANCE)) console.warn(`WARNING: ${o.name} needs ${totalH.toFixed(2)} in and does not fit in ${o.h.toFixed(2)} in`);
 		slide.addTable(rows, { x: o.x, y: o.y, w, colW: o.colW, rowH: [TABLE_HEAD_H].concat(rowHs), border: { type: "solid", pt: TABLE_BORDER_PT, color: C.accent6 }, objectName: o.name });
 		return { w, h: Math.max(o.h, totalH) };
+	}
+
+	/**
+	 * A figure at the left (full content height, or IMAGE_BESIDE_MAX_W wide when it is wide) and numbered step
+	 * cards stacked to its right; the cards share the content height (rows grow only if their text needs it).
+	 * o: figureName
+	 */
+	function imageWithSteps(slide, s, o) {
+		const t = IMAGE_STEPS;
+		// Changed from the registration generator: the figure is IMAGE_BESIDE_MAX_W wide at most; when the steps need more height
+		// than the content area has, the figure narrows (in steps of IMAGE_STEP_W, down to t.figureMinW) until they fit.
+		const stepsFit = (figW) => {
+			const textW = CONTENT_W - figW - GAP - CARD_PAD - BADGE_D - GAP_TIGHT;
+			const need = s.steps.map((st) => Math.max(t.minRowH, textHeight(st.text, textW, t.stepPt) + 2 * t.rowCardPad));
+			return { need, extra: (CONTENT_H - (s.steps.length - 1) * t.stackGap - need.reduce((a, b) => a + b, 0)) / s.steps.length };
+		};
+		let figW = IMAGE_BESIDE_MAX_W;
+		while (stepsFit(figW).extra < 0 && figW - IMAGE_STEP_W >= t.figureMinW - 1e-9) figW -= IMAGE_STEP_W;
+		const img = framedImage(slide, o.figureName, s.image, CONTENT_X, CONTENT_TOP, figW, CONTENT_H, "left");
+		const rx = img.x + img.w + GAP;
+		const rw = CONTENT_X + CONTENT_W - rx;
+		const { need, extra } = stepsFit(figW);
+		if (extra < 0) console.warn(`WARNING: ${o.figureName}: steps need ${(-extra * s.steps.length).toFixed(2)} in more than the content height`);
+		let y = CONTENT_TOP;
+		s.steps.forEach((st, i) => {
+			const rowH = need[i] + Math.max(0, extra);
+			card(slide, `Step ${st.n} card`, rx, y, rw, rowH);
+			numberBadge(slide, `Step ${st.n} badge`, st.n, rx + CARD_PAD / 2, y + (rowH - BADGE_D) / 2, BADGE_D, C.accent1);
+			const tx = rx + CARD_PAD / 2 + BADGE_D + GAP_TIGHT;
+			text(slide, `Step ${st.n} text`, st.text, tx, y, rx + rw - CARD_PAD / 2 - tx, rowH, { fontSize: t.stepPt, valign: "middle" });
+			y += rowH + t.stackGap;
+		});
+	}
+
+	/**
+	 * A figure at the left (full content height, or IMAGE_BESIDE_MAX_W wide when it is wide) and check rows to its
+	 * right, spread over the full height so the list is centered against the figure.
+	 * o: figureName, rowName
+	 */
+	function imageWithPoints(slide, s, o) {
+		const b = IMAGE_POINTS;
+		// Changed from the registration generator: the figure is as wide as the rows still fit beside it. Starting from the
+		// width that fills the content height (at most b.figureMaxW), the figure narrows in steps of IMAGE_STEP_W, down to
+		// IMAGE_BESIDE_MAX_W, until the rows fit the content height at the smallest allowed size (BODY_MIN_PT); the rows then
+		// take the largest size of pointPt and its fallbacks at which they fit that width.
+		const info = imageInfo[s.image];
+		const rowsH = (pt, rowW) => s.points.reduce((sum, str) => sum + Math.max(BADGE_SMALL_D, textHeight(str, rowW - BADGE_SMALL_D - GAP_TIGHT, pt)), 0) + (s.points.length - 1) * b.rowGap;
+		const sizes = [b.pointPt].concat(b.pointPtFallbacks);
+		const smallest = sizes[sizes.length - 1];
+		const rowW = (figW) => CONTENT_W - figW - GAP;
+		let figW = Math.min(CONTENT_H * (info.w / info.h), b.figureMaxW);
+		while (rowsH(smallest, rowW(figW)) > CONTENT_H && figW - IMAGE_STEP_W >= IMAGE_BESIDE_MAX_W - 1e-9) figW -= IMAGE_STEP_W;
+		const pt = sizes.find((size) => rowsH(size, rowW(figW)) <= CONTENT_H) || smallest;
+		if (rowsH(pt, rowW(figW)) > CONTENT_H) console.warn(`WARNING: slide "${s.id}": the rows need ${rowsH(pt, rowW(figW)).toFixed(2)} in of ${CONTENT_H.toFixed(2)} in`);
+		const img = framedImage(slide, o.figureName, s.image, CONTENT_X, CONTENT_TOP, figW, CONTENT_H, "left");
+		const rx = img.x + img.w + GAP;
+		const rw = CONTENT_X + CONTENT_W - rx;
+		rowList(slide, o.rowName, s.points, { x: rx, y: CONTENT_TOP, w: rw, pt, badgeD: BADGE_SMALL_D, gap: b.rowGap, fillH: CONTENT_H, cardKind: null, cardPad: 0, badge: () => ({ kind: "icon", icon: "check", fill: C.accent2 }) });
 	}
 
 	// ---- Slide builders ----------------------------------------------------------------------
@@ -773,20 +881,18 @@ async function buildDeck(contentJson, outputPptx) {
 		title(slide, s.title);
 		slide.addText(s.subtitle, { placeholder: "subtitle" });
 		slide.addText(s.footer, { placeholder: "footer" });
-		// Graphic: sphere B, sphere A and the board, sitting on one baseline (native shapes).
+		// Graphic: the sensor and three boards at three standoffs and tilts, sitting on one baseline (native shapes).
 		const a = TITLE_ART;
 		const baseline = DARK_FOOTER_Y - a.bottomGap;
-		const sphereBX = MARGIN;
-		slide.addShape(R.ellipse, { x: sphereBX, y: baseline - a.sphereBD, w: a.sphereBD, h: a.sphereBD, fill: { color: C.accent2 }, line: { color: C.accent6, width: a.outlinePt }, objectName: "Graphic sphere B" });
-		// TCP cross at the center of sphere B
-		const bcx = sphereBX + a.sphereBD / 2;
-		const bcy = baseline - a.sphereBD / 2;
-		slide.addShape(R.rect, { x: bcx - a.crossLen / 2, y: bcy - a.crossThick / 2, w: a.crossLen, h: a.crossThick, fill: { color: C.background1 }, line: { type: "none" }, objectName: "Graphic sphere B cross horizontal" });
-		slide.addShape(R.rect, { x: bcx - a.crossThick / 2, y: bcy - a.crossLen / 2, w: a.crossThick, h: a.crossLen, fill: { color: C.background1 }, line: { type: "none" }, objectName: "Graphic sphere B cross vertical" });
-		const sphereAX = sphereBX + a.sphereBD + GAP;
-		slide.addShape(R.ellipse, { x: sphereAX, y: baseline - a.sphereAD, w: a.sphereAD, h: a.sphereAD, fill: { color: C.accent1 }, line: { color: C.accent6, width: a.outlinePt }, objectName: "Graphic sphere A" });
-		const boardX = sphereAX + a.sphereAD + GAP;
-		slide.addShape(R.roundRect, { x: boardX, y: baseline - a.boardH, w: a.boardW, h: a.boardH, rectRadius: a.boardRadius, fill: { color: C.accent6 }, line: { color: C.accent3, width: a.outlinePt }, objectName: "Graphic board" });
+		const cy = baseline - a.plateH / 2; // common vertical center of the sensor and the boards
+		const sensorX = MARGIN;
+		slide.addShape(R.roundRect, { x: sensorX, y: cy - a.sensorH / 2, w: a.sensorW, h: a.sensorH, rectRadius: CARD_RADIUS, fill: { color: C.accent2 }, line: { color: C.accent6, width: a.outlinePt }, objectName: "Graphic sensor body" });
+		slide.addShape(R.ellipse, { x: sensorX + a.sensorW - a.lensInset - a.lensD, y: cy - a.lensD / 2, w: a.lensD, h: a.lensD, fill: { color: C.accent3 }, line: { type: "none" }, objectName: "Graphic sensor lens" });
+		a.standoffsMm.forEach((mm, i) => {
+			const cx = sensorX + a.sensorW + mm * a.inchesPerMm; // board center
+			slide.addShape(R.roundRect, { x: cx - a.plateW / 2, y: cy - a.plateH / 2, w: a.plateW, h: a.plateH, rectRadius: a.plateRadius, rotate: a.tiltsDeg[i], fill: { color: C.accent6 }, line: { color: C.accent3, width: a.outlinePt }, objectName: `Graphic board ${i + 1}` });
+			slide.addShape(R.ellipse, { x: cx - a.originD / 2, y: cy - a.originD / 2, w: a.originD, h: a.originD, fill: { color: C.accent1 }, line: { type: "none" }, objectName: `Graphic board ${i + 1} tool-frame origin` });
+		});
 	};
 
 	builders.product = (slide, s) => {
@@ -812,7 +918,7 @@ async function buildDeck(contentJson, outputPptx) {
 	builders.flow = (slide, s) => {
 		title(slide, s.title);
 		const f = FLOW;
-		const perRow = s.steps.length / 2;
+		const perRow = Math.ceil(s.steps.length / 2); // seven steps: four in the first row, three in the second
 		const cardW = (CONTENT_W - (perRow - 1) * ARROW_GAP) / perRow;
 		const cardH = (CONTENT_H - FLOW_ROW_GAP) / 2;
 		const pos = (i) => ({ x: CONTENT_X + (i % perRow) * (cardW + ARROW_GAP), y: CONTENT_TOP + Math.floor(i / perRow) * (cardH + FLOW_ROW_GAP) });
@@ -824,8 +930,8 @@ async function buildDeck(contentJson, outputPptx) {
 			text(slide, `Step ${st.n} head`, st.head, x + CARD_PAD, hy, cardW - 2 * CARD_PAD, f.headH, { fontSize: f.headPt, bold: true, color: C.text2 });
 			const ty = hy + f.headH;
 			text(slide, `Step ${st.n} text`, st.text, x + CARD_PAD, ty, cardW - 2 * CARD_PAD, y + cardH - CARD_PAD - ty, { fontSize: f.textPt });
-			// Chevron to the next card in the same row
-			if (i % perRow !== perRow - 1) {
+			// Chevron to the next card in the same row (none after the last step, which ends row 2 short)
+			if (i % perRow !== perRow - 1 && i < s.steps.length - 1) {
 				slide.addShape(R.chevron, { x: x + cardW + (ARROW_GAP - ARROW_W) / 2, y: y + (cardH - ARROW_H) / 2, w: ARROW_W, h: ARROW_H, fill: { color: C.accent2 }, line: { type: "none" }, objectName: `Arrow ${st.n} to ${st.n + 1}` });
 			}
 		});
@@ -846,29 +952,7 @@ async function buildDeck(contentJson, outputPptx) {
 
 	builders.fixtures = (slide, s) => {
 		title(slide, s.title);
-		const f = FIXTURES;
-		const cardW = f.imageCardW;
-		const info = imageInfo[s.image];
-		const innerW = cardW - 2 * CARD_PAD;
-		card(slide, "Figure card", CONTENT_X, CONTENT_TOP, cardW, CONTENT_H, "white");
-		// Figure and caption are centered vertically as a group inside the card
-		const imgH = innerW * (info.h / info.w);
-		const groupH = imgH + GAP_TIGHT + f.captionH;
-		const gy = CONTENT_TOP + (CONTENT_H - groupH) / 2;
-		fitImage(slide, "Sphere on stem, side view", s.image, CONTENT_X + CARD_PAD, gy, innerW, imgH);
-		text(slide, "Figure caption", s.caption, CONTENT_X + CARD_PAD, gy + imgH + GAP_TIGHT, innerW, f.captionH, { fontSize: CAPTION_PT, color: C.accent5 });
-		const rx = CONTENT_X + cardW + GAP;
-		const rw = CONTENT_W - cardW - GAP;
-		const cardH = (CONTENT_H - 2 * GAP) / s.cards.length;
-		const icons = ["circle", "circle", "board"];
-		s.cards.forEach((c, i) => {
-			const y = CONTENT_TOP + i * (cardH + GAP);
-			card(slide, `Fixture ${i + 1} card`, rx, y, rw, cardH);
-			iconBadge(slide, `Fixture ${i + 1} icon`, icons[i], rx + CARD_PAD, y + (cardH - f.iconD) / 2, f.iconD, C.accent2);
-			const tx = rx + CARD_PAD + f.iconD + GAP_TIGHT;
-			const tw = rw - 2 * CARD_PAD - f.iconD - GAP_TIGHT;
-			text(slide, `Fixture ${i + 1} text`, [{ text: c.head, options: { fontSize: f.headPt, bold: true, color: C.text2, breakLine: true } }, { text: c.text, options: { fontSize: f.textPt } }], tx, y + CARD_PAD, tw, cardH - 2 * CARD_PAD, { valign: "middle" });
-		});
+		figureWithCards(slide, s, { sizes: FIXTURES, icons: CARD_ICONS[s.id] || DEFAULT_CARD_ICONS, figureName: FIGURE_ALT[s.id] || DEFAULT_FIGURE_ALT, partName: "Fixture" });
 	};
 
 	builders.cost = (slide, s) => {
@@ -889,7 +973,7 @@ async function buildDeck(contentJson, outputPptx) {
 		title(slide, s.title);
 		const t = BUILD_LIST;
 		const area = tableArea(s.caption);
-		const table = dataTable(slide, s, { name: "Build list table", x: CONTENT_X, y: CONTENT_TOP, h: area.tableH, colW: t.colW, cellPt: t.cellPt, colAlign: ["left", "left", "left"], colBold: [false, false, false], colColor: [] });
+		const table = dataTable(slide, s, { name: "Build list table", x: CONTENT_X, y: CONTENT_TOP, h: area.tableH, colW: t.colW, cellPt: t.cellPt, colAlign: ["left", "left", "left", "left"], colBold: [false, false, false, false], colColor: [] });
 		// Visual: a tint card over the table's height with a large teal toolbox circle in its middle
 		const vx = CONTENT_X + table.w + GAP;
 		const vw = CONTENT_X + CONTENT_W - vx;
@@ -902,23 +986,21 @@ async function buildDeck(contentJson, outputPptx) {
 		title(slide, s.title);
 		const t = BUY_LIST;
 		const area = tableArea(s.caption);
-		dataTable(slide, s, { name: "Buy list table", x: CONTENT_X, y: CONTENT_TOP, h: area.tableH, colW: t.colW, cellPt: t.cellPt, colAlign: ["left", "left", "right"], colBold: [false, false, true], colColor: [] });
+		dataTable(slide, s, { name: "Buy list table", x: CONTENT_X, y: CONTENT_TOP, h: area.tableH, colW: t.colW, cellPt: t.cellPt, colAlign: ["left", "left", "right", "left"], colBold: [false, false, true, false], colColor: [] });
 		caption(slide, "Buy list caption", s.caption, CONTENT_X, area.captionY, CONTENT_W, area.captionH, { valign: "bottom" });
-	};
-
-	builders.sphere_spec = (slide, s) => {
-		title(slide, s.title);
-		const t = SPHERE_SPEC;
-		const area = tableArea(s.caption);
-		dataTable(slide, s, { name: "Sphere specification table", x: CONTENT_X, y: CONTENT_TOP, h: area.tableH, colW: t.colW, cellPt: t.cellPt, colAlign: ["left", "left", "left"], colBold: [true, false, false], colColor: [C.text2] });
-		caption(slide, "Sphere specification caption", s.caption, CONTENT_X, area.captionY, CONTENT_W, area.captionH, { valign: "bottom" });
 	};
 
 	builders.plate_spec = (slide, s) => {
 		title(slide, s.title);
 		const t = PLATE_SPEC;
 		const area = tableArea(s.caption);
-		const table = dataTable(slide, s, { name: "Plate specification table", x: CONTENT_X, y: CONTENT_TOP, h: area.tableH, colW: t.colW, cellPt: t.cellPt, colAlign: ["left", "left"], colBold: [true, false], colColor: [C.text2] });
+		const wide = s.table.header.length > 2; // three columns: two target groups, full width, no plate drawing (see PLATE_SPEC)
+		const colW = wide ? t.colWWide : t.colW;
+		const table = dataTable(slide, s, { name: "Plate specification table", x: CONTENT_X, y: CONTENT_TOP, h: area.tableH, colW, cellPt: wide ? t.cellWidePt : t.cellPt, colAlign: colW.map(() => "left"), colBold: colW.map((_, i) => i === 0), colColor: [C.text2] });
+		if (wide) {
+			caption(slide, "Plate specification caption", s.caption, CONTENT_X, area.captionY, CONTENT_W, area.captionH, { valign: "bottom" });
+			return;
+		}
 		// Visual: the plate drawn to scale in a white card, its two locating edges in orange, the three support pads as circles
 		const vx = CONTENT_X + table.w + GAP;
 		const vw = CONTENT_X + CONTENT_W - vx;
@@ -954,145 +1036,84 @@ async function buildDeck(contentJson, outputPptx) {
 		caption(slide, "Plate specification caption", s.caption, CONTENT_X, area.captionY, CONTENT_W, area.captionH, { valign: "bottom" });
 	};
 
-	builders.spheres = (slide, s) => {
-		title(slide, s.title);
-		const sp = SPHERES;
-		const cardW = (CONTENT_W - 2 * GAP) / s.columns.length;
-		s.columns.forEach((col, i) => {
-			const x = CONTENT_X + i * (cardW + GAP);
-			card(slide, `Column ${i + 1} card`, x, CONTENT_TOP, cardW, CONTENT_H);
-			iconBadge(slide, `Column ${i + 1} icon`, col.icon, x + CARD_PAD, CONTENT_TOP + CARD_PAD, sp.iconD, C.accent2);
-			const hy = CONTENT_TOP + CARD_PAD + sp.iconD + GAP_TIGHT;
-			text(slide, `Column ${i + 1} head`, col.head, x + CARD_PAD, hy, cardW - 2 * CARD_PAD, sp.headH, { fontFace: HEAD_FONT_REF, fontSize: sp.headPt, bold: true, color: C.text2 });
-			const by = hy + sp.headH + GAP_TIGHT / 2;
-			bullets(slide, `Column ${i + 1} points`, col.points, x + CARD_PAD, by, cardW - 2 * CARD_PAD, CONTENT_TOP + CONTENT_H - CARD_PAD - by, { fontSize: sp.bulletPt, paraSpacePt: PARA_SPACE_LOOSE_PT });
-		});
-	};
-
-	builders.mounting = (slide, s) => {
-		title(slide, s.title);
-		const m = MOUNTING;
-		// One image at the full content height; the caption has no room under it, so it sits at the
-		// bottom of the right column, below the points card.
-		const img = framedImage(slide, "Adapter on flange with stem", s.image, CONTENT_X, CONTENT_TOP, CONTENT_W, CONTENT_H, "left");
-		const px = img.x + img.w + GAP;
-		const pw = CONTENT_X + CONTENT_W - px;
-		const cardH = CONTENT_H - GAP - m.captionH;
-		card(slide, "Points card", px, CONTENT_TOP, pw, cardH);
-		bullets(slide, "Mounting points", s.points, px + CARD_PAD, CONTENT_TOP + CARD_PAD, pw - 2 * CARD_PAD, cardH - 2 * CARD_PAD, { fontSize: m.pointsPt, valign: "middle", paraSpacePt: PARA_SPACE_LOOSE_PT });
-		caption(slide, "Figure caption", s.caption, px, CONTENT_BOTTOM - m.captionH, pw, m.captionH, { valign: "bottom" });
-	};
-
-	builders.sphere_end = (slide, s) => {
-		title(slide, s.title);
-		const e = SPHERE_END;
-		// Two images, each at most half the content width, both at the largest common height the slide allows
-		const halfW = (CONTENT_W - GAP) / 2;
-		const left = imageInfo[s.image];
-		const right = imageInfo[s.image2];
-		const heightAvail = CONTENT_H - CAPTION_LINE_H - GAP - e.labelH - e.labelGap;
-		const imgH = Math.min(heightAvail, halfW / (left.w / left.h), halfW / (right.w / right.h));
-		const leftW = imgH * (left.w / left.h);
-		const rightW = imgH * (right.w / right.h);
-		const rightX = CONTENT_X + CONTENT_W - rightW; // right image flush with the right margin
-		framedImage(slide, "Ceramic sphere with threaded insert", s.image, CONTENT_X, CONTENT_TOP, leftW, imgH, "left");
-		framedImage(slide, "Steel sphere with bonded blind hole", s.image2, rightX, CONTENT_TOP, rightW, imgH, "left");
-		const ly = CONTENT_TOP + imgH + e.labelGap;
-		text(slide, "Label ceramic sphere", s.label, CONTENT_X, ly, leftW, e.labelH, { fontSize: e.labelPt, bold: true, color: C.text2 });
-		text(slide, "Label steel sphere", s.label2, rightX, ly, rightW, e.labelH, { fontSize: e.labelPt, bold: true, color: C.text2 });
-		caption(slide, "Figure caption", s.caption, CONTENT_X, CONTENT_BOTTOM - CAPTION_LINE_H, CONTENT_W, CAPTION_LINE_H, { valign: "bottom" });
-	};
-
 	/**
-	 * The board figure at the largest size that leaves room for its caption, with four icon cards stacked to its right.
-	 * o: sizes (iconD, headPt, textPt, cardPad), icons[], figureName, partName
+	 * A white card at the left holding a wide figure and its caption (centered vertically as a group), and icon
+	 * cards stacked to its right. Card heights follow the text they hold (head line plus wrapped text), scaled
+	 * together to fill the column; a column whose text needs more than the height available is reported.
+	 * o: sizes (figureCardW, iconD, headPt, textPt, cardPad, textRightPad, stackGap), icons[], figureName, partName
 	 */
 	function figureWithCards(slide, s, o) {
 		const d = o.sizes;
-		const imgBoxH = CONTENT_H - CAPTION_GAP - CAPTION_TWO_LINE_H;
+		// Changed from the registration generator: the figure card is d.figureCardW wide at most; when the icon cards'
+		// text needs more height than the column has, the card narrows (in steps of FIGURE_CARD_STEP, down to
+		// d.figureCardMinW) until the text fits, so the figure is as large as the text allows.
+		const cardsNeed = (cardW) => {
+			const rx = CONTENT_X + cardW + GAP;
+			const tw = CONTENT_X + CONTENT_W - CARD_PAD - d.textRightPad - (rx + CARD_PAD + d.iconD + GAP_TIGHT);
+			const needH = s.cards.map((c) => 2 * d.cardPad + (d.headPt * BODY_LINE_FACTOR) / 72 + textHeight(c.text, tw, d.textPt));
+			return { needH, tw, scale: (CONTENT_H - (s.cards.length - 1) * d.stackGap) / needH.reduce((a, b) => a + b, 0) };
+		};
+		let figureCardW = d.figureCardW;
+		while (cardsNeed(figureCardW).scale < 1 && figureCardW - FIGURE_CARD_STEP >= d.figureCardMinW - 1e-9) figureCardW -= FIGURE_CARD_STEP;
+		const innerW = figureCardW - 2 * CARD_PAD;
+		card(slide, "Figure card", CONTENT_X, CONTENT_TOP, figureCardW, CONTENT_H, "white");
 		const info = imageInfo[s.image];
-		const img = framedImage(slide, o.figureName, s.image, CONTENT_X, CONTENT_TOP, imgBoxH * (info.w / info.h), imgBoxH, "left");
-		caption(slide, "Figure caption", s.caption, CONTENT_X, img.y + img.h + CAPTION_GAP, img.w, CAPTION_TWO_LINE_H);
-		const rx = CONTENT_X + img.w + GAP;
+		const imgH = innerW * (info.h / info.w);
+		const captionH = textHeight(s.caption, innerW, CAPTION_PT);
+		const gy = CONTENT_TOP + (CONTENT_H - (imgH + CAPTION_GAP + captionH)) / 2;
+		fitImage(slide, o.figureName, s.image, CONTENT_X + CARD_PAD, gy, innerW, imgH);
+		caption(slide, "Figure caption", s.caption, CONTENT_X + CARD_PAD, gy + imgH + CAPTION_GAP, innerW, captionH);
+		const rx = CONTENT_X + figureCardW + GAP;
 		const rw = CONTENT_X + CONTENT_W - rx;
 		const tx = rx + CARD_PAD + d.iconD + GAP_TIGHT;
-		const tw = rx + rw - CARD_PAD - d.textRightPad - tx;
-		// Card heights follow the text they hold (head line plus wrapped text), scaled together to fill the column
-		const needH = s.cards.map((c) => 2 * d.cardPad + (d.headPt * BODY_LINE_FACTOR) / 72 + textHeight(c.text, tw, d.textPt));
-		const scale = (CONTENT_H - (s.cards.length - 1) * STACK_GAP) / needH.reduce((a, b) => a + b, 0);
+		const { needH, tw, scale } = cardsNeed(figureCardW);
+		if (scale < 1) console.warn(`WARNING: slide "${s.id}": ${o.partName} cards need ${(1 / scale).toFixed(2)} times the height available`);
 		let y = CONTENT_TOP;
 		s.cards.forEach((c, i) => {
 			const cardH = needH[i] * scale;
 			card(slide, `${o.partName} ${i + 1} card`, rx, y, rw, cardH);
 			iconBadge(slide, `${o.partName} ${i + 1} icon`, o.icons[i], rx + CARD_PAD, y + (cardH - d.iconD) / 2, d.iconD, C.accent2);
 			text(slide, `${o.partName} ${i + 1} text`, [{ text: c.head, options: { fontSize: d.headPt, bold: true, color: C.text2, breakLine: true } }, { text: c.text, options: { fontSize: d.textPt } }], tx, y + d.cardPad, tw, cardH - 2 * d.cardPad, { valign: "middle" });
-			y += cardH + STACK_GAP;
+			y += cardH + d.stackGap;
 		});
 	}
 
 	builders.board_build = (slide, s) => {
 		title(slide, s.title);
-		const b = BOARD_BUILD;
-		figureWithCards(slide, s, { sizes: b, icons: ["board", "paint", "ruler", "wrench"], figureName: "Board on its adapter", partName: "Board part" });
+		figureWithCards(slide, s, { sizes: BOARD_BUILD, icons: ["board", "paint", "ruler", "layers"], figureName: "Front face of the board and its adapter", partName: "Board part" });
 	};
 
 	builders.runout = (slide, s) => {
 		title(slide, s.title);
-		figureWithCards(slide, s, { sizes: RUNOUT, icons: ["gauge", "magnet", "layers", "crosshairs"], figureName: "Run-out check on the board", partName: "Run-out part" });
+		figureWithCards(slide, s, { sizes: RUNOUT, icons: CARD_ICONS[s.id] || DEFAULT_CARD_ICONS, figureName: FIGURE_ALT[s.id] || DEFAULT_FIGURE_ALT, partName: "Run-out part" });
 	};
 
-	builders.nest_build = (slide, s) => {
+	/**
+	 * Two drawings side by side at one height, each as large as the content area allows, the caption under them.
+	 * New in this generator (edge_target_drawings, feature_plate_drawings). The height is the largest at which both
+	 * fit: limited by the content height less the caption, or by the content width shared by the two aspect ratios.
+	 * The drawings and the caption form one group, centered vertically in the content area. A drawing file that does
+	 * not exist yet is drawn as a labeled placeholder of the same size (see loadImage).
+	 */
+	builders.pair = (slide, s) => {
 		title(slide, s.title);
-		const n = NEST;
-		// Left: white card with the side view and the top view of the nest, drawn with native shapes.
-		card(slide, "Nest diagram card", CONTENT_X, CONTENT_TOP, n.cardW, CONTENT_H, "white");
-		const viewW = n.baseW;
-		const drawingH = n.sideH; // both views are about this tall; they share one baseline (bottom edge)
-		const blockH = drawingH + n.labelGap + n.labelH;
-		const top = CONTENT_TOP + (CONTENT_H - blockH) / 2;
-		const bottom = top + drawingH; // baseline shared by both views
-		const rowW = 2 * viewW + n.viewGap;
-		const sideX = CONTENT_X + (n.cardW - rowW) / 2;
-		const topX = sideX + viewW + n.viewGap;
-		const ballLine = () => ({ color: C.accent5, width: n.outlinePt });
-
-		// --- Side view: base plate, two visible balls, and the sphere resting on them
-		const plateY = bottom - n.plateH;
-		slide.addShape(R.rect, { x: sideX, y: plateY, w: n.baseW, h: n.plateH, fill: { color: C.accent3 }, line: { type: "none" }, objectName: "Side view base plate" });
-		const ballCY = plateY - n.ballR; // balls sit on the plate
-		const midX = sideX + viewW / 2;
-		[-1, 1].forEach((side, i) => {
-			slide.addShape(R.ellipse, { x: midX + side * n.ballOffsetX - n.ballR, y: ballCY - n.ballR, w: n.ballD, h: n.ballD, fill: { color: C.accent5 }, line: ballLine(), objectName: `Side view ball ${i + 1}` });
+		const p = PAIR;
+		const n = s.images.length;
+		const infos = s.images.map((rel) => imageInfo[rel]);
+		const ratioSum = infos.reduce((sum, info) => sum + info.w / info.h, 0);
+		const captionH = captionHeightFor(s.caption, CONTENT_W);
+		const maxH = CONTENT_H - CAPTION_GAP - captionH;
+		const imgH = Math.min(maxH, (CONTENT_W - (n - 1) * p.gap) / ratioSum);
+		const groupW = imgH * ratioSum + (n - 1) * p.gap;
+		const gx = CONTENT_X + (CONTENT_W - groupW) / 2;
+		const gy = CONTENT_TOP + (CONTENT_H - (imgH + CAPTION_GAP + captionH)) / 2;
+		let x = gx;
+		s.images.forEach((rel, i) => {
+			const w = imgH * (infos[i].w / infos[i].h);
+			framedImage(slide, `Drawing ${i + 1}: ${path.basename(rel, ".png")}`, rel, x, gy, w, imgH, "left");
+			x += w + p.gap;
 		});
-		const sphereCY = ballCY - n.rise;
-		slide.addShape(R.ellipse, { x: midX - n.sphereR, y: sphereCY - n.sphereR, w: n.sphereD, h: n.sphereD, fill: { color: C.background2 }, line: ballLine(), objectName: "Side view sphere" });
-		const cross = (cx, cy, label) => {
-			slide.addShape(R.line, { x: cx - n.crossLen / 2, y: cy, w: n.crossLen, h: 0, line: { color: C.accent4, width: n.crossPt }, objectName: label + " cross horizontal" });
-			slide.addShape(R.line, { x: cx, y: cy - n.crossLen / 2, w: 0, h: n.crossLen, line: { color: C.accent4, width: n.crossPt }, objectName: label + " cross vertical" });
-		};
-		cross(midX, sphereCY, "Side view sphere center");
-		text(slide, "Side view label", EXTRA_LABELS.sideView, sideX, bottom + n.labelGap, viewW, n.labelH, { fontSize: n.labelPt, bold: true, color: C.accent5, align: "center" });
-
-		// --- Top view: base outline, three balls on a triangle, the sphere's dashed outline, red center cross
-		const baseTop = bottom - n.baseW;
-		const tcx = topX + viewW / 2;
-		const tcy = baseTop + n.baseW / 2;
-		slide.addShape(R.roundRect, { x: topX, y: baseTop, w: n.baseW, h: n.baseW, rectRadius: n.baseRadius, fill: { color: C.accent6 }, line: { color: C.accent3, width: n.outlinePt }, objectName: "Top view base outline" });
-		[0, 1, 2].forEach((k) => {
-			const ang = -Math.PI / 2 + (k * 2 * Math.PI) / 3; // one ball straight "up" in the drawing
-			slide.addShape(R.ellipse, { x: tcx + n.triangleR * Math.cos(ang) - n.ballR, y: tcy + n.triangleR * Math.sin(ang) - n.ballR, w: n.ballD, h: n.ballD, fill: { color: C.accent5 }, line: ballLine(), objectName: `Top view ball ${k + 1}` });
-		});
-		slide.addShape(R.ellipse, { x: tcx - n.sphereR, y: tcy - n.sphereR, w: n.sphereD, h: n.sphereD, fill: { type: "none" }, line: { color: C.text2, width: n.dashedPt, dashType: "dash" }, objectName: "Top view sphere outline" });
-		cross(tcx, tcy, "Top view sphere center");
-		text(slide, "Top view label", EXTRA_LABELS.topView, topX, bottom + n.labelGap, viewW, n.labelH, { fontSize: n.labelPt, bold: true, color: C.accent5, align: "center" });
-
-		// Right: the four points as icon rows
-		const rx = CONTENT_X + n.cardW + GAP;
-		const rw = CONTENT_X + CONTENT_W - rx;
-		const icons = ["circle", "check", "tool", "clock"];
-		const rowGap = STACK_GAP; // rows of 16 pt text in tint cards; nest points are the longest text on the slide
-		const minRowH = (CONTENT_H - (s.points.length - 1) * rowGap) / s.points.length;
-		rowList(slide, "Nest point", s.points, { x: rx, y: CONTENT_TOP, w: rw, pt: n.pointPt, badgeD: n.iconD, gap: rowGap, fixedRowH: minRowH, cardKind: "tint", cardPad: GAP_TIGHT, badge: (i) => ({ kind: "icon", icon: icons[i], fill: C.accent2 }) });
+		caption(slide, "Figure caption", s.caption, gx, gy + imgH + CAPTION_GAP, groupW, captionH);
 	};
 
 	builders.suppliers = (slide, s) => {
@@ -1115,76 +1136,62 @@ async function buildDeck(contentJson, outputPptx) {
 		iconBadge(slide, "Clipboard check icon", "clipboardCheck", vx + (vw - a.badgeD) / 2, CONTENT_TOP + (CONTENT_H - a.badgeD) / 2, a.badgeD, C.accent2);
 	};
 
-	builders.tcp = (slide, s) => {
+	builders.approach = (slide, s) => {
 		title(slide, s.title);
-		const t = TCP;
-		// Portrait figure at the full content height on the left, steps on the right
-		const img = framedImage(slide, "Finding the tool center point with a three-ball nest", s.image, CONTENT_X, CONTENT_TOP, CONTENT_W, CONTENT_H, "left");
-		const rx = img.x + img.w + GAP;
-		const rw = CONTENT_X + CONTENT_W - rx;
-		// Step cards share the available height (rows grow only if text needs it)
-		const texts = s.steps.map((st) => st.text);
-		const need = texts.map((tx) => Math.max(t.minRowH, textHeight(tx, rw - 2 * t.rowCardPad - BADGE_D - GAP_TIGHT, t.stepPt) + 2 * t.rowCardPad));
-		const extra = (CONTENT_H - (s.steps.length - 1) * STACK_GAP - need.reduce((a, b) => a + b, 0)) / s.steps.length;
-		let y = CONTENT_TOP;
-		s.steps.forEach((st, i) => {
-			const rowH = need[i] + Math.max(0, extra);
-			card(slide, `Step ${st.n} card`, rx, y, rw, rowH);
-			numberBadge(slide, `Step ${st.n} badge`, st.n, rx + CARD_PAD / 2, y + (rowH - BADGE_D) / 2, BADGE_D, C.accent1);
-			const tx = rx + CARD_PAD / 2 + BADGE_D + GAP_TIGHT;
-			text(slide, `Step ${st.n} text`, st.text, tx, y, rx + rw - CARD_PAD / 2 - tx, rowH, { fontSize: t.stepPt, valign: "middle" });
-			y += rowH + STACK_GAP;
-		});
+		imageWithSteps(slide, s, { figureName: FIGURE_ALT[s.id] || DEFAULT_FIGURE_ALT });
 	};
 
 	builders.board = (slide, s) => {
 		title(slide, s.title);
-		const b = BOARD;
-		// Figure at the full content height on the left, check rows on the right
-		const img = framedImage(slide, "Board on the flange with its tool frame", s.image, CONTENT_X, CONTENT_TOP, CONTENT_W, CONTENT_H, "left");
-		const rx = img.x + img.w + GAP;
-		const rw = CONTENT_X + CONTENT_W - rx;
-		// Rows are spread over the full height so the list is centered against the figure
-		const rowH = (CONTENT_H - (s.points.length - 1) * b.rowGap) / s.points.length;
-		rowList(slide, "Board point", s.points, { x: rx, y: CONTENT_TOP, w: rw, pt: b.pointPt, badgeD: BADGE_SMALL_D, gap: b.rowGap, minRowH: rowH, cardKind: null, cardPad: 0, badge: () => ({ kind: "icon", icon: "check", fill: C.accent2 }) });
+		imageWithPoints(slide, s, { figureName: FIGURE_ALT[s.id] || DEFAULT_FIGURE_ALT, rowName: "Board point" });
+	};
+
+	builders.residuals = (slide, s) => {
+		title(slide, s.title);
+		imageWithPoints(slide, s, { figureName: "The normal residual and the offset residual between the predicted and the measured plane", rowName: "Residual point" });
 	};
 
 	builders.bootstrap = (slide, s) => {
 		title(slide, s.title);
 		const b = BOOTSTRAP;
-		// Sensor rectangle on the left, drawn the same height as the frames
+		const cols = b.columns;
+		const rows = Math.ceil(s.boot.length / cols);
+		const gridH = rows * b.frameH + (rows - 1) * b.rowGap;
+		// Sensor rectangle on the left, drawn the same height as the frame grid
 		const sensorX = CONTENT_X;
 		const sensorY = CONTENT_TOP;
-		slide.addShape(R.roundRect, { x: sensorX, y: sensorY, w: b.sensorW, h: b.frameH, rectRadius: CARD_RADIUS, fill: { color: C.text2 }, line: { type: "none" }, objectName: "Sensor body" });
+		slide.addShape(R.roundRect, { x: sensorX, y: sensorY, w: b.sensorW, h: gridH, rectRadius: CARD_RADIUS, fill: { color: C.text2 }, line: { type: "none" }, objectName: "Sensor body" });
 		slide.addShape(R.ellipse, { x: sensorX + (b.sensorW - b.lensD) / 2, y: sensorY + CARD_PAD, w: b.lensD, h: b.lensD, fill: { color: C.accent3 }, line: { type: "none" }, objectName: "Sensor lens" });
-		text(slide, "Sensor label", EXTRA_LABELS.sensor, sensorX, sensorY + CARD_PAD + b.lensD + GAP_TIGHT / 2, b.sensorW, b.frameH - (CARD_PAD + b.lensD + GAP_TIGHT / 2), { fontSize: b.sensorPt, bold: true, color: C.background1, align: "center", valign: "top" });
-		// Frames, one per bootstrap capture: what the sensor sees
+		text(slide, "Sensor label", EXTRA_LABELS.sensor, sensorX, sensorY + CARD_PAD + b.lensD + GAP_TIGHT / 2, b.sensorW, gridH - (CARD_PAD + b.lensD + GAP_TIGHT / 2), { fontSize: b.sensorPt, bold: true, color: C.background1, align: "center", valign: "top" });
+		// Frames, one per bootstrap capture: what the sensor sees, with its text to the right
 		const framesX = sensorX + b.sensorW + ARROW_GAP;
-		const n = s.boot.length;
-		const frameW = (CONTENT_X + CONTENT_W - framesX - (n - 1) * GAP) / n;
-		slide.addShape(R.chevron, { x: sensorX + b.sensorW + (ARROW_GAP - ARROW_W) / 2, y: sensorY + (b.frameH - ARROW_H) / 2, w: ARROW_W, h: ARROW_H, fill: { color: C.accent2 }, line: { type: "none" }, objectName: "Sensor view arrow" });
-		// Where each circle sits relative to the frame center, and its size
+		const cellW = (CONTENT_X + CONTENT_W - framesX - (cols - 1) * GAP) / cols;
+		slide.addShape(R.chevron, { x: sensorX + b.sensorW + (ARROW_GAP - ARROW_W) / 2, y: sensorY + (gridH - ARROW_H) / 2, w: ARROW_W, h: ARROW_H, fill: { color: C.accent2 }, line: { type: "none" }, objectName: "Sensor view arrow" });
+		// Size of each circle (w x h): facing the sensor, then tilted (top, bottom: narrower in height; left, right: in width), then farther away
 		const placement = [
-			{ dx: 0, dy: 0, d: b.bigD }, // boot01: center
-			{ dx: -b.offsetX, dy: 0, d: b.bigD }, // boot02: left
-			{ dx: 0, dy: -b.offsetY, d: b.bigD }, // boot03: up
-			{ dx: 0, dy: 0, d: b.farD }, // boot04: farther, so drawn smaller
+			{ w: b.bigD, h: b.bigD }, // boot01: facing, near the center
+			{ w: b.bigD, h: b.bigD * b.tiltRatio }, // boot02: top edge toward the sensor
+			{ w: b.bigD, h: b.bigD * b.tiltRatio }, // boot03: bottom edge toward the sensor
+			{ w: b.bigD * b.tiltRatio, h: b.bigD }, // boot04: left edge toward the sensor
+			{ w: b.bigD * b.tiltRatio, h: b.bigD }, // boot05: right edge toward the sensor
+			{ w: b.farD, h: b.farD }, // boot06: farther, so drawn smaller
 		];
 		s.boot.forEach((bt, i) => {
-			const fx = framesX + i * (frameW + GAP);
-			card(slide, `Frame ${bt.id}`, fx, sensorY, frameW, b.frameH, "white");
-			const cx = fx + frameW / 2;
-			const cy = sensorY + b.frameH / 2;
+			const fx = framesX + (i % cols) * (cellW + GAP);
+			const fy = sensorY + Math.floor(i / cols) * (b.frameH + b.rowGap);
+			card(slide, `Frame ${bt.id}`, fx, fy, b.frameW, b.frameH, "white");
+			const cx = fx + b.frameW / 2;
+			const cy = fy + b.frameH / 2;
 			const cross = () => ({ line: { color: C.accent6, width: b.crossPt } });
-			slide.addShape(R.line, Object.assign({ x: fx + b.frameLineGap, y: cy, w: frameW - 2 * b.frameLineGap, h: 0, objectName: `Frame ${bt.id} crosshair horizontal` }, cross()));
-			slide.addShape(R.line, Object.assign({ x: cx, y: sensorY + b.frameLineGap, w: 0, h: b.frameH - 2 * b.frameLineGap, objectName: `Frame ${bt.id} crosshair vertical` }, cross()));
+			slide.addShape(R.line, Object.assign({ x: fx + b.frameLineGap, y: cy, w: b.frameW - 2 * b.frameLineGap, h: 0, objectName: `Frame ${bt.id} crosshair horizontal` }, cross()));
+			slide.addShape(R.line, Object.assign({ x: cx, y: fy + b.frameLineGap, w: 0, h: b.frameH - 2 * b.frameLineGap, objectName: `Frame ${bt.id} crosshair vertical` }, cross()));
 			const p = placement[i];
-			slide.addText(bt.id, { x: cx + p.dx - p.d / 2, y: cy + p.dy - p.d / 2, w: p.d, h: p.d, shape: R.ellipse, fill: { color: C.accent1 }, line: { type: "none" }, color: C.background1, bold: true, fontSize: DIAGRAM_LABEL_PT, align: "center", valign: "middle", margin: 0, wrap: false, isTextBox: true, objectName: `Circle ${bt.id}` });
-			text(slide, `Text ${bt.id}`, bt.text, fx, sensorY + b.frameH + GAP_TIGHT, frameW, b.textH, { fontSize: b.textPt });
+			slide.addText(bt.id, { x: cx - p.w / 2, y: cy - p.h / 2, w: p.w, h: p.h, shape: R.ellipse, fill: { color: C.accent1 }, line: { type: "none" }, color: C.background1, bold: true, fontSize: DIAGRAM_LABEL_PT, align: "center", valign: "middle", margin: 0, wrap: false, isTextBox: true, objectName: `Circle ${bt.id}` });
+			text(slide, `Text ${bt.id}`, bt.text, fx + b.frameW + b.textGap, fy, cellW - b.frameW - b.textGap, b.frameH, { fontSize: b.textPt, valign: "middle" });
 		});
-		const py = sensorY + b.frameH + GAP_TIGHT + b.textH + GAP;
+		const py = sensorY + gridH + GAP;
 		card(slide, "Points card", CONTENT_X, py, CONTENT_W, CONTENT_BOTTOM - py);
-		bullets(slide, "Bootstrap points", s.points, CONTENT_X + CARD_PAD, py + CARD_PAD, CONTENT_W - 2 * CARD_PAD, CONTENT_BOTTOM - py - 2 * CARD_PAD, { fontSize: b.pointsPt, valign: "middle" });
+		bullets(slide, "Bootstrap points", s.points, CONTENT_X + CARD_PAD, py + GAP_TIGHT, CONTENT_W - 2 * CARD_PAD, CONTENT_BOTTOM - py - 2 * GAP_TIGHT, { fontSize: b.pointsPt, valign: "middle" });
 	};
 
 	builders.plan = (slide, s) => {
@@ -1257,7 +1264,7 @@ async function buildDeck(contentJson, outputPptx) {
 			const tx = hx + GAP_TIGHT / 2 + BADGE_SMALL_D + GAP_TIGHT / 2;
 			text(slide, `Option ${i + 1} head`, col.head, tx, hy, hx + hw - GAP_TIGHT / 2 - tx, m.headBarH, { fontFace: HEAD_FONT_REF, fontSize: m.headPt, bold: true, color: C.background1, valign: "middle" });
 			const by = hy + m.headBarH + GAP_TIGHT;
-			bullets(slide, `Option ${i + 1} points`, col.points, x + CARD_PAD, by, colW - 2 * CARD_PAD, CONTENT_TOP + colsH - CARD_PAD - by, { fontSize: m.bulletPt, paraSpacePt: PARA_SPACE_LOOSE_PT });
+			bullets(slide, `Option ${i + 1} points`, col.points, x + CARD_PAD, by, colW - 2 * CARD_PAD, CONTENT_TOP + colsH - CARD_PAD - by, { fontSize: m.bulletPt, paraSpacePt: m.paraSpacePt });
 		});
 		const ey = CONTENT_TOP + colsH + GAP;
 		slide.addShape(R.roundRect, { x: CONTENT_X, y: ey, w: CONTENT_W, h: m.exampleBoxH, rectRadius: CARD_RADIUS, fill: { color: C.background2 }, line: { color: C.accent6, width: OUTLINE_PT }, objectName: "Example box" });
@@ -1279,9 +1286,9 @@ async function buildDeck(contentJson, outputPptx) {
 			const x = CONTENT_X + (i % cols) * (cardW + GAP);
 			const y = CONTENT_TOP + Math.floor(i / cols) * (cardH + GAP);
 			card(slide, `Check ${i + 1} card`, x, y, cardW, cardH, "white");
-			iconBadge(slide, `Check ${i + 1} icon`, "warning", x + CARD_PAD, y + CARD_PAD, k.iconD, C.accent4);
-			const tx = x + CARD_PAD + k.iconD + GAP_TIGHT;
-			const tw = x + cardW - CARD_PAD - tx;
+			iconBadge(slide, `Check ${i + 1} icon`, "warning", x + k.cardPad, y + k.cardPad, k.iconD, C.accent4);
+			const tx = x + k.cardPad + k.iconD + GAP_TIGHT;
+			const tw = x + cardW - k.cardPad - tx;
 			text(
 				slide,
 				`Check ${i + 1} text`,
@@ -1291,9 +1298,9 @@ async function buildDeck(contentJson, outputPptx) {
 					{ text: c.text, options: { fontSize: k.textPt } },
 				],
 				tx,
-				y + CARD_PAD,
+				y + k.cardPad,
 				tw,
-				cardH - 2 * CARD_PAD,
+				cardH - 2 * k.cardPad,
 				{ valign: "top" }
 			);
 		});
@@ -1324,31 +1331,28 @@ async function buildDeck(contentJson, outputPptx) {
 		text(slide, "Key message", s.message, mtx, my, CONTENT_X + CONTENT_W - CARD_PAD - mtx, o.messageH, { fontSize: BOX_MESSAGE_PT, bold: true, color: C.text2, valign: "middle" });
 	}
 
-	builders.independent = (slide, s) => {
-		title(slide, s.title);
-		const d = COLUMNS_MESSAGE;
-		columnsWithMessage(slide, s, { sizes: d, bulletPt: d.bulletPt, paraSpacePt: PARA_SPACE_LOOSE_PT, messageH: d.messageH, boxFill: C.background1, boxLine: C.accent4, boxIcon: "warning", boxIconFill: C.accent4 });
-	};
-
 	builders.robot_program = (slide, s) => {
 		title(slide, s.title);
 		const r = ROBOT_PROGRAM;
 		// Like the loop slide's message box: tint fill, orange outline, orange icon circle
-		columnsWithMessage(slide, s, { sizes: COLUMNS_MESSAGE, bulletPt: r.bulletPt, paraSpacePt: r.paraSpacePt, messageH: r.messageH, boxFill: C.background2, boxLine: C.accent1, boxIcon: "robot", boxIconFill: C.accent1 });
+		columnsWithMessage(slide, s, { sizes: COLUMNS_MESSAGE, bulletPt: r.bulletPt, paraSpacePt: r.paraSpacePt, messageH: r.messageH, boxFill: C.background2, boxLine: C.accent1, boxIcon: MESSAGE_ICONS[s.id] || "robot", boxIconFill: C.accent1 });
 	};
+
+	// The orienting slide (what is tested and why) uses the same three-column-plus-message layout as prep.
+	builders.purpose = (slide, s) => builders.prep(slide, s);
 
 	builders.prep = (slide, s) => {
 		title(slide, s.title);
 		const r = PREP;
 		// Same helper and box as robot_program: tint fill, orange outline, orange icon circle
-		columnsWithMessage(slide, s, { sizes: COLUMNS_MESSAGE, bulletPt: r.bulletPt, paraSpacePt: r.paraSpacePt, messageH: r.messageH, boxFill: C.background2, boxLine: C.accent1, boxIcon: "tool", boxIconFill: C.accent1 });
+		columnsWithMessage(slide, s, { sizes: COLUMNS_MESSAGE, bulletPt: r.bulletPt, paraSpacePt: r.paraSpacePt, messageH: r.messageH, boxFill: C.background2, boxLine: C.accent1, boxIcon: MESSAGE_ICONS[s.id] || "tool", boxIconFill: C.accent1 });
 	};
 
 	builders.spoilers = (slide, s) => {
 		title(slide, s.title);
 		const sp = SPOILERS;
 		const colW = (CONTENT_W - (sp.columns - 1) * GAP) / sp.columns;
-		const rowH = (CONTENT_H - (sp.rowsFirstColumn - 1) * GAP) / sp.rowsFirstColumn;
+		const rowH = (CONTENT_H - (sp.rowsFirstColumn - 1) * sp.rowGap) / sp.rowsFirstColumn;
 		const left = s.items.slice(0, sp.rowsFirstColumn);
 		const right = s.items.slice(sp.rowsFirstColumn);
 		[left, right].forEach((items, ci) => {
@@ -1358,7 +1362,7 @@ async function buildDeck(contentJson, outputPptx) {
 				w: colW,
 				pt: sp.textPt,
 				badgeD: sp.iconD,
-				gap: GAP,
+				gap: sp.rowGap,
 				minRowH: rowH,
 				cardKind: "tint",
 				cardPad: sp.cardPad,
@@ -1390,8 +1394,8 @@ async function buildDeck(contentJson, outputPptx) {
 		}
 		const masterName = s.layout === "title_dark" ? "TITLE_DARK" : "TITLE_ONLY";
 		const slide = pres.addSlide({ masterName, sectionTitle: s.section });
-		const build = builders[s.id];
-		if (!build) throw new Error(`No builder for slide id "${s.id}"`);
+		const build = builders[s.builder || s.id]; // changed from the registration generator, which selected by id only
+		if (!build) throw new Error(`No builder "${s.builder || s.id}" for slide id "${s.id}"`);
 		build(slide, s);
 		slide.addNotes(s.notes);
 	}
@@ -1410,7 +1414,7 @@ async function main() {
 	} else if (args.length === 2) {
 		await buildDeck(args[0], args[1]);
 	} else {
-		throw new Error("Usage: node make_stage1_deck.js [<content.json> <output.pptx>]");
+		throw new Error("Usage: node make_perf_deck.js [<content.json> <output.pptx>]");
 	}
 }
 

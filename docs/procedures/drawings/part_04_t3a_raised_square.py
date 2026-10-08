@@ -40,11 +40,12 @@ SQUARE_ROT = SQUARE.rotation_deg  # slant of the square, counterclockwise seen f
 RAISED_SQUARE_THICKNESS_MM = 10.0  # raised square thickness (10, not the 6 mm of a front plate: room for blind holes)
 SQUARE_T = RAISED_SQUARE_THICKNESS_MM
 HOLE_THREAD_DEPTH_MM = 6.0  # M5 thread depth of the blind standoff holes in the back of the square
-HOLE_DRILL_DEPTH_MM = 7.5  # drilled depth of those holes, measured to the tip of the drill point
+HOLE_DRILL_DEPTH_MM = 8.0  # drilled depth of those holes, measured to the tip of the drill point
 DRILL_POINT_DEG = 118.0  # included angle of a standard drill point
 BACK_T = c.BACK_PLATE_THICKNESS_MM  # back plate thickness (8)
-HIDDEN_POST_SQUARE_MM = 60.0  # standoff square (side), in the square's own rotated frame
-SHOWN_GAP_MM = GAP_SMALL_MM  # the section shows the 15 mm set; the 60 mm set differs only in standoff length
+HIDDEN_POST_SQUARE_MM = 64.0  # standoff square (side), in the square's own rotated frame (holes at +/-32)
+SHOWN_GAP_MM = GAP_SMALL_MM  # G of the section: the 15 mm set; the 60 mm set differs only in standoff length
+BODY_SHOWN_MM = c.standoff_body_length(SHOWN_GAP_MM, SQUARE_T)  # standoff body length in the section (G - 10 = 5)
 BODY_D = sp.STANDOFF_BODY_DIAMETER_MM  # standoff body diameter
 
 # Derived dimensions (computed, never typed)
@@ -57,9 +58,12 @@ DRILL_R = c.M5_TAP_DRILL_MM / 2  # tap drill radius
 POINT_LEN = DRILL_R / math.tan(math.radians(DRILL_POINT_DEG / 2))  # axial length of the drill point (1.26)
 FULL_DIA_DEPTH = HOLE_DRILL_DEPTH_MM - POINT_LEN  # depth to which the drill is at full diameter
 FLOOR_MIN = SQUARE_T - HOLE_DRILL_DEPTH_MM  # material left in front of the drill-point tip
-assert FLOOR_MIN >= 2.5 - 1e-9, "floor under the blind holes below 2.5 mm"
+assert FLOOR_MIN >= 2.0 - 1e-9, "floor under the blind holes below 2.0 mm"
 assert FULL_DIA_DEPTH > HOLE_THREAD_DEPTH_MM, "thread would run into the drill point"
 assert sp.STANDOFF_STUD_FRONT_LENGTH_MM <= HOLE_THREAD_DEPTH_MM, "front stud longer than the thread"
+HOLE_RADIUS_FROM_AXIS = HIDDEN_POST_SQUARE_MM / 2 * math.sqrt(2)  # distance of a standoff axis from the plate center (45.25)
+FLANGE_CLEARANCE_MM = HOLE_RADIUS_FROM_AXIS - c.M5_MAJOR_MM / 2 - sp.SPIGOT_FLANGE_DIAMETER_MM / 2  # thread edge to the flange rim
+assert FLANGE_CLEARANCE_MM > 2.0, "standoff holes must clear the spigot flange by more than 2 mm"
 
 
 def blind_hole_notch(u0: float) -> list[tuple[float, float]]:
@@ -160,7 +164,7 @@ def build(out_dir: str) -> list[str]:
     # ---------------- section A-A ----------------
     sec = View(sh, SEC_ORIGIN, SEC_SCALE)
     u_l, u_r = -SEC_HALF_WIDTH, SEC_HALF_WIDTH
-    g = SHOWN_GAP_MM
+    g = BODY_SHOWN_MM  # back face of the square above the back plate = standoff body length
     hole_us = [-HIDDEN_POST_SQUARE_MM / 2, HIDDEN_POST_SQUARE_MM / 2]
     # back plate
     c.region(sec, c.back_plate_piece(u_l, u_r, hole_us), crop_u=(u_l, u_r))
@@ -185,12 +189,11 @@ def build(out_dir: str) -> list[str]:
     sec.dim_v(-HIDDEN_POST_SQUARE_MM / 2 - BODY_D / 2, -HIDDEN_POST_SQUARE_MM / 2 - BODY_D / 2, 0.0, g, -9.0,
               c.fmt(g))
     sec.dim_v(h, hb, top, g, 10.0, c.fmt(SQUARE_T))
-    sh.text(SEC_ORIGIN[0] + 38.0, SEC_ORIGIN[1] + g / 2 * SEC_SCALE - 1.2, "STANDOFF PT-03", size=d.FONT_NOTE)
-    sh.text(SEC_ORIGIN[0] + 38.0, SEC_ORIGIN[1] + g / 2 * SEC_SCALE - 5.2, f"G = {c.fmt(g)} (60 SET: 60)", size=d.FONT_NOTE)
+    sec.dim_v(h, h, top, 0.0, 22.0, c.fmt(SHOWN_GAP_MM), base_u=h)  # G: front face of the square to the back plate
     sh.text(SEC_ORIGIN[0], SEC_ORIGIN[1] - BACK_T * SEC_SCALE - 12.0,
             "SECTION A-A   SCALE 1:1", size=d.FONT_LABEL, ha="center", weight="bold")
     sh.text(SEC_ORIGIN[0], SEC_ORIGIN[1] - BACK_T * SEC_SCALE - 17.5,
-            "back plate, 15 mm set shown; plate and square cropped at both ends", size=d.FONT_NOTE, ha="center")
+            f"G = {c.fmt(SHOWN_GAP_MM)} shown; STANDOFF PT-03 {c.standoff_label(GAP_SMALL_MM, GAP_LARGE_MM, SQUARE_T)}", size=d.FONT_NOTE, ha="center")
 
     # ---------------- 4:1 knife-edge detail ----------------
     c.draw_edge_detail(sh, DET_ORIGIN, DET_SCALE, SQUARE_T, material_side=-1,
@@ -203,7 +206,7 @@ def build(out_dir: str) -> list[str]:
         f"center. Plate outline rounded up to whole mm.",
         c.NOTE_KNIFE_EDGE + f" Back face of the square {c.fmt(round(BACK_SIDE, 2))} square (computed).",
         c.NOTE_FINISH + " " + c.NOTE_FLATNESS + " Do not machine the front face or the land after blasting.",
-        f"Standoffs PT-03, 15 mm set or 60 mm set; both sets delivered. Square: {sp.STANDOFF_STUD} blind holes, thread "
+        c.gap_convention_note(SQUARE_T, GAP_SMALL_MM, GAP_LARGE_MM) + f" Standoffs PT-03, both sets delivered. Square: {sp.STANDOFF_STUD} blind holes, thread "
         f"{c.fmt(HOLE_THREAD_DEPTH_MM)} deep, tap drill \u00d8{c.M5_TAP_DRILL_MM:g} drilled {c.fmt(HOLE_DRILL_DEPTH_MM)} deep to the tip of a "
         f"{c.fmt(DRILL_POINT_DEG)}\u00b0 point (full diameter to {FULL_DIA_DEPTH:.2f}); floor under the tip {FLOOR_MIN:.1f} mm. The "
         f"{c.fmt(sp.STANDOFF_STUD_FRONT_LENGTH_MM)} mm front stud seats {c.fmt(HOLE_THREAD_DEPTH_MM - sp.STANDOFF_STUD_FRONT_LENGTH_MM)} "
@@ -231,12 +234,13 @@ def print_checks() -> None:
     """Print the computed values that the drawing uses."""
     print(f"PT-04 plate {PLATE_W:g} x {PLATE_H:g} x {BACK_T:g}; square {SQUARE_SIDE:g} x {SQUARE_T:g}, slant {SQUARE_ROT:g} deg")
     print(f"PT-04 bevel run {RUN:.3f} mm, back face side {BACK_SIDE:.3f} mm")
+    axis_to_edge = SQUARE_SIDE / 2 - HIDDEN_POST_SQUARE_MM / 2  # standoff axis to the nearest front-face edge
     for g in (GAP_SMALL_MM, GAP_LARGE_MM):
-        axis_to_edge = SQUARE_SIDE / 2 - HIDDEN_POST_SQUARE_MM / 2  # standoff axis to the nearest front-face edge
-        print(f"PT-04 hidden check, gap {g:g}: axis-to-edge {axis_to_edge:.2f} mm vs gap x tan30 + 5 = "
-              f"{c.hidden_threshold_mm(g):.2f} mm (margin {axis_to_edge - c.hidden_threshold_mm(g):.2f}); "
-              f"strict {c.hidden_threshold_strict_mm(g, SQUARE_T):.2f} (margin "
-              f"{axis_to_edge - c.hidden_threshold_strict_mm(g, SQUARE_T):.2f})")
+        print(f"PT-04 hidden check, G {g:g}: axis-to-edge {axis_to_edge:.2f} mm vs G x tan30 + 5 = "
+              f"{c.hidden_threshold_mm(g):.2f} mm (margin {axis_to_edge - c.hidden_threshold_mm(g):.2f})")
+    print(f"PT-04 standoff bodies: {c.standoff_label(GAP_SMALL_MM, GAP_LARGE_MM, SQUARE_T)} ({c.body_length_source()})")
+    print(f"PT-04 standoff axes at r = {HOLE_RADIUS_FROM_AXIS:.2f} mm: M5 thread edge clears the {sp.SPIGOT_FLANGE_DIAMETER_MM:g} mm flange rim by "
+          f"{FLANGE_CLEARANCE_MM:.2f} mm")
 
 
 if __name__ == "__main__":

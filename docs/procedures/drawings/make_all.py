@@ -22,6 +22,10 @@ sys.path.insert(0, HERE)
 import part_01_target_adapter  # noqa: E402
 import part_02_target_spigot  # noqa: E402
 import part_03_standoffs  # noqa: E402
+import part_04_t3a_raised_square  # noqa: E402
+import part_05_t3b_square_window  # noqa: E402
+import part_06_t4_disk_plate  # noqa: E402
+import part_07_t5_cutout_plate  # noqa: E402
 
 
 def main() -> int:
@@ -30,6 +34,11 @@ def main() -> int:
     results[part_01_target_adapter.NUMBER] = part_01_target_adapter.build(HERE)
     results[part_02_target_spigot.NUMBER] = part_02_target_spigot.build(HERE)
     results[part_03_standoffs.NUMBER] = part_03_standoffs.build(HERE)
+    # PT-04 to PT-07 (target plates): each prints its geometry checks, then draws its sheet(s)
+    for number, module in (("PT-04", part_04_t3a_raised_square), ("PT-05", part_05_t3b_square_window),
+                           ("PT-06", part_06_t4_disk_plate), ("PT-07", part_07_t5_cutout_plate)):
+        module.print_checks()
+        results[number] = module.build(HERE)
     problems = 0
     for number in sorted(results):
         issues = results[number]

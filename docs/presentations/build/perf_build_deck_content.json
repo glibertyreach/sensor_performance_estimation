@@ -33,7 +33,7 @@
         },
         {
           "head": "Two gaps",
-          "text": "Standoffs of 15 mm and 60 mm set the gap between front and back plates, so every result is measured at two step heights"
+          "text": "Standoffs set the gap G, 15 mm or 60 mm, between the faces the sensor sees, so every result is measured at two step heights"
         }
       ],
       "notes": "Every target except the board is a two-plane construction: a front surface with knife edges standing a known gap in front of a back plate of the same finish. One geometry serves the edge, area, detection and boundary-bias tests. The board is the stage-1 calibration board on its SC1-05 adapter, which replaced a 400 mm noise plate; it also carries the registration. Feature sizes follow a ladder of 2 square root 2, so that over the 400 to 1600 mm working range each feature covers two octaves of subtended size and neighbors overlap by half an octave. Procedure section 2 and the specification's section 3.2 give the construction; the drawings are in appendix F."
@@ -94,7 +94,7 @@
           ],
           [
             "Standoff sets, 15 mm and 60 mm gaps",
-            "3 sets of 8, plus 4 spares",
+            "4 lengths, 32 pieces with spares",
             "PT-03",
             "new"
           ],
@@ -205,7 +205,7 @@
       "builder": "cost",
       "layout": "title_only",
       "section": "Scope of work",
-      "title": "New spending: $2,440 to $6,450",
+      "title": "New spending: $2,470 to $6,540",
       "table": {
         "header": [
           "Item to build",
@@ -222,7 +222,7 @@
           ],
           [
             "Standoff sets (PT-03)",
-            "$120 to $360"
+            "$150 to $450"
           ],
           [
             "T3a, raised square (PT-04)",
@@ -244,11 +244,11 @@
       },
       "stats": [
         {
-          "value": "$2,440 to $6,450",
-          "label": "new items: $2,260 to $5,760 to build, $180 to $690 to buy"
+          "value": "$2,470 to $6,540",
+          "label": "new items: $2,290 to $5,850 to build, $180 to $690 to buy"
         },
         {
-          "value": "$3,090 to $8,420",
+          "value": "$3,120 to $8,510",
           "label": "if stage 1 has not been run: its board, adapter, run-out fixture, calipers and torque wrench added"
         }
       ],
@@ -465,10 +465,10 @@
       "title": "Standoff set PT-03: the body length is the gap",
       "image": "assets/PT-03_standoff_set.png",
       "points": [
-        "Aluminum, 10 mm body, length 15.0 or 60.0 mm plus or minus 0.05 mm; shoulder faces square within 0.02 mm",
+        "Aluminum, 10 mm body; the body length is G minus the front part's thickness, so the step the sensor sees is G: 9 and 54 mm for the 6 mm front plates, 5 and 50 mm for the 10 mm raised square, plus or minus 0.05 mm",
         "Asymmetric studs: M5 x 8 at the back end into the 8 mm back plate, M5 x 5.5 at the front end so it sits 0.5 mm below a 6 mm front face; a groove marks the front end",
         "Four standoffs of one group are matched in length within 0.02 mm; the measured length is recorded as the gap in the as-built record",
-        "Three targets use them: hidden behind the raised square of T3a, at the corners of T3b and T5; 28 pieces with spares",
+        "Three targets use them: hidden behind the raised square of T3a, at the corners of T3b and T5; 32 pieces with spares",
         "Bead blast to match the plates, then measure"
       ],
       "notes": "The gap G between the planes is set by the standoff body alone, which is why its length and squareness are the tight dimensions. The disks of T4 stand on their own posts instead, one disk-and-post assembly per gap. Drawing script part_03_standoffs.py; the asymmetric studs are also read by the plate drawings."
