@@ -30,3 +30,18 @@ Questions asked, in order, and the answers:
 - Q1 (robot and flange), Neil 2026-10-07: the robot model is unknown (TBD); the specification stays agnostic of the robot model. Consequence: the adapter is drawn to ISO 9409-1-50-4-M6 with the boxed confirm note, as in the related projects; no robot is named anywhere.
 - Q2 (metrology), Neil 2026-10-07: no as-built measurements of the targets in-house beyond a sphere's diameter with a micrometer, a plate's flatness with a run-out gauge, and a plate's width and length. Resolution proposed and agreed: the fabricator delivers an inspection report (feature diameter, land, bevel, position from the dowel datum) that fills targets_asbuilt.csv; a value not reported falls back to the nominal with the drawing tolerance as its uncertainty, so the drawings carry tolerances; in-house the technician records each plate's flatness, width and length. This changes the specification's Section 3.3 (as-built record) and is to be executed there as well.
 - Related projects named by Neil for consistency and reuse: "Binocular depth sensor calibration" = glibertyreach/depth_calibration_from_spherical_target (stage-1 decks, drawings SC1-01 to SC1-06, cost pattern); "Sensor registration via plane correspondence" = glibertyreach/plane_plane_registration (procedure with the same Section 1 structure, costs.py, decks, the consistency-pass skill). Equipment and procedures are reused from them wherever they fit.
+- Q3 (target mounting) and Q4 (drift-run stand), presented 2026-10-07 and 2026-10-08; Neil asked why the noise plate
+  is 400 mm and how the current (stage-1) plate could serve. Reviewer answer: the size was a design choice (far-station
+  ROI of about 170 px, 40 rows per ramp quantum, registration leverage); the stage-1 board (200 x 150 mm on SC1-05)
+  serves with the ramp spanning 2 quanta instead of 4, a 5,500-pixel far-station ROI, tilts feasible from the second
+  station, and the same registration hardware as the registration project.
+- Neil's decision (2026-10-08): adopt; the 400 mm noise plate is eliminated. T2 = the stage-1 board on its SC1-05
+  adapter; NOISE plate size 200 x 150 mm; RAMP_QUANTA = 2. Q4 is thereby answered: the drift run uses the board on any
+  rigid laboratory stand, as the registration project does; no stand drawing.
+- Q3 re-presented for the feature targets (T3a, T3b, T4, T5) only; pending.
+- Neil's question (2026-10-08): what is lost if spheres are eliminated and only planes are used, after trying to
+  measure the lost quantities with planes. Reviewer answer given in chat (curvature term of the depth bias becomes a
+  prediction from the measured line spread function; grazing incidence beyond the tilt range unmeasured; lateral
+  position, registration translation, angular reflectance to the tilt limit and the tool frame are recoverable with
+  edged plates and tilts).
+
