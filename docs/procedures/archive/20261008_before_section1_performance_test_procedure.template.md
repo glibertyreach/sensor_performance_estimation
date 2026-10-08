@@ -6,7 +6,7 @@ What you are producing: a session folder of sensor capture files (`.mc`), one gr
 
 The analysis definitions (what is computed from the captures) are in the characterization procedure specification of 2026-10-04. This document is the step-by-step rendering of its Part I (acquisition) plus a guide to running the analyses of its Part II. It does not repeat the math. "Specification Section N" means that section of the specification.
 
-The order of the five capture series, and what each analysis needs from the others, is in Figure 1. Figure 2 and Figure 3 (§1) show the setup and the target mounting stack. Figure 4 and Figure 5 (§2) show the targets and their chamfered edges. Figure 6 and Figure 7 (§5) show the stations and the planned poses. Figure 8 (§8) shows the depth-step visits, and Figure 9 (§13) shows how the session folder feeds the analyses.
+The order of the five capture series, and what each analysis needs from the others, is in Figure 1. Figure 2 (§1) shows the setup. Figure 3 and Figure 4 (§2) show the targets and their chamfered edges. Figure 5 and Figure 6 (§5) show the stations and the planned poses. Figure 7 (§8) shows the depth-step visits, and Figure 8 (§13) shows how the session folder feeds the analyses.
 
 ![](figures/fig_procedure_flow.png)
 
@@ -14,153 +14,61 @@ Figure 1. Procedure order and data dependencies. Shaded boxes are captures and o
 
 ---
 
-## 1. Scope of work and equipment
+## 1. Equipment
 
-This section is the complete list of what must exist before the first session: what is already in hand, what must be built, what must be bought, and what must be prepared. Nothing outside this list is needed. The board, its adapter, the run-out fixture and the rigid sensor mount come from the stage-1 calibration project and the registration project; 1b says what they are, so that they can be made for this procedure alone if those projects have not been run. Appendix F holds the shop drawings; appendix E lists suppliers. The robot model is not yet chosen, so every flange part is drawn to the ISO 9409-1-50-4-M6 interface and nothing in this document depends on the model.
-
-The sensor stays fixed. The robot carries the target, so every target pose is commanded, repeatable, and logged. Figure 2 shows the arrangement.
+The sensor stays fixed. The robot carries the target, so every target pose is commanded, repeatable, and logged. Figure 2 shows the arrangement. Table 1 lists the equipment and why each item is needed.
 
 ![](figures/fig_setup.png)
 
-Figure 2. The experimental setup, side view. The sensor stands on its own rigid stand, separate from the robot. The robot carries the target on the target adapter anywhere between Z_MIN and Z_MAX. The laboratory is enclosed and its lighting is constant.
+Figure 2. The experimental setup, side view. The sensor stands on its own rigid stand, separate from the robot. The robot carries the target on the dowel-pinned adapter anywhere between Z_MIN and Z_MAX. The laboratory is enclosed and its lighting is constant.
 
-### 1a. Already in hand
+| Item | Requirement | Why |
+|---|---|---|
+| VSX3000 sensor on a rigid stand | Stand mechanically separate from the robot base, on an isolated floor or table | Prevents robot motion from moving the sensor |
+| 6-axis robot | Repeatability {{VALUE:robot_repeatability_mm}} mm or better (ISO 9283); reports the actual, encoder-derived pose at 0.01 mm resolution, time-stamped against the frames; approach-from-below moves programmable; payload above the heaviest target plus adapter | Commanded, repeatable target poses; the read-back pose is the step truth of series Z |
+| Quick-change target adapter | Dowel-pinned, re-mount repeatability {{VALUE:adapter_remount_repeatability_mm}} mm or better; every target carries the same dowel datum | Targets can be swapped without re-registering; the datum places their features |
+| Temperature loggers (sensor housing and air) | One sample every {{VALUE:temperature_log_interval_min}} minute | For drift attribution |
+| Capture computer | VSX3000 SDK, the LRVisionLibs `MatCloud` reader, and a robot interface that logs the actual pose read back from the robot | Synchronized capture and logging |
 
-| Item | Requirement |
-|---|---|
-| Sensor | The VSX3000 to be characterized, on the rigid sensor mount of the stage-1 project (a stiff bracket, not a tripod, mechanically separate from the robot base, on an isolated floor or table, its position marked so a bump is noticed); robot motion must not move the sensor |
-| Robot | Six-axis industrial robot, model not yet chosen, with an ISO 9409-1-50-4-M6 tool flange (confirm against the chosen robot's flange drawing before the adapter is machined); repeatability {{VALUE:robot_repeatability_mm}} mm or better (ISO 9283); reports its actual, encoder-derived pose at 0.01 mm resolution, time-stamped against the frames; approach-from-below moves programmable; payload above the heaviest target with its adapter (about {{DERIVED:heaviest_target_kg}} kg) |
-| Capture computer and software | VSX3000 SDK, the LRVisionLibs `MatCloud` reader, and the robot interface that logs the actual pose read back from the robot; accepts the capture trigger from the robot program and writes one `.mc` file group per pose, named by pose id (§11); at least {{DERIVED:disk_gb_per_1000_frames}} GB free per 1,000 frames, about {{DERIVED:disk_gb_session}} GB for the default plan |
-| Analysis computer | Any computer with Python 3.10 or later and this repository installed, its self-test passed (appendix C) |
-| Noise and registration board (T2) with its adapter | From stage 1: 200 x 150 mm plate, at least 6 mm thick, matte light-gray front face flat to {{VALUE:plate_flatness_mm}} mm, on the SC1-05 board adapter (plate on the ISO flange with three support pads, three edge pins and three clamp fingers); specification in 1d |
-| Run-out fixture | From stage 1: dial indicator on a magnetic base on a steel plate bolted to the cell table; the in-house flatness check of every plate (§2) |
-| Calipers with depth rod, 150 mm, and torque wrench | From stage 1: gap G and standoff lengths; recorded adapter and spigot screw torques |
+Table 1. Equipment, requirements, and the reason for each.
 
 The robot must report its actual (encoder-derived) pose at the time of the capture, not only the commanded one, to a resolution of 0.01 mm, time-stamped against the frames. If it cannot, tell the engineer before you start: for series Z the read-back pose is the step truth. The laboratory is enclosed and its lighting is constant, so there is no light meter and no ambient-light log; keep the lighting unchanged for the whole session (§3).
 
-### 1b. What must be built
-
-{{COST_TABLE_BUILD}}
-
-Table 1. What must be built. The items marked "stage 1" exist if the stage-1 calibration project has been run and cost nothing more; otherwise they are built to the stage-1 drawing and specification.
-
-The four feature targets (T3a, T3b, T4, T5) share one mounting system (Figure 3): the target adapter (PT-01) bolts to the robot flange and carries a 40 mm H7 bore with a keyway; each target carries a spigot (PT-02) bolted to the back of its back plate, with a radial dowel that enters the keyway and sets the target's orientation; a ball-lock pin through the adapter's cross hole and the spigot's cross hole holds the target. Changing targets is a matter of pulling the pin, lifting the target off and dropping the next one in, with the same datum every time: the spigot axis and the dowel are the dowel datum that every target's as-built record refers to (§2). The board T2 does not use the spigot; it stays on its own SC1-05 adapter, and swapping between the board and a feature target means swapping the adapter on the flange, which the once-per-mount check of §4 allows for.
-
-![](figures/fig_mounting.png)
-
-Figure 3. The target mounting stack, cross-section, not to scale. The adapter (PT-01) stays on the robot flange; each feature target carries its own spigot (PT-02), which drops into the adapter's bore with its dowel in the keyway and is held by the ball-lock pin. The standoffs (PT-03) set the gap G.
-
-The two gaps are set by standoffs (PT-03) between the front and back plates of T3b and T5, and by the length of the hidden posts of T3a and T4; each of those two targets is delivered with posts for both gaps.
-
-### 1c. What must be bought
-
-{{COST_TABLE_BUY}}
-
-Table 2. What must be bought.
-
-{{COST_PARAGRAPH}}
-
-### 1d. Purchase specifications
-
-Hand the tables below, with the drawings of appendix F, to the fabricator. The four feature targets are one order: the plates are cut, drilled, chamfered and finished together so that every surface the sensor sees has the same finish.
-
-| Requirement | T3a raised square | T3b square window | T4 disk plate | T5 cutout plate |
-|---|---|---|---|---|
-| Plates | Back plate {{DERIVED:edge_plate_size_text}} mm; raised square {{VALUE:edge_square_size_mm}} mm on hidden posts | Front plate {{DERIVED:edge_plate_size_text}} mm with a {{VALUE:edge_square_size_mm}} mm window; back plate the same size | Back plate {{DERIVED:disk_plate_size_text}} mm; {{DERIVED:feature_count}} disks of {{DERIVED:feature_diameters}} on 2 mm posts; {{DERIVED:post_site_count}} post without a disk | Front plate {{DERIVED:disk_plate_size_text}} mm with {{DERIVED:feature_count}} holes of {{DERIVED:feature_diameters}}; back plate the same size, removable |
-| Thickness | At least 6 mm, every plate; the raised square at least 6 mm | same | same; disks at least 3 mm | same |
-| Knife edges | Every edge of the square beveled from the back at 45 degrees, land {{VALUE:edge_land_max_mm}} mm or less (§2) | Window countersunk from the back at 45 degrees (90 degree included), land {{VALUE:edge_land_max_mm}} mm or less | Disks beveled from the back at 45 degrees, land {{VALUE:edge_land_max_mm}} mm or less | Holes countersunk from the back at 45 degrees, land {{VALUE:edge_land_max_mm}} mm or less |
-| Feature sizes known to | The fabricator's inspection report gives each feature's front-face size, land width, bevel angle and position from the spigot datum, each with the instrument's uncertainty; the engineer enters them in `targets_asbuilt.csv` (§2). A value left out of the report falls back to the nominal with the drawing tolerance as its uncertainty | same | same | same |
-| Flatness | Every plate flat to {{VALUE:plate_flatness_mm}} mm over its front face, checked by the fabricator before finishing and in-house with the run-out fixture after mounting (§2) | same | same | same |
-| Gap | Posts for G = {{VALUE:gap_small_mm}} and {{VALUE:gap_large_mm}} mm, both sets delivered | Standoffs PT-03, both sets | Posts for both gaps, both sets delivered | Standoffs PT-03, both sets |
-| Material | Aluminum tooling plate (MIC-6 or 6061-T6), finish-ground; posts in 2 mm stainless steel rod | same | same; disks in the same plate stock; posts 2 mm stainless steel rod | same |
-| Surface | One finish on every front and back face: fine glass-bead blast, uniform, light, mid-range reflectance at the projector wavelength; all plates blasted in one batch with one medium and one pressure. No paint on plates thinner than 10 mm unless the fabricator confirms flatness after painting | same | same, disks and posts included | same |
-| Mounting interface | Spigot PT-02 on the back of the back plate: four M5 tapped holes on a 60 mm pitch circle, oriented to the drawing | same | same | same |
-| Approximate mass | about {{DERIVED:edge_target_mass_kg}} kg with spigot | same | about {{DERIVED:disk_target_mass_kg}} kg with spigot | same |
-| Documents | Inspection report (above); material and finish record; reflectance at the projector wavelength if measured | same | same | same |
-
-Table 3. Purchase specification for the four feature targets.
-
-| Requirement | Noise and registration board (T2) |
-|---|---|
-| Size | 200 x 150 mm, at least 6 mm thick (the stage-1 board) |
-| Material | Ground aluminum tooling plate (for example MIC-6, finish-ground) or float glass |
-| Flatness | {{VALUE:plate_flatness_mm}} mm over the front face, checked in-house with the run-out fixture after mounting on the board adapter |
-| Front face | Matte light-gray paint, thin and even, or bead blast if the plate is 10 mm or thicker; the same mid-range reflectance as the feature targets, recorded |
-| Edges | Square and clean on the bottom long edge and the left short edge, which rest against the board adapter's edge pins |
-| Documents | Supplier's flatness report, kept with the session notes |
-
-Table 4. Purchase specification for the board (the stage-1 specification, repeated).
-
-### 1e. Special fixtures that are bought, not drawn
-
-Run-out fixture. The flatness check of §2 holds the dial indicator still while the robot turns the plate in front of it. Use a dial indicator with 0.01 mm graduation and about 10 mm travel (for example Mitutoyo 2046 series, about $50 to $150) on an articulating magnetic base with fine adjustment (for example Noga MG71003 or DG-61003, about $140 to $320), standing on a steel base plate about 150 x 100 x 12 mm bolted to the cell table with two M8 screws. The stage-1 fixture serves as it is.
-
-Drift-run stand. The optional drift run of §6 holds the board still at {{VALUE:z_reference_mm}} mm for {{VALUE:drift_run_duration_min}} minutes with the robot idle. Any rigid laboratory stand that holds the board on its adapter without creeping serves (a bolted post or a heavy tripod with its head locked); no drawing is needed, and the sentinel captures of the run show whether it moved.
-
-Ball-lock pins. Two 8 mm quick-release ball-lock pins (one spare) of the grip length on drawing PT-01, from McMaster-Carr or Carr Lane (appendix E).
-
-Temperature loggers. Two loggers with a resolution of 0.1 degree C or better, one strapped to the sensor housing and one in the air near the target, each sampling every {{VALUE:temperature_log_interval_min}} minute and exporting a time-stamped CSV (§11).
-
-### 1f. Preparation before the first session
-
-Robot:
-
-- Confirm the chosen robot's flange against ISO 9409-1-50-4-M6 before the target adapter (PT-01) and the board adapter (SC1-05) are machined, and check its repeatability specification: {{VALUE:robot_repeatability_mm}} mm or better.
-- Confirm that the controller reports the actual pose at 0.01 mm resolution with a time stamp the capture computer can match to the frames.
-- Weigh each fixture (the board on its adapter; each feature target on the target adapter, with both gap sets) and enter its tool load data (mass and center of gravity) in the controller; wrong load data shifts every pose.
-- Write the robot program to the interface of §11: it reads the pose list, drives each pose from the approach direction the list gives, triggers the captures through the capture computer's communication software, and writes the pose log. Note where the program writes the pose log (controller storage or a network location) so it can be collected after the session. Once the robot model and controller are settled, the program can be written with Claude Code.
-- Dry-run every planned pose at reduced speed, without capturing, with the largest target mounted: each pose must be reachable and must clear the sensor, its mount and its cables, including the approach retreat of the depth-step series.
-- Review the new program under the cell's safety rules.
-
-Sensor and computers:
-
-- Set up the capture software for the robot's trigger and the pose-id file names (§11).
-- Engineer: choose and record the production sensor configuration in `sensor_config.json` (§3), and decide whether the filters-off repeat is run.
-- Free at least {{DERIVED:disk_gb_session}} GB on the capture computer for the default plan ({{DERIVED:total_frames_text}} frames at {{DERIVED:disk_gb_per_1000_frames}} GB per 1,000 frames).
-- Install this repository on the analysis computer and pass its self-test (appendix C).
-
-Cell:
-
-- Layout study: place the sensor so that target centers from {{VALUE:z_min_mm}} to {{VALUE:z_max_mm}} mm along its axis, at the four field positions of §5 and tilted to {{DERIVED:max_tilt_deg}} degrees, lie inside the robot's reach, and so that the approach moves stay clear of the sensor; do this before the sensor mount is fixed.
-- Bolt the run-out base plate to the cell table (two M8) where the robot can present each plate to the indicator.
-- Identify and record the robot base frame used for the session.
-- Start the two temperature loggers and check that their clocks agree with the capture computer's.
-
 ## 2. Targets
 
-Every target uses a two-plane construction: a front surface with knife edges, standing a known gap G in front of a back plate of the same finish. One geometry therefore serves the edge, area, detection, and boundary-bias tests. The two gaps are {{VALUE:gap_small_mm}} mm (the small gap) and {{VALUE:gap_large_mm}} mm (the large gap), set with standoffs (PT-03). The drawings of appendix F carry tolerances, and the fabricator's inspection report gives the as-built values (the as-built record, below). Table 5 lists the targets and Figure 4 shows them to one scale.
+Every target uses a two-plane construction: a front surface with knife edges, standing a known gap G in front of a back plate of the same finish. One geometry therefore serves the edge, area, detection, and boundary-bias tests. The two gaps are {{VALUE:gap_small_mm}} mm (the small gap) and {{VALUE:gap_large_mm}} mm (the large gap), set with spacers. Fabrication tolerances are left to the fabricator. Instead, every feature is measured as built and logged (the as-built record, below). Table 2 lists the targets and Figure 3 shows them to one scale.
 
 | ID | Target | Construction | Used in |
 |---|---|---|---|
-| T2 | Noise and registration plate | Uniform matte, the stage-1 calibration board on its SC1-05 board adapter, {{DERIVED:noise_plate_text}} mm (width, height), at least 6 mm thick, flat to {{VALUE:plate_flatness_mm}} mm, no pattern. Registration uses its plane (§4). | Registration, A, Z, sentinels |
-| T3a | Raised square | Square of side {{VALUE:edge_square_size_mm}} mm with knife edges, on hidden standoffs at the gap G above a back plate. The standoff length sets G to {{VALUE:gap_small_mm}} or {{VALUE:gap_large_mm}} mm. | B edges, E |
+| T2 | Noise and registration plate | Uniform matte, {{VALUE:noise_plate_size_mm}} mm (width, height), flat to {{VALUE:plate_flatness_mm}} mm, no pattern. Registration uses its plane (§4). | Registration, A, Z, sentinels |
+| T3a | Raised square | Square of side {{VALUE:edge_square_size_mm}} mm with knife edges, on hidden posts at the gap G above a back plate. Spacers set G to {{VALUE:gap_small_mm}} or {{VALUE:gap_large_mm}} mm. | B edges, E |
 | T3b | Square window | Front plate with a square window of the same size and knife edges. The back plate is at G behind it. | B edges, E |
 | T4 | Disk plate | Back-beveled disks on thin posts at G above a back plate: {{DERIVED:feature_count}} disks on the feature ladder, {{DERIVED:blank_site_count}} blank sites, and {{DERIVED:post_site_count}} post-only control site. | C, D, E |
 | T5 | Cutout plate | Back-beveled holes in a front plate, with the back plate at G, removable for the open-background variant (§9): {{DERIVED:feature_count}} holes on the feature ladder and {{DERIVED:blank_site_count}} blank sites. | C, D, E |
 
-Table 5. The targets (specification Section 3.2).
+Table 2. The targets (specification Section 3.2).
 
 ![](figures/fig_targets.png)
 
-Figure 4. Front views of T2, T3a, T3b, T4 and T5 to one scale, drawn from the code's own target definitions with the indicative sensor geometry. The real layout depends on the final focal length (unconfirmed). Gray is the back plate, dashed circles are blank sites, vermillion dots are post-only control sites.
+Figure 3. Front views of T2, T3a, T3b, T4 and T5 to one scale, drawn from the code's own target definitions with the indicative sensor geometry. The real layout depends on the final focal length (unconfirmed). Gray is the back plate, dashed circles are blank sites, vermillion dots are post-only control sites.
 
 **Feature ladder.** The sensor responds to the subtended size D_px = D f_x / Z, not to the diameter in millimeters. The robot sweeps each feature through the ladder stations from Z_MIN to Z_MAX, a factor of 4 in distance, so one feature covers two octaves of D_px. The smallest feature is {{VALUE:feature_min_px_at_z_max}} px at the far station, and each next feature is larger by a factor of {{DERIVED:feature_ratio_text}}, so neighbors overlap by half an octave; the overlap is the scaling test of the analyses (§14). With the indicative f_x of {{DERIVED:indicative_fx_px}} px (unconfirmed) the {{DERIVED:feature_count}} features per plate are {{DERIVED:feature_diameters}}, covering {{DERIVED:feature_px_ranges_text}} over the working range. The lower end sits below the minimum detectable size expected for the VSX3000 (the specification's estimate is 10 to 15 px), so the series reaches the point where detection disappears. Features on a plate are spaced at least {{VALUE:feature_isolation_px}} px apart, edge to edge, evaluated at Z_MAX ({{DERIVED:isolation_mm_at_z_max}} mm at the indicative f_x), so the sensor's spatial interpolation cannot couple neighboring features at any station. The plan tool's layout is the source of the as-built drawing, and each plate must fit the field of view at Z_MIN.
 
-**Two planes.** In the disk plate and T3a the front material is the disks (or the square) and the back plate is seen around them. In the cutout plate and T3b the front material is a plate and the back plate is seen through the holes (or the window). Standoffs set the gap. Measure the real gap with the depth rod of the calipers and record it.
+**Two planes.** In the disk plate and T3a the front material is the disks (or the square) and the back plate is seen around them. In the cutout plate and T3b the front material is a plate and the back plate is seen through the holes (or the window). Spacers set the gap. Measure the real gap and record it.
 
 **Blank and control sites.** Each plate has {{DERIVED:blank_site_count}} blank sites, one for each feature: blank site i is a patch of plain surface sized to the search window of feature i at Z_MAX (the feature plus a margin of {{VALUE:detection_window_margin_px}} px on each side). These give the false-alarm rate in series D at every station. The disk plate also has {{DERIVED:post_site_count}} post-only site (a post with no disk). It shows whether the support post itself is detected.
 
-**Datum.** Every feature target mounts on the same spigot datum (the spigot axis and its orientation dowel, §1b), and the as-built record (below) includes each feature's offset from that datum. Registration from the plane of T2 does not observe where a target sits sideways on the flange, so the once-per-mount check (Step 4.8) locates each mounted target against the left IR image and compares it with those offsets.
+**Datum.** Every target mounts on the same dowel datum, and the as-built record (below) includes each feature's offset from that datum. Registration from the plane of T2 does not observe where a target sits sideways on the flange, so the once-per-mount check (Step 4.8) locates each mounted target against the left IR image and compares it with those offsets.
 
 **Surface finish.** All front and back surfaces use one finish, for example bead-blasted aluminum or a matte coating, with mid-range IR reflectance. Record the finish and, if possible, its reflectance at the projector wavelength. A reflectance difference between plates would bias the edge and area results.
 
 ### Chamfered (knife-edge) boundaries
 
-Every boundary that defines an edge, disk, or cutout must be chamfered from the back (Figure 5). Then no camera or projector ray can strike the boundary's side wall, and the sensor sees only the front face and the back plate. An unchamfered wall would be seen as a third surface by one camera and not the other, which corrupts exactly the edge measurements this procedure is meant to make.
+Every boundary that defines an edge, disk, or cutout must be chamfered from the back (Figure 4). Then no camera or projector ray can strike the boundary's side wall, and the sensor sees only the front face and the back plate. An unchamfered wall would be seen as a third surface by one camera and not the other, which corrupts exactly the edge measurements this procedure is meant to make.
 
 ![](figures/fig_chamfer.png)
 
-Figure 5. Chamfered cutout and disk on its post, cross-section, not to scale. The three viewpoints (left camera, projector, right camera) pass the knife edge in open space and never meet the beveled wall. The bevel angle is measured from the plate normal.
+Figure 4. Chamfered cutout and disk on its post, cross-section, not to scale. The three viewpoints (left camera, projector, right camera) pass the knife edge in open space and never meet the beveled wall. The bevel angle is measured from the plate normal.
 
 - Cutouts and the square window: countersink from the back face, so the hole widens away from the sensor.
 - Disks and the raised square: bevel the back, so the part narrows away from the sensor (a frustum).
@@ -173,7 +81,7 @@ A rough worked value from the specification, assuming about a 70 degree horizont
 
 ### The as-built record
 
-No feature-level measurement is made in-house. The fabricator delivers an inspection report with each feature's front-face diameter, land width, bevel angle and position from the spigot datum, each with the instrument's uncertainty. Engineer: enter these values in `targets_asbuilt.csv`, the file the analysis reads; the engineer writes a template with the nominal values to overwrite. Where the report leaves a value out, the nominal value stands with the drawing tolerance as its uncertainty; an empty numeric cell keeps the nominal value. In-house, record each plate's flatness with the run-out fixture (§3) and its width and length with the calipers or the steel rule, and the surface finish. All analyses use the as-built values, never bare nominals without an uncertainty. The datum offsets are the reference of the once-per-mount check (Step 4.8); the position columns of Table 6 are measured from the plate center.
+Engineer, with the metrologist: measure each feature's front-face diameter, land width, bevel angle, and plate position with an optical comparator or a calibrated microscope, and its offset from the common dowel datum. Record each value with its measurement uncertainty in `targets_asbuilt.csv`. This is the file the analysis reads. All analyses use these as-built values, never the nominal ones. Table 3 lists the columns. The engineer can write a template with the nominal values for the metrologist to overwrite; an empty numeric cell keeps the nominal value. The datum offsets are the reference of the once-per-mount check (Step 4.8); the position columns of Table 3 are measured from the plate center.
 
 | Column | Meaning |
 |---|---|
@@ -188,7 +96,7 @@ No feature-level measurement is made in-house. The fabricator delivers an inspec
 | `rotation_deg` | In-plane rotation of a square feature (the slant), in degrees |
 | `level_index` | Feature of the ladder, from 0 for the smallest (disks, cutouts, and the blank site that serves the feature); empty otherwise |
 
-Table 6. Columns of `targets_asbuilt.csv`.
+Table 3. Columns of `targets_asbuilt.csv`.
 
 ## 3. Before anything else
 
@@ -252,7 +160,7 @@ The plane form (`--method planes`) is the default. The tool prints the residual 
 Accept the registration only if both of these hold:
 
 - The RMS plane-distance residual is {{VALUE:registration_residual_accept_mm}} mm or less (`REGISTRATION_RESIDUAL_ACCEPT_MM`). If it is more, the tool still writes `registration.json` but marks it not accepted, and its exit code is 1.
-- The standard error of the camera's Z offset, from the covariance of the fit, is reported next to the residual. About 0.1 mm is expected (Table 11). The register tool prints the residual only, so the engineer takes this standard error from the fit covariance and records it with the result.
+- The standard error of the camera's Z offset, from the covariance of the fit, is reported next to the residual. About 0.1 mm is expected (Table 8). The register tool prints the residual only, so the engineer takes this standard error from the fit covariance and records it with the result.
 
 If either is too large, add poses with larger tilts, up to plus or minus {{VALUE:registration_tilt_range_deg}} degrees, or check the mount, then solve again. Save both transforms, the residual, and the standard error of the Z offset in `registration.json` in the session folder (the engineer adds the standard error to the file if the tool did not write it). Note the residual and the standard error in `session_log.md`.
 
@@ -289,30 +197,30 @@ The planner writes five files in the output folder:
 
 - `poses.csv`: one row per commanded pose.
 - `plan_summary.txt`: poses and frames per series and station, the capture budget, every adjustment, and every warning. Read it before you start.
-- `plan.png`: the planned target centers, a picture of the same kind as Figure 7.
+- `plan.png`: the planned target centers, a picture of the same kind as Figure 6.
 - `targets.json`: the target definitions the plan was made with.
 - `parameters.json`: the parameter values the plan was made with (appendix A).
 
 **Terms used in every series.** Four terms are used from here to §10, and each has one meaning.
 
 - Station: a commanded distance of the target center from the sensor, along the optical axis, in mm (the target's Z). The stations are listed below.
-- Field position: where the target center sits in the image. Code 0 is the center. Codes 1 to 4 are the four corners, at {{VALUE:field_offset_fraction}} of the half field (`FIELD_OFFSET_FRACTION`): 1 toward (-H, -V), 2 toward (+H, -V), 3 toward (+H, +V), and 4 toward (-H, +V). Figure 6 shows them. A corner is pulled inward when the target would not fit there (the coverage rule below).
+- Field position: where the target center sits in the image. Code 0 is the center. Codes 1 to 4 are the four corners, at {{VALUE:field_offset_fraction}} of the half field (`FIELD_OFFSET_FRACTION`): 1 toward (-H, -V), 2 toward (+H, -V), 3 toward (+H, +V), and 4 toward (-H, +V). Figure 5 shows them. A corner is pulled inward when the target would not fit there (the coverage rule below).
 - Pose: one commanded target position and orientation. The registration (§4) turns it into the flange pose the robot is sent to. One pose is one move, one settle wait, and the capture of its frames.
 - Pose list: the planner's `poses.csv`, one row per pose, in the order to do them (`order`). The robot program executes it row by row. §6 to §10 say what the list holds for each series. You do not choose stations, positions, or order yourself: you follow the list.
 
 One geometric ladder of Z stations serves the whole procedure: {{DERIVED:station_count}} stations of the ladder at a ratio of {{DERIVED:station_ratio_text}} (four per octave), {{DERIVED:ladder_text}} mm. Series A, C, and D visit all of them; A also adds the {{DERIVED:legacy_depth_count}} legacy depths {{DERIVED:legacy_depths_text}} mm, at the center field position only, so that the existing metrics can be computed at the same depths as the existing data. Series B (edges) visits every second station, the {{DERIVED:shape_station_count}} shape stations ({{DERIVED:shape_stations_text}} mm). The step ladder of series Z and the tilt sub-series of A visit every fourth station, the {{DERIVED:reduced_station_count}} reduced stations ({{DERIVED:reduced_stations_text}} mm); the ramp of series Z visits every station of the ladder. The extended trials of D run at the {{DERIVED:low_station_count}} farthest stations ({{DERIVED:low_stations_text}} mm). The reference station, {{VALUE:z_reference_mm}} mm (a station of the ladder), serves the warm-up check, the sentinels, the re-mount check, the field sub-series of C, the open-background variant, and the post check of D. The working range of {{VALUE:z_min_mm}} to {{VALUE:z_max_mm}} mm carries the dagger of appendix A, and Step 4.5 confirms it.
 
-The stations the plan visits, and the five field positions in the image, are in Figure 6. The whole plan is in Figure 7.
+The stations the plan visits, and the five field positions in the image, are in Figure 5. The whole plan is in Figure 6.
 
 ![](figures/fig_stations.png)
 
-Figure 6. Left: the {{DERIVED:station_count}} stations of the ladder, used by A, C and D and by the ramp of Z (A adds the {{DERIVED:legacy_depth_count}} legacy depths, at the center only), the {{DERIVED:shape_station_count}} shape stations of B, the {{DERIVED:reduced_station_count}} reduced stations of the Z step ladder and the A tilt sub-series, and the {{DERIVED:low_station_count}} farthest stations of the extended D trials, along Z; the dotted line is the reference station. Right: the {{DERIVED:field_position_count}} field positions (codes 0 to 4) in the image, and the square span of the random lateral offsets (phase jitter) at one corner, true size and magnified.
+Figure 5. Left: the {{DERIVED:station_count}} stations of the ladder, used by A, C and D and by the ramp of Z (A adds the {{DERIVED:legacy_depth_count}} legacy depths, at the center only), the {{DERIVED:shape_station_count}} shape stations of B, the {{DERIVED:reduced_station_count}} reduced stations of the Z step ladder and the A tilt sub-series, and the {{DERIVED:low_station_count}} farthest stations of the extended D trials, along Z; the dotted line is the reference station. Right: the {{DERIVED:field_position_count}} field positions (codes 0 to 4) in the image, and the square span of the random lateral offsets (phase jitter) at one corner, true size and magnified.
 
 ![](figures/fig_plan.png)
 
-Figure 7. The default full plan: target centers in the sensor frame, side view (H against Z) and front view (H against V), colored by series, with the frustum. Each cloud around a station is a set of random lateral offsets.
+Figure 6. The default full plan: target centers in the sensor frame, side view (H against Z) and front view (H against V), colored by series, with the frustum. Each cloud around a station is a set of random lateral offsets.
 
-**What a row of `poses.csv` contains.** Table 7 lists the procedure letters. A row has the order to execute it in (`order`), the identity that names the files (`procedure`, `target_id`, `gap_mm`, `station_z_mm`, `field`, `pose_index`), the number of frames (`frames`), a sub-series label (`subseries`: {{DERIVED:subseries_plan_text}}), the logged random seed (`seed`), the random lateral offset in mm at the station depth (`offset_h_mm`, `offset_v_mm`), the tilt (`tilt_axis`, `tilt_deg`), the commanded Z step and visit (`step_mm`, `visit`, series Z only), the feature index (`level_index`, usually empty, because one frame sees every feature of a plate), and the wanted target pose in the camera frame (`target_x_mm` to `target_rz_deg`: position in mm and a rotation vector in degrees). With a registration the row also holds the flange pose to command in the robot base frame: position and rotation vector (`base_x_mm` to `base_rz_deg`), the rotation matrix (`r00` to `r22`, row by row), and the quaternion (`quat_w`, `quat_x`, `quat_y`, `quat_z`). Use whichever form your robot program accepts. A last column (`notes`) holds extra detail as JSON: for example the achieved field fraction (`field_fraction_achieved`), the approach of a series Z pose (`approach`), the direction every pose is approached from (`approach_direction`: `-Z,-H,-V` for the standard rule, and `-H`, `+H`, `-V` or `+V` for a lateral-sweep pose; the drift run, whose plate does not move, says `fixed stand`), and whether a sentinel is the reference of its mount (`mount_reference`).
+**What a row of `poses.csv` contains.** Table 4 lists the procedure letters. A row has the order to execute it in (`order`), the identity that names the files (`procedure`, `target_id`, `gap_mm`, `station_z_mm`, `field`, `pose_index`), the number of frames (`frames`), a sub-series label (`subseries`: {{DERIVED:subseries_plan_text}}), the logged random seed (`seed`), the random lateral offset in mm at the station depth (`offset_h_mm`, `offset_v_mm`), the tilt (`tilt_axis`, `tilt_deg`), the commanded Z step and visit (`step_mm`, `visit`, series Z only), the feature index (`level_index`, usually empty, because one frame sees every feature of a plate), and the wanted target pose in the camera frame (`target_x_mm` to `target_rz_deg`: position in mm and a rotation vector in degrees). With a registration the row also holds the flange pose to command in the robot base frame: position and rotation vector (`base_x_mm` to `base_rz_deg`), the rotation matrix (`r00` to `r22`, row by row), and the quaternion (`quat_w`, `quat_x`, `quat_y`, `quat_z`). Use whichever form your robot program accepts. A last column (`notes`) holds extra detail as JSON: for example the achieved field fraction (`field_fraction_achieved`), the approach of a series Z pose (`approach`), the direction every pose is approached from (`approach_direction`: `-Z,-H,-V` for the standard rule, and `-H`, `+H`, `-V` or `+V` for a lateral-sweep pose; the drift run, whose plate does not move, says `fixed stand`), and whether a sentinel is the reference of its mount (`mount_reference`).
 
 | Letter | Series | Target | See |
 |---|---|---|---|
@@ -324,7 +232,7 @@ Figure 7. The default full plan: target centers in the sensor frame, side view (
 | D | Detection trials | T4, T5 | §10 |
 | S | Drift sentinels | whichever target is mounted | §5 |
 
-Table 7. Procedure letters of the plan and of the file names.
+Table 4. Procedure letters of the plan and of the file names.
 
 **Coverage rule.** The planner checks that each target fits the field of view at its station and field position, with a margin of {{VALUE:boundary_band_half_width_px}} px (`BOUNDARY_BAND_HALF_WIDTH_PX`) between the plate and the image border (and half the phase-jitter span more for the series with random offsets). A target that would not fit, for example T2 at a corner at Z_MIN, is pulled inward along its field direction until it fits. The fraction of the requested offset that it kept is the achieved field fraction: 1 means no pull-in, and 0 means the target stays at the center. The fraction is in the `notes` of the row (`field_fraction_achieved`) and in the manifest (§11), and `plan_summary.txt` lists every adjustment and every target that does not fit even when centered. Do not override these. Tell the engineer about any plate that does not fit when centered. Keep `plan_summary.txt` with the session: the achieved fractions are reported with the results of series A (per station) and with the field comparison of series C (§14). The disk and cutout plates T4 and T5 are built to fit the field of view at Z_MIN with room for the random offsets; if the target set cannot be built that way, the planner stops with an error that names the plate, and the engineer changes the target design before anything is fabricated.
 
@@ -344,7 +252,7 @@ Do the series in the order of the plan: A, then B, then Z, then C, then D. Do no
 
 This series captures the {{DERIVED:station_count}} stations of the ladder at {{DERIVED:field_position_count}} field positions each, and the {{DERIVED:legacy_depth_count}} legacy depths ({{DERIVED:legacy_depths_text}} mm) at the center only, {{DERIVED:noise_station_frames}} frames per pose, plus a tilt sub-series. The order of the poses is randomized, with a logged seed, so that slow drift cannot masquerade as a Z dependence. The planner has already done this: follow the `order` column.
 
-1. Mount T2. Do the mount check (Step 4.8). The stations are every station of the ladder from Z_MIN ({{VALUE:z_min_mm}} mm) to Z_MAX ({{VALUE:z_max_mm}} mm), {{DERIVED:ladder_text}} mm, each at the five field positions: the center and four corners at {{VALUE:field_offset_fraction}} of the half field, all fronto-parallel (Figure 6). The legacy depths {{DERIVED:legacy_depths_text}} mm are at the center only, because the existing metrics use the center.
+1. Mount T2. Do the mount check (Step 4.8). The stations are every station of the ladder from Z_MIN ({{VALUE:z_min_mm}} mm) to Z_MAX ({{VALUE:z_max_mm}} mm), {{DERIVED:ladder_text}} mm, each at the five field positions: the center and four corners at {{VALUE:field_offset_fraction}} of the half field, all fronto-parallel (Figure 5). The legacy depths {{DERIVED:legacy_depths_text}} mm are at the center only, because the existing metrics use the center.
 2. The plate must cover the analysis region at every pose. Where a corner would carry part of the plate out of the image, the planner has pulled the pose inward by the coverage rule (§5) and recorded the achieved field fraction in the row. This happens at the near stations. Do not move such a pose back out. The results of series A report the fraction for each station.
 3. Before the first station, the pose list has a drift sentinel on T2 (center, Z = {{VALUE:z_reference_mm}} mm, {{DERIVED:sentinel_frames}} frames). More follow every {{VALUE:drift_sentinel_interval_min}} minutes. The one after the last station is on T2 as well, because T2 is still mounted (§5, drift sentinels).
 4. At each station: move, wait the settle time, then capture the frames of the row. Log the read-back robot pose, the sensor temperature, and the timestamps. The air temperature comes from the loggers of Step 4.1.
@@ -375,7 +283,7 @@ Design change: the specification of 2026-10-04 used a dial indicator on the targ
 
 ![](figures/fig_zstep.png)
 
-Figure 8. The series Z captures at one station, 800 mm. Left: the step ladder, the {{DERIVED:zstep_rung_count}} step sizes in turn, each with its A, B, A, B alternation. Right: the ramp, with the depth the sensor reports if it quantizes at the expected quantum (an illustration, not a measurement).
+Figure 7. The series Z captures at one station, 800 mm. Left: the step ladder, the {{DERIVED:zstep_rung_count}} step sizes in turn, each with its A, B, A, B alternation. Right: the ramp, with the depth the sensor reports if it quantizes at the expected quantum (an illustration, not a measurement).
 
 1. Mount T2 centered and fronto-parallel and do the mount check (Step 4.8). The step ladder visits the {{DERIVED:reduced_station_count}} reduced stations ({{DERIVED:reduced_stations_text}} mm); the ramp visits all {{DERIVED:station_count}} stations of the ladder. Every pose of the series is approached from below (§5, step 1 of the robot program). The drift sentinel after the last pose of the series is on T2, which is still mounted (§5).
 2. Step ladder. The rungs are multiples of the expected depth quantum at the station: {{DERIVED:zstep_quanta_text}} times it (`Z_STEP_LADDER_QUANTA`). The expected quantum grows with the square of Z, so the rungs do too: at the indicative geometry they run from {{DERIVED:zstep_rungs_text}}. The planner lists the rungs of each station in millimeters in `plan_summary.txt`; use those. No rung is smaller than {{VALUE:robot_min_resolvable_move_mm}} mm (`ROBOT_MIN_RESOLVABLE_MOVE_MM`), the smallest Z move the robot is trusted to make; a smaller multiple is raised to it. The expected quantum, listed in `plan_summary.txt`, uses the Tier-A disparity quantum until analysis A has measured the real one. For each of the {{DERIVED:zstep_rung_count}} step sizes, alternate the target between Z0 (visit A) and Z0 plus the step (visit B) for {{VALUE:z_step_repeats}} cycles (A, B, A, B, and so on). Capture {{VALUE:frames_per_zstep_pose}} frames at each visit. The analysis uses the read-back pose of every visit, not the commanded step, as ground truth for the step. Alternating cancels linear drift. Rows have sub-series `ladder`, with `step_mm` and `visit` filled in. At the farthest station the largest rung carries the plate beyond Z_MAX; the planner notes this in `plan_summary.txt`. Capture it as planned and write in `session_log.md` whether the sensor returned valid depth there.
@@ -430,7 +338,7 @@ Optional columns that end up in the manifest: `timestamp`, `sensor_temp_c`, `air
 
 - `procedure` to `pose_index`: exactly the values of the plan row, which also name the files (a sentinel row has procedure `S` and the target that is mounted). `gap_mm` is empty for a target without a back plate, which the file name writes as `G0`.
 - `x_mm`, `y_mm`, `z_mm`: the reported (actual, encoder-derived) flange position in the robot base frame, in mm, written with at least {{DERIVED:pose_log_min_decimals}} decimals (a resolution of 0.01 mm). This is a requirement: for series Z the read-back pose is the step truth, and a log rounded to 0.1 mm makes the smallest rungs meaningless. `make_manifest` warns when every `z_mm` of series Z has fewer decimals.
-- `rotation_type` and `r1` to `r9`: the reported orientation, in whatever form the controller gives, named by one of the types of Table 8. Fill unused `r` columns with nothing.
+- `rotation_type` and `r1` to `r9`: the reported orientation, in whatever form the controller gives, named by one of the types of Table 5. Fill unused `r` columns with nothing.
 
 | rotation_type | Values | Meaning |
 |---|---|---|
@@ -443,7 +351,7 @@ Optional columns that end up in the manifest: `timestamp`, `sensor_temp_c`, `air
 | `rotvec_deg` | 3 | Rotation vector: direction is the axis, length is the angle in degrees |
 | `matrix` | 9 | Row-major 3 by 3 rotation matrix |
 
-Table 8. Rotation types of the pose log.
+Table 5. Rotation types of the pose log.
 
 Example lines:
 
@@ -462,7 +370,7 @@ python3 -m sensorperf.cli.make_manifest --pose-log pose_log.csv --captures Chara
 
 The tool matches every file to its plan row by its name, takes the read-back pose from the log, and computes the target pose in the camera frame through the registration. It lists, by name, every capture file with no log row or plan row, every planned pose without captures, every logged frame without a file, and every pose read back far from the plan. A pose without files or a file without a pose is a warning; add `--strict` to make warnings errors. Problems in the log or plan stop the tool and no manifest is written. Fix what it names and run it again. Do not use `poses.csv` as the pose log for real captures: it holds the commanded poses, and the analysis needs the poses the robot reported. The manifest is the file the analysis reads; keep the pose log too.
 
-What the manifest contains, one line per frame (Table 9):
+What the manifest contains, one line per frame (Table 6):
 
 | Group | Columns |
 |---|---|
@@ -473,9 +381,9 @@ What the manifest contains, one line per frame (Table 9):
 | Readings | `timestamp`, `sensor_temp_c`, `air_temp_c`, `sensor_config_id` |
 | Sub-series details | `subseries`, `tilt_axis`, `tilt_deg`, `step_mm`, `visit`, `level_index` |
 
-Table 9. Manifest columns, in the order the manifest module writes them. Rotations are rotation vectors in degrees.
+Table 6. Manifest columns, in the order the manifest module writes them. Rotations are rotation vectors in degrees.
 
-Further columns may follow the ones in Table 9. They carry extra metadata from the plan; at present the achieved field fraction (`field_fraction_achieved`) for a pose placed at a field position, which the analysis of A reads, and the direction the pose was approached from (`approach_direction`) for every pose: `-Z,-H,-V` by the standard rule, `-H`, `+H`, `-V` or `+V` for a lateral-sweep pose (which the analysis of B reads), and `fixed stand` for a capture of the drift run.
+Further columns may follow the ones in Table 6. They carry extra metadata from the plan; at present the achieved field fraction (`field_fraction_achieved`) for a pose placed at a field position, which the analysis of A reads, and the direction the pose was approached from (`approach_direction`) for every pose: `-Z,-H,-V` by the standard rule, `-H`, `+H`, `-V` or `+V` for a lateral-sweep pose (which the analysis of B reads), and `fixed stand` for a capture of the drift run.
 
 The `subseries` column holds one of these labels: {{DERIVED:subseries_plan_text}}. The labels `ladder`, `ramp`, and `staircase` belong to series Z, `nominal`, `jitter`, and `lateral_sweep` to series B, `field` and `open` to series C, `extended` and `jitter` to series D, and `main` to the main stations of the other series. The labels `filters_off`, `staircase`, `lateral_sweep`, `open`, and `drift_run` mark the optional captures. The module also defines {{DERIVED:subseries_check_text}} for the engineer's own checks (Steps 4.3, 4.4, 4.8 and the post check of §10); the planner never writes them. Every optional set has its own pose-index range, so its file names have four digits (§5): the filters-off repeat starts at {{DERIVED:filters_off_first_pose}}, the staircase at {{DERIVED:staircase_first_pose}}, the lateral sweep at {{DERIVED:lateral_sweep_first_pose}}, and the open-background variant at {{DERIVED:open_background_first_pose}}; the sentinels captured during a set use that set's range. The pose index of the optional drift run (§3, Step 4.3) starts at {{DERIVED:drift_run_first_pose}}, and its files are in the sentinels folder.
 
@@ -502,7 +410,7 @@ The tool also has an option for the post check of series D (§10, step 1): `--pi
 
 ## 13. Data layout, deliverables, and the capture budget
 
-Save every frame raw (`.mc`), with one manifest row per frame, so that any analysis can be re-run without re-capturing. Figure 9 shows how the folder feeds the analyses. The folder layout, under `Noise Estimation Data/`, is:
+Save every frame raw (`.mc`), with one manifest row per frame, so that any analysis can be re-run without re-capturing. Figure 8 shows how the folder feeds the analyses. The folder layout, under `Noise Estimation Data/`, is:
 
 ```
 Characterization_<YYYYMMDD>/
@@ -517,7 +425,7 @@ The `sentinels/` folder holds the sentinels of the session and, if it was made, 
 
 ![](figures/fig_data_flow.png)
 
-Figure 9. The session folder feeds the six analyses, which write into `analysis/`. The fits of A and the boundary terms of E converge on `forward_model_parameters.json`.
+Figure 8. The session folder feeds the six analyses, which write into `analysis/`. The fits of A and the boundary terms of E converge on `forward_model_parameters.json`.
 
 **Deliverables checklist**
 
@@ -533,15 +441,15 @@ Figure 9. The session folder feeds the six analyses, which write into `analysis/
 - [ ] `session_log.md` with: date, sensor serial number, warm-up time, settle time, base frame name, plate flatness and finish, mount-check results, target changes with times, and anything unusual
 - [ ] Photos of the setup: sensor stand, each target on the adapter
 
-**Capture budget.** Table 10 is computed from the default plan. The estimate assumes {{DERIVED:budget_frame_rate_hz}} frames per second and {{VALUE:move_and_settle_time_s}} s per move plus settle. Both are assumptions; the VSX3000 frame rate in the chosen trigger mode should replace them. The table has a separate row for the drift sentinels.
+**Capture budget.** Table 7 is computed from the default plan. The estimate assumes {{DERIVED:budget_frame_rate_hz}} frames per second and {{VALUE:move_and_settle_time_s}} s per move plus settle. Both are assumptions; the VSX3000 frame rate in the chosen trigger mode should replace them. The table has a separate row for the drift sentinels.
 
 {{BUDGET_TABLE}}
 
-Table 10. Capture budget of the default plan: poses, frames, and robot time per series.
+Table 7. Capture budget of the default plan: poses, frames, and robot time per series.
 
 The plan has {{DERIVED:total_poses_text}} poses and {{DERIVED:total_frames_text}} frames, about {{DERIVED:total_robot_hours}} hours of robot time. The extended {{DERIVED:low_probability_percent}} percent series takes about a third of the robot time. Check storage before starting: multiply the size of one `.mc` frame by {{DERIVED:total_frames_text}} frames.
 
-Outside the budget, and not in Table 10, are the optional captures, which the engineer plans only when needed (§5):
+Outside the budget, and not in Table 7, are the optional captures, which the engineer plans only when needed (§5):
 
 - the filters-off repeat of A, B-HV, and B-Z (Step 4.2): {{DERIVED:optional_filters_off_poses}} poses, {{DERIVED:optional_filters_off_frames}} frames, about {{DERIVED:optional_filters_off_hours}} hours;
 - the staircase of series Z (§8, step 5): {{DERIVED:optional_staircase_poses}} poses, {{DERIVED:optional_staircase_frames}} frames, about {{DERIVED:optional_staircase_hours}} hours;
@@ -561,7 +469,7 @@ The engineer runs the analyses on the finished session folder. One command runs 
 python3 -m sensorperf.cli.analyze --session Characterization_20261014/ [--only A B Z C D E]
 ```
 
-`--only` runs a subset (the letters are those of Table 7, with B for the lateral analysis and Z for the depth analysis). An analysis whose frames are absent from the manifest is skipped with a notice. The results go into `analysis/` in the session folder; an optional `--out DIR` changes the folder. The exit code is 0 when every selected analysis ran, 1 when one failed (the others still run), and 2 when the session cannot be read. Each analysis writes a CSV summary, a detail file, and figures (PNG and SVG). The definitions are in the specification, Sections 10 to 14; this section says what each one reports.
+`--only` runs a subset (the letters are those of Table 4, with B for the lateral analysis and Z for the depth analysis). An analysis whose frames are absent from the manifest is skipped with a notice. The results go into `analysis/` in the session folder; an optional `--out DIR` changes the folder. The exit code is 0 when every selected analysis ran, 1 when one failed (the others still run), and 2 when the session cannot be read. Each analysis writes a CSV summary, a detail file, and figures (PNG and SVG). The definitions are in the specification, Sections 10 to 14; this section says what each one reports.
 
 **A, noise versus Z** (specification Section 10; series A and the sentinels). Reports the temporal, fixed-pattern, and total depth noise of the plate at each Z (the fixed-pattern noise is the spread of the frame-averaged depth about the registered plane, after the temporal noise that remains in the average is taken out), with the bias, the fill rate, the spatial correlation length, and the depth quantization step, and fits the disparity-noise model. It also reports how noise and fill rate change with incidence angle (the tilt sub-series), measures the drift of every mounted target with the sentinels (each against its own first sentinel) and, where a target drifts by more than {{VALUE:warmup_drift_fraction_of_sigma}} times sigma_t at the reference station, flags it and corrects the bias of the poses captured on that mount, and computes the existing legacy metrics at {{DERIVED:legacy_depths_text}} mm. Writes `A_noise_summary.csv` (one row per station and tilt, with the achieved field fraction of the pose and, for the mount it was captured on, the drift rate `drift_rate_mm_per_h` and the flag `drift_flagged`); `A_sentinel_drift.csv` (one row per mounted target: the drift rate `drift_rate_mm_per_h`, the maximum excursion `max_excursion_mm`, the flag `flagged`, and the correction applied `correction_applied_mm`; when the optional drift run exists, also the predicted drift `predicted_drift_mm` and the attribution `attribution`, which is "sensor" or "robot or mount"); and figures: the noise curves with the model fit, fill rate, noise maps, autocorrelation profiles, depth-code histograms, and the sentinel drift of each mounted target. With the drift run, it also writes `A_drift_run.csv` (one row per capture), `A_drift_run_fit.json` (the line of depth against sensor temperature, and the warm-up time), and a figure of the run (`A_drift_run`). The predicted drift comes from that line and the logged temperature; a difference between predicted and observed drift that is well above the sentinel's own noise points to the robot or a mount, not the sensor. The fitted disparity noise, the noise floor, the quantum, k, and the correlation length go into `forward_model_parameters.json`.
 
@@ -601,7 +509,7 @@ Writes `E_boundary_bias.csv`, `E_boundary_details.json`, and figures: outcome pr
 
 ## 15. Things that spoil a session
 
-The smallest Z steps and the absolute bias are the measurements most limited by the setup. The relative measurements are robust: noise, rise distance, transfer-curve shape, and detection minimums. Table 11 lists the sources of error. The magnitudes are typical values from the specification, not measured ones; the engineer replaces them with measured values after §4.
+The smallest Z steps and the absolute bias are the measurements most limited by the setup. The relative measurements are robust: noise, rise distance, transfer-curve shape, and detection minimums. Table 8 lists the sources of error. The magnitudes are typical values from the specification, not measured ones; the engineer replaces them with measured values after §4.
 
 | Source | Typical magnitude | Affects | What you do about it |
 |---|---|---|---|
@@ -616,7 +524,7 @@ The smallest Z steps and the absolute bias are the measurements most limited by 
 | Sensor temporal filter | Depends on the configuration | Noise (underestimated), trial independence | Discard frames after each move until the plane settles (Step 4.4); filters-off repeat if possible |
 | Reflectance mismatch | Avoided by design | Edges, area | One finish on all surfaces |
 
-Table 11. Sources of error, their size, and what to do about them.
+Table 8. Sources of error, their size, and what to do about them.
 
 Things that spoil a session in practice:
 
@@ -636,7 +544,7 @@ Things that spoil a session in practice:
 - Not recording a filter setting or a configuration change in `sensor_config.json`.
 - Losing the seed of the plan. Without it the offsets cannot be reproduced; the plan files keep it.
 
-Limitations. Results hold for one surface finish, static targets, mostly fronto-parallel poses, and the sensor configuration recorded in `sensor_config.json`. Registration from planes leaves the camera's depth offset conditioned by the registration tilt range (Table 11), so absolute bias carries that uncertainty; Z-scale and nonlinear bias do not, because a rigid transform cannot absorb them. The range limits of {{VALUE:z_min_mm}} and {{VALUE:z_max_mm}} mm assume the sensor reads there; Step 4.5 confirms this before any series runs. The 0 percent detection size is a prediction from the fitted curve below the measured {{DERIVED:low_probability_percent}} percent point, not a measurement. Off-axis results (series A and the field sub-series of C) hold at the field fraction the planner achieved, which can be well below the requested one at the near stations. The smallest detectable Z step for the large patches may come out as a bound set by the robot's repeatability, or by the accuracy with which it reports its pose, not a measurement.
+Limitations. Results hold for one surface finish, static targets, mostly fronto-parallel poses, and the sensor configuration recorded in `sensor_config.json`. Registration from planes leaves the camera's depth offset conditioned by the registration tilt range (Table 8), so absolute bias carries that uncertainty; Z-scale and nonlinear bias do not, because a rigid transform cannot absorb them. The range limits of {{VALUE:z_min_mm}} and {{VALUE:z_max_mm}} mm assume the sensor reads there; Step 4.5 confirms this before any series runs. The 0 percent detection size is a prediction from the fitted curve below the measured {{DERIVED:low_probability_percent}} percent point, not a measurement. Off-axis results (series A and the field sub-series of C) hold at the field fraction the planner achieved, which can be well below the requested one at the near stations. The smallest detectable Z step for the large patches may come out as a bound set by the robot's repeatability, or by the accuracy with which it reports its pose, not a measurement.
 
 ---
 
@@ -648,17 +556,17 @@ Values marked with a dagger in the specification depend on VSX3000 datasheet or 
 
 {{PARAMETER_TABLE}}
 
-Table 12. The parameters of the procedure, with the values of the default plan.
+Table 9. The parameters of the procedure, with the values of the default plan.
 
 ## Appendix B. Software reference
 
 The code that supports this procedure is the Python package `sensorperf/` in this repository. The command-line tools each import other modules of the package, so they cannot be copied out on their own. Ship the whole `sensorperf/` directory together with `pyproject.toml`, `requirements.txt`, and `tests/`, either as a clone of the repository or as a copy of those items with the directory layout kept.
 
-The tools: `plan_stations` (§5), `register` (§4), `make_manifest` (§11), `check_captures` (§4, Step 4.8; §10 and §12), `simulate` (a synthetic session for practice, appendix C), and `analyze` (§14). Table 13 lists the package files with their line counts and what they do. The design document `docs/design/code_design.md` describes the modules.
+The tools: `plan_stations` (§5), `register` (§4), `make_manifest` (§11), `check_captures` (§4, Step 4.8; §10 and §12), `simulate` (a synthetic session for practice, appendix C), and `analyze` (§14). Table 10 lists the package files with their line counts and what they do. The design document `docs/design/code_design.md` describes the modules.
 
 {{FILE_TABLE}}
 
-Table 13. The files of the package.
+Table 10. The files of the package.
 
 Output of `python3 -m sensorperf.cli.plan_stations --help`:
 
@@ -750,32 +658,3 @@ C.8 If something goes wrong.
 ## Appendix D. Figure index
 
 {{FIGURE_INDEX}}
-
-## Appendix E. Suppliers
-
-This list was assembled from the suppliers' web pages in October 2026, partly for the stage-1 procedure. It is a starting point, not an endorsement: confirm sizes, finishes and prices with the supplier before ordering, because catalogs change and the targets are made to order.
-
-Plate stock and machining for the four feature targets (section 1d, drawings PT-04 to PT-07):
-
-- McMaster-Carr: MIC-6 cast aluminum tooling plate in 6 mm (1/4 inch) and 8 mm (5/16 inch) thicknesses, sold with mill certificates and a stated flatness of about 0.13 mm over the sheet. Ask the machine shop to finish-grind the front faces to the {{VALUE:plate_flatness_mm}} mm of section 1d, or buy the plates finish-ground from the shop.
-- Any job shop with a CNC mill and a lathe makes the plates, the raised square, the disks, the standoffs and the spigots; a shop that also bead-blasts (or sends out to a blasting shop) keeps every surface in one batch, which section 1d requires. Ask for the inspection report of section 2 as part of the quote.
-- 2 mm stainless steel drill rod for the disk posts and precision ground stock for the spigots: McMaster-Carr, MSC Industrial.
-
-Board (section 1d, from stage 1): McMaster-Carr MIC-6 plate finish-ground by a local shop, or a 6 to 10 mm float glass plate from any glass or optical-flat supplier, matte-painted on the front face. The supplier's or the grinding shop's flatness report is the starting document; the flatness is confirmed in-house with the run-out fixture after mounting.
-
-Ball-lock pins (section 1e): 8 mm quick-release ball-lock pins with a T-handle, grip length as on drawing PT-01, from McMaster-Carr, Carr Lane or Jergens, about $20 to $60 each.
-
-Temperature loggers (section 1e): two-channel or single-channel USB loggers with 0.1 degree C resolution and a CSV export, for example Lascar EL-USB-1 or Onset HOBO MX100, about $30 to $100 each, with a surface probe or a strap for the sensor housing.
-
-Measuring instruments (section 1c), all stocked by McMaster-Carr, Transcat, MSI-Viking and the usual tool suppliers:
-
-- Calipers, 600 mm (for example Mitutoyo 500-507 or an iGaging 600 mm digital caliper, about $150 to $250), or a 500 mm steel rule graduated in 0.5 mm (about $40) for the plate width and length.
-- Calipers with depth rod, 150 mm: Mitutoyo or Starrett, about $30 to $150 (from stage 1).
-- Dial indicator for the run-out fixture: Mitutoyo 2046 series, 0.01 mm graduation, 10 mm travel, about $50 to $150; magnetic base Noga MG71003 or DG-61003, about $140 to $320 (from stage 1).
-- Torque wrench, 1 to 25 N m range for the M5 and M6 screws, about $80 to $250 (from stage 1).
-
-Machine shop: the target adapter, the four spigots, the standoffs, the four feature targets with their disks and posts, and the T5 edge bracket (drawings in appendix F); the stage-1 board adapter SC1-05 and the run-out base plate if stage 1 has not been run.
-
-## Appendix F. Shop drawings
-
-The drawings PT-01 to PT-07 are generated by scripts in `docs/procedures/drawings/`; this appendix is completed when the drawings are released.
