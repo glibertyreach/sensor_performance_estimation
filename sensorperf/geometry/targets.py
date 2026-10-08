@@ -107,6 +107,8 @@ OUTLINE_POINTS_DEFAULT = 256
 ARRAY_ROW_PACKING_FRACTION = 0.9
 """Fraction of the plate width used by a row of features when laying out an array whose caller gives no row width limit
 (a roughly square plate)."""
+EDGE_PLATE_ROUNDING_TOLERANCE = 1.0e-9
+"""A derived plate side within this (in steps) of a multiple of EDGE_PLATE_SIZE_STEP_MM is not rounded up to the next one."""
 ARRAY_MIN_PLATE_SIZE_MM = 100.0
 """An array plate is never smaller than this (width and height), whatever the ladder."""
 ASBUILT_COLUMNS = ("target_id", "site_id", "kind", "x_mm", "y_mm", "diameter_mm", "diameter_uncertainty_mm",
@@ -447,6 +449,9 @@ class TargetSet:
     """All targets of a session, by id."""
 
     targets: dict[str, TwoPlaneTarget] = field(default_factory=dict)
+    derived: dict[str, Any] = field(default_factory=dict)
+    """Values that were derived by a rule rather than set (the sizing of the edge plates, for one), kept so that the session
+    records how the targets came to be. Saved in targets.json under "derived" when not empty."""
 
     def add(self, target: TwoPlaneTarget) -> None:
         self.targets[target.target_id] = target
@@ -457,14 +462,16 @@ class TargetSet:
         return target if gap_mm is None else target.with_gap(gap_mm)
 
     def save(self, path: str | Path) -> Path:
-        document = {"targets": [t.to_dict() for t in self.targets.values()]}
+        document: dict[str, Any] = {"targets": [t.to_dict() for t in self.targets.values()]}
+        if self.derived:
+            document["derived"] = self.derived
         Path(path).write_text(json.dumps(document, indent=2), encoding="utf-8")
         return Path(path)
 
     @classmethod
     def load(cls, path: str | Path) -> "TargetSet":
         document = json.loads(Path(path).read_text(encoding="utf-8"))
-        targets = cls()
+        targets = cls(derived=dict(document.get("derived", {})))
         for entry in document["targets"]:
             targets.add(TwoPlaneTarget.from_dict(entry))
         return targets
@@ -536,13 +543,94 @@ def make_noise_plate(params: CharacterizationParameters) -> TwoPlaneTarget:
     return TwoPlaneTarget(TARGET_NOISE_PLATE, TARGET_KIND_PLATE, width / 2.0, height / 2.0)
 
 
+@dataclass(frozen=True)
+class EdgePlateSizing:
+    """How the side of the T3a and T3b plates follows from the rule (:func:`edge_plate_sizing`), mm and degrees."""
+
+    worst_ray_angle_deg: float
+    """Largest angle from the plate normal between any viewpoint and any edge point over the poses used."""
+    band_mm: float
+    """BOUNDARY_BAND_HALF_WIDTH_PX at Z_MAX, in millimeters."""
+    shadow_mm: float
+    """GAP_LARGE_MM times the tangent of the worst ray angle: the width of the back plate that the front material hides."""
+    isolation_mm: float
+    """FEATURE_ISOLATION_PX at Z_MAX, in millimeters (the clear plate the T3b front plate needs around its window)."""
+    extension_mm: float
+    """How far the plate extends past the square on each side: the larger of band + shadow and the isolation."""
+    derived_side_mm: float
+    """The square plus twice the extension, before rounding."""
+    side_mm: float
+    """The derived side rounded up to EDGE_PLATE_SIZE_STEP_MM."""
+
+    def to_dict(self) -> dict[str, float]:
+        return asdict(self)
+
+
+def worst_ray_angle_deg(params: CharacterizationParameters, geometry: SensorGeometry) -> float:
+    """The worst-case ray angle of the chamfer rule (Section 3.3) for the edge targets: the largest angle from the plate
+    normal between the line from any viewpoint (left camera, right camera, projector) and any edge point, over every pose
+    used. The edge points are the four corners of the square (rotated by EDGE_SLANT_DEG; the corners are the points farthest
+    from the optical axis), the poses are the B-HV stations (``z_shape_stations_mm``) centered, with the phase-jitter
+    offset of up to half PHASE_JITTER_SPAN_PX in H and V. The angle is largest at Z_MIN."""
+    stereo = StereoGeometry.from_sensor_geometry(geometry)
+    half = params.edge_square_size_mm / 2.0
+    slant = math.radians(params.edge_slant_deg)
+    rotation = np.array([[math.cos(slant), -math.sin(slant)], [math.sin(slant), math.cos(slant)]])
+    corners = [rotation @ np.array([sign_h * half, sign_v * half]) for sign_h in (-1.0, 1.0) for sign_v in (-1.0, 1.0)]
+    worst = 0.0
+    for z in params.z_shape_stations_mm():
+        jitter = params.phase_jitter_span_px / 2.0 * geometry.pixel_footprint_mm(z)
+        for corner in corners:
+            for jitter_h in (-jitter, jitter):
+                for jitter_v in (-jitter, jitter):
+                    point = np.array([corner[0] + jitter_h, corner[1] + jitter_v, z])
+                    for viewpoint in stereo.viewpoints(require_projector=True):
+                        offset = point - viewpoint
+                        worst = max(worst, math.atan2(math.hypot(offset[0], offset[1]), offset[2]))
+    return math.degrees(worst)
+
+
+def edge_plate_sizing(params: CharacterizationParameters, geometry: SensorGeometry) -> EdgePlateSizing:
+    """The rule that sizes the T3a back plate and the T3b front plate (square plates, both sides equal).
+
+    The plate extends past the EDGE_SQUARE_SIZE_MM square, on each side, by the larger of
+    (a) the boundary band (BOUNDARY_BAND_HALF_WIDTH_PX at Z_MAX, in mm) plus the shadow of the large gap (GAP_LARGE_MM times
+        the tangent of the worst ray angle, :func:`worst_ray_angle_deg`): the edge analyses need back plate beyond the
+        band, and the front material hides this much of it from the farthest viewpoint;
+    (b) the feature isolation (FEATURE_ISOLATION_PX at Z_MAX, in mm), the clear plate that the T3b front plate needs around
+        its window as every plate of the set needs around its features.
+    The side (the square plus twice the extension) is rounded up to a multiple of EDGE_PLATE_SIZE_STEP_MM."""
+    angle = worst_ray_angle_deg(params, geometry)
+    pitch_far = geometry.pixel_footprint_mm(params.z_max_mm)
+    band = params.boundary_band_half_width_px * pitch_far
+    shadow = params.gap_large_mm * math.tan(math.radians(angle))
+    isolation = params.feature_isolation_px * pitch_far
+    extension = max(band + shadow, isolation)
+    side = params.edge_square_size_mm + 2.0 * extension
+    steps = math.ceil(side / params.edge_plate_size_step_mm - EDGE_PLATE_ROUNDING_TOLERANCE)
+    return EdgePlateSizing(angle, band, shadow, isolation, extension, side, steps * params.edge_plate_size_step_mm)
+
+
+def edge_plate_size_mm(params: CharacterizationParameters, geometry: SensorGeometry) -> tuple[float, float]:
+    """Width and height of the T3a and T3b plates: ``params.edge_plate_size_mm`` when it overrides, else the derived square
+    of :func:`edge_plate_sizing`."""
+    if params.edge_plate_size_mm is not None:
+        return params.edge_plate_size_mm
+    side = edge_plate_sizing(params, geometry).side_mm
+    return (side, side)
+
+
 def make_edge_target(params: CharacterizationParameters, kind: str, gap_mm: float,
-                     plate_half_size_mm: tuple[float, float] | None = None) -> TwoPlaneTarget:
+                     plate_half_size_mm: tuple[float, float] | None = None,
+                     geometry: SensorGeometry | None = None) -> TwoPlaneTarget:
     """T3a (kind TARGET_KIND_RAISED_SQUARE) or T3b (TARGET_KIND_SQUARE_WINDOW): a
     square of EDGE_SQUARE_SIZE_MM rotated by EDGE_SLANT_DEG, with the back plate
-    (T3a) or the front plate (T3b) of ``edge_plate_size_mm`` (not the smaller T2 board) unless given."""
+    (T3a) or the front plate (T3b) of the size of :func:`edge_plate_size_mm` (not the smaller T2 board) unless
+    ``plate_half_size_mm`` is given. The derived size needs the sensor ``geometry``; one of the two must be given."""
     if plate_half_size_mm is None:
-        width, height = params.edge_plate_size_mm
+        if geometry is None:
+            raise ValueError("make_edge_target needs the sensor geometry (or plate_half_size_mm) to size the edge plate")
+        width, height = edge_plate_size_mm(params, geometry)
         plate_half_size_mm = (width / 2.0, height / 2.0)
     if kind == TARGET_KIND_RAISED_SQUARE:
         target_id, feature_kind = TARGET_RAISED_SQUARE, FEATURE_SQUARE_RAISED
@@ -708,8 +796,11 @@ def make_standard_target_set(params: CharacterizationParameters, geometry: Senso
     max_row_mm = usable_width_mm - 2.0 * plate_margin_mm
     targets = TargetSet()
     targets.add(make_noise_plate(params))
-    targets.add(make_edge_target(params, TARGET_KIND_RAISED_SQUARE, gap))
-    targets.add(make_edge_target(params, TARGET_KIND_SQUARE_WINDOW, gap))
+    targets.add(make_edge_target(params, TARGET_KIND_RAISED_SQUARE, gap, geometry=geometry))
+    targets.add(make_edge_target(params, TARGET_KIND_SQUARE_WINDOW, gap, geometry=geometry))
+    sizing = edge_plate_sizing(params, geometry)
+    targets.derived["edge_plate_size_mm"] = list(edge_plate_size_mm(params, geometry))
+    targets.derived["edge_plate_sizing"] = dict(sizing.to_dict(), overridden=params.edge_plate_size_mm is not None)
     targets.add(make_feature_array(TARGET_DISKS, TARGET_KIND_DISK_ARRAY, diameters, isolation_mm, gap, blanks,
                                    params.post_sites_per_plate, post_diameter_mm=params.post_diameter_mm(geometry),
                                    max_row_width_mm=max_row_mm, plate_margin_mm=plate_margin_mm))

@@ -42,6 +42,7 @@ import datetime as dt
 import importlib
 import io
 import json
+import math
 import re
 import shutil
 import subprocess
@@ -293,6 +294,14 @@ def derived_values(params: CharacterizationParameters, geometry: SensorGeometry,
         "legacy_depths_text": _and_text(legacy),
         "tilt_stations_text": _and_text(tilt_stations),
         "tilt_dropped_text": _and_text(tilt_dropped) if tilt_dropped else "none",
+        # The T2 board and the lever arms of its tilts: the near edge of a tilt about H swings the half-height toward the
+        # sensor, of a tilt about V the half-width (tilt feasibility, Section 6 Step 5).
+        "noise_plate_text": f"{params.noise_plate_size_mm[0]:g} x {params.noise_plate_size_mm[1]:g}",
+        "tilt_half_extent_h_mm": f"{params.noise_plate_size_mm[1] / 2.0:g}",
+        "tilt_half_extent_v_mm": f"{params.noise_plate_size_mm[0] / 2.0:g}",
+        # The illustration of the mount-tilt tolerance: how far the tolerance moves an edge at the board's half-width.
+        "mount_tilt_edge_mm": f"{params.noise_plate_size_mm[0] / 2.0:g}",
+        "mount_tilt_edge_shift_mm": f"{params.noise_plate_size_mm[0] / 2.0 * math.tan(math.radians(params.mount_tilt_tolerance_deg)):.2f}",
         "station_ratio_text": "2^(1/4)" if abs(params.z_station_ratio - 2.0 ** 0.25) < 1e-12 else f"{params.z_station_ratio:.4g}",
         "field_position_count": 5,
         "tilt_count": len(params.tilt_angles_deg),

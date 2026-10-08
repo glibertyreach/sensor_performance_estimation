@@ -41,23 +41,26 @@ class CostItem:
 
 
 # ---------------------------------------------------------------------------
-# What must be built (section 1b). Drawing numbers are the PT-xx sheets of appendix E.
+# What must be built (section 1b). Drawing numbers are the PT-xx sheets of appendix F.
 # ---------------------------------------------------------------------------
 BUILD_ITEMS = (
     CostItem("Target adapter", "1", 300, 700,
              "Flange plate with the spigot bore and the cross-pin hole; ISO 9409-1-50-4-M6 interface", "PT-01"),
     CostItem("Target spigots", "4", 240, 600,
              "One per feature target: turned spigot with its orientation dowel and mounting flange", "PT-02"),
-    CostItem("Standoff sets, 15 mm and 60 mm gaps", "2 sets of 8", 80, 240,
-             "Set the gap G between front and back plates of T3b and T5; T3a and T4 use their hidden posts", "PT-03"),
+    CostItem("Standoff sets, 15 mm and 60 mm gaps", "3 sets of 8, plus 4 spares", 120, 360,
+             "Set the gap G: between the front and back plates of T3b and T5, and hidden behind the raised square of T3a;"
+             " T4's disks stand on their own 2 mm posts", "PT-03"),
     CostItem("T3a, raised square", "1", 350, 900,
-             "Back plate, knife-edged 160 mm square on hidden posts, back-beveled; bead-blast finish", "PT-04"),
+             "Back plate, knife-edged 160 mm square on hidden standoffs, back-beveled; bead-blast finish", "PT-04"),
     CostItem("T3b, square window", "1", 350, 900,
              "Front plate with the countersunk 160 mm window, back plate; bead-blast finish", "PT-05"),
     CostItem("T4, disk plate", "1", 450, 1200,
-             "Back plate, three back-beveled disks on 2 mm posts, one post-only site; bead-blast finish", "PT-06"),
-    CostItem("T5, cutout plate", "1", 400, 1000,
-             "Front plate with three countersunk holes, back plate; bead-blast finish", "PT-07"),
+             "Back plate, three back-beveled disks on 2 mm posts (one assembly per gap), one post-only site;"
+             " bead-blast finish", "PT-06"),
+    CostItem("T5, cutout plate", "1", 450, 1100,
+             "Front plate with three countersunk holes, removable back plate, and the edge bracket that carries"
+             " the spigot; bead-blast finish", "PT-07"),
     CostItem("Noise and registration board (T2) with its adapter", "1", 300, 1000,
              "200 x 150 mm board flat to 0.05 mm on the SC1-05 board adapter", "SC1-05", "stage 1"),
     CostItem("Run-out fixture", "1", 240, 570,
@@ -83,7 +86,7 @@ BUY_ITEMS = (
     CostItem("Temperature loggers, 2", "2", 60, 200,
              "Sensor housing and air, one sample per minute, for drift attribution"),
     CostItem("Consumables", "", 40, 120,
-             "Medium-strength thread locker, isopropyl alcohol and wipes, padded cases for the targets"),
+             "Medium-strength thread locker, low-strength removable retaining compound for the disk posts, isopropyl alcohol and wipes, padded cases for the targets"),
 )
 IN_HAND_ITEMS = (
     ("Phone camera", "Setup photos for the deliverables (section 13)"),

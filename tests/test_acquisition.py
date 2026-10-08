@@ -34,7 +34,7 @@ from sensorperf.acquisition.plan import (
     camera_of, filters_off_budget, open_background_budget, fit_violation_px, format_budget_table, insert_sentinels, lateral_sweep_budget, staircase_budget, jitter_offset_mm, place_in_field,
     plan_detection_series, plan_drift_run, plan_edge_series, plan_full_session, plan_noise_series, plan_registration,
     plan_zstep_series, read_plan_csv, write_plan, APPROACH_FROM_BELOW, MIN_POSE_LOG_DECIMALS,
-    count_sentinel_remounts, ramp_visible_height_mm, tilt_is_feasible, tilt_near_edge_mm,
+    count_sentinel_remounts, ramp_visible_height_mm, TILT_SUBSTITUTED_KEY, tilt_is_feasible, tilt_near_edge_mm,
 )
 from sensorperf.acquisition.pose_log import PoseLogError, build_manifest, build_manifest_with_report
 from sensorperf.cli import check_captures as check_cli
@@ -136,10 +136,10 @@ def test_optional_variants_keep_keys_unique():
     # The drift sentinels captured during the repeat belong to it (procedure S, its sub-series and its pose indices).
     off = [c for c in off_set if c.procedure != PROCEDURE_SENTINEL]
     assert off_set and len(off_set) > len(off)
-    # Section 4, Step 4.2: the repeat covers A, B-HV and B-Z (A: 47 station poses + 16 tilt poses).
+    # Section 4, Step 4.2: the repeat covers A, B-HV and B-Z (A: 47 station poses + 24 tilt poses).
     off_by_series = {p: sum(1 for c in off if c.procedure == p) for p in ("A", "B", "Z")}
     assert len(off) == sum(off_by_series.values())
-    assert off_by_series["A"] == 47 + 16
+    assert off_by_series["A"] == 47 + 24
     assert off_by_series["B"] == sum(1 for c in plan if c.procedure == "B" and c.subseries in ("nominal", "jitter"))
     assert off_by_series["Z"] == sum(1 for c in plan if c.procedure == "Z" and c.subseries in ("ladder", "ramp"))
     assert off_by_series["B"] > 0 and off_by_series["Z"] > 0
@@ -182,7 +182,7 @@ def test_registration_poses_span_the_volume():
 def test_noise_station_order_is_a_permutation_of_the_station_list(full_plan):
     """Section 5 Steps 1 and 2 and redesign note Section 1: the nine ladder stations at the five field positions plus the two
     legacy depths (700 and 1000 mm) at the center only, 9 x 5 + 2 = 47 main poses, are all visited once, in the order of the
-    logged seed; the tilt sub-series (16 poses: the 800 and 1600 mm stations, every tilt at 400 mm being infeasible) and the
+    logged seed; the tilt sub-series (24 poses: the 476, 800 and 1600 mm stations; the sweeps of 400 mm, where every tilt is infeasible, move to 476 mm) and the
     repeat-mount check follow."""
     plan, _ = full_plan
     main = [c for c in plan if c.procedure == PROCEDURE_NOISE and c.subseries == "main"]
@@ -198,8 +198,8 @@ def test_noise_station_order_is_a_permutation_of_the_station_list(full_plan):
     assert [(c.station_z_mm, c.field) for c in main] == [stations[int(i)] for i in permutation]
     assert all(c.frames == PARAMS.frames_per_noise_station for c in main)
     tilt = [c for c in plan if c.procedure == PROCEDURE_NOISE and c.subseries == "tilt"]
-    assert len(tilt) == 2 * 2 * len(PARAMS.tilt_angles_deg) == 16
-    assert Counter((c.tilt_axis, c.tilt_deg) for c in tilt)[("V", 15.0)] == 2
+    assert len(tilt) == 2 * 3 * len(PARAMS.tilt_angles_deg) == 24      # 476 (for 400), 800, 1600; both axes
+    assert Counter((c.tilt_axis, c.tilt_deg) for c in tilt)[("V", 15.0)] == 3
     assert all(c.frames == PARAMS.frames_per_tilt_pose and c.field == 0 for c in tilt)
     remount = [c for c in plan if c.subseries == "remount"]
     assert len(remount) == 1 and remount[0].station_z_mm == PARAMS.z_reference_mm and remount[0].field == 0
@@ -207,8 +207,9 @@ def test_noise_station_order_is_a_permutation_of_the_station_list(full_plan):
 
 def test_tilt_feasibility_skips_tilts_that_bring_the_plate_edge_inside_z_min():
     """Section 5, Step 5 (tilt feasibility): a tilt is planned only where Z - h sin(tilt) >= Z_MIN, h the half extent of the
-    200 x 150 mm T2 board across the tilt axis (100 mm about V, 75 mm about H). At the indicative geometry every tilt at 400 mm is skipped, with its
-    reason listed in the diagnostics, and the tilt sub-series keeps the 800 and 1600 mm stations in both axes and all angles."""
+    200 x 150 mm T2 board across the tilt axis (100 mm about V, 75 mm about H). At the indicative geometry every tilt at 400 mm is infeasible; its sweeps are
+    planned at the nearest feasible station, 476 mm, instead of being dropped, so the tilt sub-series runs at 476, 800 and
+    1600 mm in both axes and all angles, and the summary says so."""
     plate = make_standard_target_set(PARAMS, GEOMETRY).get(TARGET_NOISE_PLATE)
     assert (plate.half_width_mm, plate.half_height_mm) == (100.0, 75.0)
     # The rule itself, including its equality case (Z = 450 mm, 30 deg about V: the edge is exactly at Z_MIN).
@@ -225,17 +226,33 @@ def test_tilt_feasibility_skips_tilts_that_bring_the_plate_edge_inside_z_min():
     plan = plan_noise_series(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), with_sentinels=False,
                              diagnostics=diagnostics)
     tilt = [c for c in plan if c.subseries == "tilt"]
-    assert {c.station_z_mm for c in tilt} == {800.0, 1600.0}
+    # The sweeps of the reduced station 400 mm are not dropped: they are planned at the nearest feasible station, 476 mm.
+    assert {c.station_z_mm for c in tilt} == {476.0, 800.0, 1600.0}
     assert Counter((c.station_z_mm, c.tilt_axis) for c in tilt) == {
-        (z, axis): len(PARAMS.tilt_angles_deg) for z in (800.0, 1600.0) for axis in ("H", "V")}
+        (z, axis): len(PARAMS.tilt_angles_deg) for z in (476.0, 800.0, 1600.0) for axis in ("H", "V")}
     assert all(tilt_near_edge_mm(plate, c.station_z_mm, c.tilt_axis, c.tilt_deg) >= PARAMS.z_min_mm for c in tilt)
-    # The skipped poses are listed with the reason, per axis.
-    assert len(diagnostics.skipped) == 2
-    for axis, message in zip(("V", "H"), diagnostics.skipped):
-        assert f"tilt about {axis} at Z = 400 mm: skipped 0, 15, 30, 45 deg" in message and "Z_MIN" in message
+    assert {c.notes.get(TILT_SUBSTITUTED_KEY) for c in tilt if c.station_z_mm == 476.0} == {400.0}
+    assert all(TILT_SUBSTITUTED_KEY not in c.notes for c in tilt if c.station_z_mm != 476.0)
+    # Nothing is left out, and the summary says what was substituted, per axis.
+    assert diagnostics.skipped == []
     from sensorperf.acquisition.plan import plan_summary_text
     text = plan_summary_text(plan, PARAMS, GEOMETRY, diagnostics)
-    assert "Skipped poses (left out of the plan): 2" in text and "A tilt about V at Z = 400 mm" in text
+    for axis in ("V", "H"):
+        assert (f"A tilt about {axis}: no tilt is feasible at the reduced station Z = 400 mm" in text
+                and "planned at the nearest feasible station of the ladder, Z = 476 mm" in text)
+    assert "Skipped poses (left out of the plan): 0" in text and f"{TILT_SUBSTITUTED_KEY} = 400" in text
+
+
+def test_tilt_sweeps_are_skipped_and_listed_when_no_station_of_the_ladder_is_feasible():
+    """When even the farthest stations cannot take a tilt (here a 40 m board), there is nothing to substitute: the sweeps are
+    skipped and listed with the reason, as before the substitution existed."""
+    huge = dataclasses.replace(PARAMS, noise_plate_size_mm=(40000.0, 40000.0))
+    diagnostics = PlanDiagnostics()
+    plan = plan_noise_series(huge, GEOMETRY, np.random.default_rng(MASTER_SEED), with_sentinels=False,
+                             diagnostics=diagnostics)
+    assert not [c for c in plan if c.subseries == "tilt"]
+    assert len(diagnostics.skipped) == 2 * len(huge.z_reduced_stations_mm())
+    assert all("Z_MIN" in message for message in diagnostics.skipped)
 
 
 def test_tilt_feasibility_follows_the_plate_size_and_z_min():
@@ -248,16 +265,16 @@ def test_tilt_feasibility_follows_the_plate_size_and_z_min():
     assert all(tilt_is_feasible(low, plate, 400.0, "H", angle) for angle in low.tilt_angles_deg)
 
 
-MIN_RAMP_ROWS_PER_QUANTUM = 30.0       # image rows per expected depth quantum that the 2-quanta ramp must offer at 1600 mm
+MIN_RAMP_ROWS_PER_QUANTUM = 20.0       # image rows per expected depth quantum that the 3-quanta ramp must offer at 1600 mm
 
 
 def test_tilt_sub_series_is_feasible_and_planned_from_476_mm_on():
     """With the 200 x 150 mm T2 board (decision of 2026-10-08) every tilt of both axes is feasible from the second station of
     the ladder, 476 mm, on (the worst case, 45 deg about V, leaves the near edge at 476 - 100 sin 45 = 405 mm >= Z_MIN) and
     none at 400 mm. The planner takes the half extent across the tilt axis from the plate itself: 100 mm about V, 75 mm about
-    H. The tilt sub-series is planned at the reduced stations, so at the default parameters those are 800 and 1600 mm; when
-    the reduced stations include 476 mm (stride 1: every station), the sub-series is planned at every station from 476 mm on
-    and at none below it."""
+    H. The tilt sub-series is planned at the reduced stations, 400, 800 and 1600 mm, and the 400 mm sweeps move to 476 mm; when
+    the reduced stations are every station (stride 1) there is nothing to substitute, and the sub-series is planned at every
+    station from 476 mm on and at none below it."""
     plate = make_standard_target_set(PARAMS, GEOMETRY).get(TARGET_NOISE_PLATE)
     second_station = PARAMS.z_stations_mm()[1]
     assert second_station == 476.0
@@ -269,6 +286,8 @@ def test_tilt_sub_series_is_feasible_and_planned_from_476_mm_on():
                    for z in PARAMS.z_stations_mm()[1:] for angle in PARAMS.tilt_angles_deg)
         assert not any(tilt_is_feasible(PARAMS, plate, PARAMS.z_min_mm, axis, angle)
                        for angle in PARAMS.tilt_angles_deg if angle != 0.0)
+    default_plan = plan_noise_series(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), with_sentinels=False)
+    assert sorted({c.station_z_mm for c in default_plan if c.subseries == "tilt"}) == [second_station, 800.0, 1600.0]
     every_station = dataclasses.replace(PARAMS, z_reduced_station_stride=1)
     plan = plan_noise_series(every_station, GEOMETRY, np.random.default_rng(MASTER_SEED), with_sentinels=False)
     tilt_stations = sorted({c.station_z_mm for c in plan if c.subseries == "tilt"})
@@ -276,8 +295,43 @@ def test_tilt_sub_series_is_feasible_and_planned_from_476_mm_on():
     assert min(tilt_stations) == second_station
 
 
-def test_ramp_rows_per_quantum_at_1600_mm_are_at_least_30():
-    """Two expected quanta across the 150 mm visible height of the T2 board give about 32 image rows per quantum at 1600 mm
+def test_edge_plates_are_sized_by_the_rule_and_the_size_is_recorded(tmp_path):
+    """The T3a back plate and the T3b front plate extend past the 160 mm square by the larger of (a) the boundary band at
+    Z_MAX plus the shadow of the large gap (G tan of the worst ray angle) and (b) the feature isolation at Z_MAX, rounded up
+    to EDGE_PLATE_SIZE_STEP_MM: 300 x 300 mm at the indicative geometry, where (b) governs. The sizing is recorded in
+    targets.json and in plan_summary.txt, and EDGE_PLATE_SIZE_MM overrides it."""
+    from sensorperf.acquisition.plan import plan_summary_text
+    from sensorperf.geometry.targets import TargetSet, edge_plate_sizing, worst_ray_angle_deg
+    from sensorperf.parameters import TARGET_RAISED_SQUARE, TARGET_SQUARE_WINDOW
+    far_pitch_mm = GEOMETRY.pixel_footprint_mm(PARAMS.z_max_mm)
+    sizing = edge_plate_sizing(PARAMS, GEOMETRY)
+    assert sizing.band_mm == pytest.approx(PARAMS.boundary_band_half_width_px * far_pitch_mm)
+    assert sizing.isolation_mm == pytest.approx(PARAMS.feature_isolation_px * far_pitch_mm)
+    assert sizing.shadow_mm == pytest.approx(PARAMS.gap_large_mm * math.tan(math.radians(sizing.worst_ray_angle_deg)))
+    assert sizing.extension_mm == max(sizing.band_mm + sizing.shadow_mm, sizing.isolation_mm) == sizing.isolation_mm
+    assert sizing.derived_side_mm == pytest.approx(PARAMS.edge_square_size_mm + 2.0 * sizing.extension_mm)
+    assert sizing.side_mm == 300.0 and sizing.side_mm % PARAMS.edge_plate_size_step_mm == 0.0
+    assert sizing.derived_side_mm <= sizing.side_mm < sizing.derived_side_mm + PARAMS.edge_plate_size_step_mm
+    # The worst ray runs from the farthest viewpoint (the projector 40 mm beside the left camera, or the right camera 75 mm
+    # away) to a far corner of the slanted square at Z_MIN, with the phase-jitter offset.
+    assert worst_ray_angle_deg(PARAMS, GEOMETRY) == pytest.approx(24.3, abs=0.1)
+    targets = make_standard_target_set(PARAMS, GEOMETRY)
+    for target_id in (TARGET_RAISED_SQUARE, TARGET_SQUARE_WINDOW):
+        assert (2.0 * targets.get(target_id).half_width_mm, 2.0 * targets.get(target_id).half_height_mm) == (300.0, 300.0)
+    path = targets.save(tmp_path / "targets.json")
+    recorded = TargetSet.load(path).derived
+    assert recorded["edge_plate_size_mm"] == [300.0, 300.0] and recorded["edge_plate_sizing"]["overridden"] is False
+    text = plan_summary_text([], PARAMS, GEOMETRY)
+    assert "Edge plates (T3a back plate, T3b front plate): 300 x 300 mm, derived" in text
+    override = dataclasses.replace(PARAMS, edge_plate_size_mm=(400.0, 350.0))
+    overridden = make_standard_target_set(override, GEOMETRY)
+    assert overridden.get(TARGET_RAISED_SQUARE).half_width_mm == 200.0 and overridden.get(TARGET_SQUARE_WINDOW).half_height_mm == 175.0
+    assert overridden.derived["edge_plate_sizing"]["overridden"] is True
+    assert "(set by EDGE_PLATE_SIZE_MM)" in plan_summary_text([], override, GEOMETRY)
+
+
+def test_ramp_rows_per_quantum_at_1600_mm_are_at_least_20():
+    """Three expected quanta across the 150 mm visible height of the T2 board give about 21 image rows per quantum at 1600 mm
     at the indicative geometry (the board is 150 mm x fy / 1600 mm = 64.5 rows high), and more at the nearer stations. At least
     MIN_RAMP_ROWS_PER_QUANTUM rows per quantum keep the plateaus of the quantized ramp wide enough to measure."""
     station = max(PARAMS.z_stations_mm())
@@ -285,7 +339,7 @@ def test_ramp_rows_per_quantum_at_1600_mm_are_at_least_30():
     assert visible_mm == PARAMS.noise_plate_size_mm[1]
     rows_per_quantum = visible_mm * GEOMETRY.sensor_fy_px / station / PARAMS.ramp_quanta
     assert rows_per_quantum >= MIN_RAMP_ROWS_PER_QUANTUM
-    assert rows_per_quantum == pytest.approx(32.0, rel=0.05)
+    assert rows_per_quantum == pytest.approx(21.5, rel=0.05)
     for z in PARAMS.z_stations_mm():                                    # nearer stations have more rows per quantum
         assert PARAMS.noise_plate_size_mm[1] * GEOMETRY.sensor_fy_px / z / PARAMS.ramp_quanta >= rows_per_quantum
 
@@ -569,7 +623,7 @@ def test_zstep_ladder_alternates_with_the_right_displacement():
 def test_zstep_ramp_tilt_per_station():
     """Section 6.2, Ramp: one pose of T2 tilted about H at EVERY station of the ladder (nine), with FRAMES_PER_RAMP_POSE
     frames, sub-series "ramp", whose tilt makes the true depth across the plate's visible height (the smaller of the plate
-    height and the field height at that Z) span RAMP_QUANTA (2) expected quanta: 0.3 deg at 400 mm and 4.7 deg at 1600 mm (within 10
+    height and the field height at that Z) span RAMP_QUANTA (3) expected quanta: 0.44 deg at 400 mm and 7.1 deg at 1600 mm (within 10
     percent) at the indicative geometry, where the visible height is the 150 mm height of the T2 board at every station. The tilt is printed per station in plan_summary.txt."""
     from sensorperf.acquisition.plan import plan_summary_text
     diagnostics = PlanDiagnostics()
@@ -588,9 +642,9 @@ def test_zstep_ramp_tilt_per_station():
         assert c.target_to_camera.rotation == pytest.approx(
             Rotation.from_rotvec([math.radians(c.tilt_deg), 0.0, 0.0]).as_matrix())
     by_station = {c.station_z_mm: c.tilt_deg for c in ramp}
-    assert by_station[400.0] == pytest.approx(0.3, rel=0.1) and by_station[1600.0] == pytest.approx(4.7, rel=0.1)
+    assert by_station[400.0] == pytest.approx(0.44, rel=0.1) and by_station[1600.0] == pytest.approx(7.1, rel=0.1)
     # The tilt-feasibility rule (near edge at or beyond Z_MIN): every ramp keeps it, at Z_MIN by moving the plate center a
-    # fraction of a millimeter farther (the tilt itself is 0.3 deg and the board's near edge is 75 mm from its center).
+    # fraction of a millimeter farther (the tilt itself is 0.44 deg and the board's near edge is 75 mm from its center).
     for c in ramp:
         assert c.notes["near_edge_mm"] >= PARAMS.z_min_mm - 1e-6
     shifts = {c.station_z_mm: c.notes["ramp_center_shift_mm"] for c in ramp}
@@ -599,7 +653,7 @@ def test_zstep_ramp_tilt_per_station():
     assert ramp[0].target_to_camera.translation[2] == pytest.approx(400.0 + shifts[400.0])
     assert any("moved" in note and "Z_MIN" in note for note in diagnostics.notes)
     text = plan_summary_text(plan, PARAMS, GEOMETRY, diagnostics)
-    assert "B-Z ramp per station" in text and "tilt 0.296 deg" in text and "tilt 4.742 deg" in text
+    assert "B-Z ramp per station" in text and "tilt 0.444 deg" in text and "tilt 7.123 deg" in text
     assert not any("ramp" in message for message in diagnostics.skipped)
 
 
@@ -788,7 +842,7 @@ def test_budget_totals_are_the_stored_estimate(full_plan, capsys):
     assert by_series["D"].poses == d_poses
     c_poses = 2 * 2 * n_all * PARAMS.phase_jitter_poses_area + 2 * 4 * PARAMS.field_subseries_poses_area
     assert by_series["C"].poses == c_poses
-    assert by_series["A"].poses == 47 + 2 * len(PARAMS.tilt_angles_deg) * 2 + 1
+    assert by_series["A"].poses == 47 + 2 * len(PARAMS.tilt_angles_deg) * 3 + 1      # tilts at 476 (for 400), 800, 1600
 
 
 def test_write_plan_round_trip(tmp_path: Path):
@@ -1545,7 +1599,7 @@ JUNK_READ_BACK_MM = 1.0e6
 
 def test_drift_run_flag_adds_exactly_the_planned_captures_outside_the_budget(full_plan, tmp_path: Path):
     """Section 4, Step 3: ``plan_full_session(drift_run=True)`` appends exactly the captures of ``plan_drift_run`` after the
-    session's poses, outside the main budget: the Section 9 totals stay 7,194 poses, 42,520 frames and 7.18 h, no sentinel
+    session's poses, outside the main budget: the Section 9 totals stay 7,202 poses, 42,920 frames and 7.19 h, no sentinel
     is placed around the run, and plan_summary.txt lists the run (count, frames, pose-index range, file names) and says that
     the robot is idle and the plate stands on a fixed stand at the reference station."""
     base, _ = full_plan
@@ -1562,7 +1616,7 @@ def test_drift_run_flag_adds_exactly_the_planned_captures_outside_the_budget(ful
     args = (GEOMETRY.frame_rate_hz, PARAMS.move_and_settle_time_s)
     assert capture_budget(plan, *args) == capture_budget(base, *args)
     total = budget_total(capture_budget(plan, *args))
-    assert (total.poses, total.frames) == (7194, 42520) and total.robot_hours == pytest.approx(7.18, abs=HOURS_TOLERANCE)
+    assert (total.poses, total.frames) == (7202, 42920) and total.robot_hours == pytest.approx(7.19, abs=HOURS_TOLERANCE)
     assert (total.poses, total.frames) == (DOCUMENT_ESTIMATE_POSES, DOCUMENT_ESTIMATE_FRAMES)
     # No sentinel was added by the run: the sentinels of the plan are those of the session.
     assert count_sentinel_remounts(plan) == 0
@@ -1784,7 +1838,7 @@ def test_optional_set_sentinels_belong_to_the_set():
     """Sentinels of an optional set (F6): the drift sentinels captured during an optional set (filters-off repeat, staircase,
     lateral sweep, open-background variant of C) carry the set's sub-series label and pose-index range, count in the set's own "outside the main budget"
     table and its sentinel line of plan_summary.txt, and never in the main ``capture_budget``. The main sentinels are those
-    of a plan without the optional sets, so the totals stay 7,194 poses, 42,520 frames and 7.18 h with every optional flag on
+    of a plan without the optional sets, so the totals stay 7,202 poses, 42,920 frames and 7.19 h with every optional flag on
     (the filters-off repeat alone used to add two sentinels to the main budget clock)."""
     args = (GEOMETRY.frame_rate_hz, PARAMS.move_and_settle_time_s)
     flags = {"filters-off": dict(filters_off=True), "staircase": dict(staircase=True), "lateral sweep": dict(lateral_sweep=True),
@@ -1798,8 +1852,8 @@ def test_optional_set_sentinels_belong_to_the_set():
         plan = plan_full_session(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), **kwargs)
         # The main budget is the document's estimate whatever optional sets are planned.
         total = budget_total(capture_budget(plan, *args))
-        assert (total.poses, total.frames) == (7194, 42520), name
-        assert total.robot_hours == pytest.approx(7.18, abs=HOURS_TOLERANCE), name
+        assert (total.poses, total.frames) == (7202, 42920), name
+        assert total.robot_hours == pytest.approx(7.19, abs=HOURS_TOLERANCE), name
         # The main sentinels (sub-series "sentinel") are exactly those of the same plan without the optional sets (the main
         # captures are walked alone), and there are 11 of them, as in the document's estimate.
         main_only = insert_sentinels([c for c in plan if c.subseries not in OPTIONAL_SUBSERIES], PARAMS, GEOMETRY,
@@ -1841,11 +1895,11 @@ def kwargs_names(kwargs: dict) -> set[str]:
 
 def test_open_background_plan_prints_the_document_totals_and_its_own_sentinel_count(tmp_path: Path, capsys):
     """The command line with --open-background: the variant is outside the Section 9 budget, so the main budget still reads
-    7,194 poses, 42,520 frames and 7.18 h, and the variant's table and sentinel line report its own sentinels."""
+    7,202 poses, 42,920 frames and 7.19 h, and the variant's table and sentinel line report its own sentinels."""
     assert plan_cli.main(["--out", str(tmp_path), "--open-background"]) == 0
     text = capsys.readouterr().out
-    assert "Total                7,194   42,520          7.18" in text
-    assert "Document estimate: 7,194 poses, 42,520 frames, 7.18 h. This plan: 7,194 poses (1.00 x), 42,520 frames (1.00 x)" in text
+    assert "Total                7,202   42,920          7.19" in text
+    assert "Document estimate: 7,202 poses, 42,920 frames, 7.19 h. This plan: 7,202 poses (1.00 x), 42,920 frames (1.00 x)" in text
     block = text[text.index("Outside the main budget (optional open-background variant"):]
     assert "Sentinels" in block and "Drift sentinels captured during this set" in block
     plan = read_plan_csv(tmp_path / PLAN_CSV_NAME)
@@ -1857,12 +1911,12 @@ def test_open_background_plan_prints_the_document_totals_and_its_own_sentinel_co
 
 
 def test_filters_off_plan_prints_the_document_totals_and_its_own_sentinel_count(tmp_path: Path, capsys):
-    """The command line with --filters-off (F6): the main budget reads 7,194 poses, 42,520 frames and 7.18 h, and the
+    """The command line with --filters-off (F6): the main budget reads 7,202 poses, 42,920 frames and 7.19 h, and the
     filters-off table and its sentinel line report the sentinels of the repeat."""
     assert plan_cli.main(["--out", str(tmp_path), "--filters-off"]) == 0
     text = capsys.readouterr().out
-    assert "Total                7,194   42,520          7.18" in text
-    assert "Document estimate: 7,194 poses, 42,520 frames, 7.18 h. This plan: 7,194 poses (1.00 x), 42,520 frames (1.00 x)" in text
+    assert "Total                7,202   42,920          7.19" in text
+    assert "Document estimate: 7,202 poses, 42,920 frames, 7.19 h. This plan: 7,202 poses (1.00 x), 42,920 frames (1.00 x)" in text
     filters_off_block = text[text.index("Outside the main budget (filters-off repeat"):]
     assert "Sentinels" in filters_off_block and "Drift sentinels captured during this set" in filters_off_block
 

@@ -1,4 +1,7 @@
-"""Shared drafting helpers for the Stage-1 fixture shop drawings.
+"""Shared drafting helpers for the VSX3000 performance-testing shop drawings.
+
+(Copied from the stage-1 helper; extended with title-block cell checks and
+``View.circle_except``.  Nothing the stage-1 scripts rely on was changed.)
 
 Every drawing in this folder is built on one :class:`Sheet` (a 16.5 x 10.5 inch
 page, rendered at 200 dpi = 3300 x 2100 px).  The page uses "paper millimeters"
@@ -198,12 +201,13 @@ TB_TOP = TB_BOTTOM + TB_HEIGHT  # top y of the title block
 TEXT_UNITS = "Dimensions in mm"
 TEXT_TOLERANCES = "General tolerances ISO 2768-mK unless stated"
 TEXT_PROJECTION = "Third-angle projection"
-TEXT_DATE = "2026-10-07"
-TEXT_PROJECT = "Stage-1 calibration fixtures"
+TEXT_DATE = "2026-10-08"
+TEXT_PROJECT = "VSX3000 performance testing"
 TEXT_FLANGE_NOTE = (
-    "Flange interface per ISO 9409-1-50-4-M6. Confirm against the chosen "
-    "robot's flange drawing before machining."
+    "Flange interface ISO 9409-1-50-4-M6 (ISO 9409-1:1996 table 1); confirm "
+    "against the chosen robot's flange drawing before machining"
 )
+TB_CELL_MARGIN = 0.8  # title-block text must end at least this far inside its cell, paper mm
 
 # --------------------------------------------------------------------------
 # Metric thread helpers
@@ -278,6 +282,7 @@ class Sheet:
         self._renderer = self.fig.canvas.get_renderer()
         self.text_boxes: list[tuple[str, tuple[float, float, float, float]]] = []
         self.segments: list[tuple[Point, Point, str]] = []
+        self.cell_issues: list[str] = []  # title-block text that does not fit its cell
 
     # ---- low-level drawing in paper coordinates --------------------------
     def line(self, pts: Sequence[Point], style: str = "outline", color: str = BLACK,
@@ -407,6 +412,7 @@ class Sheet:
         for label, (x0, y0, x1, y1) in self.text_boxes:
             if x0 < FRAME_LEFT or x1 > FRAME_RIGHT or y0 < FRAME_BOTTOM or y1 > FRAME_TOP:
                 issues.append(f"outside frame: '{label}'")
+        issues.extend(self.cell_issues)
         return issues
 
     # ---- frame and finishing ----------------------------------------------
@@ -430,8 +436,9 @@ class Sheet:
         # part name row (top)
         yn = y1 - TB_NAME_ROW_H
         self.line([(x0, yn), (x1, yn)], "title", register=False)
-        self.text(x0 + TB_PAD, y1 - TB_NAME_ROW_H / 2, f"{info.number}  {info.name}",
-                  size=FONT_TITLE, va="center", weight="bold", check=False)
+        box = self.text(x0 + TB_PAD, y1 - TB_NAME_ROW_H / 2, f"{info.number}  {info.name}",
+                        size=FONT_TITLE, va="center", weight="bold", check=False)
+        self._cell_check("title row", box, x0, x1, yn, y1)
         rows = [
             [("Drawing no.", info.number, TB_HALF), ("Quantity", info.quantity, TB_HALF)],
             [("Material", info.material, 1.0)],
@@ -451,13 +458,24 @@ class Sheet:
                     self.line([(x, y), (x, y_next)], "title", register=False)
                 tx = x + TB_PAD
                 if label:
-                    self.text(tx, (y + y_next) / 2, label, size=FONT_MIN, va="center",
-                              check=False)
+                    lbox = self.text(tx, (y + y_next) / 2, label, size=FONT_MIN, va="center",
+                                     check=False)
+                    self._cell_check(f"label '{label}'", lbox, x, x + w, y_next, y)
                     tx = x + (TB_LABEL_W if frac >= 1.0 else TB_LABEL_W * TB_LABEL_NARROW)
-                self.text(tx, (y + y_next) / 2, value, size=FONT_NOTE, va="center",
-                          weight="bold" if label else "normal", check=False)
+                    if lbox[2] > tx:
+                        self.cell_issues.append(f"title block: label '{label}' runs into its value")
+                vbox = self.text(tx, (y + y_next) / 2, value, size=FONT_NOTE, va="center",
+                                 weight="bold" if label else "normal", check=False)
+                self._cell_check(f"value '{value}'", vbox, x, x + w, y_next, y)
                 x += w
             y = y_next
+
+    def _cell_check(self, what: str, box: tuple[float, float, float, float], x0: float, x1: float,
+                    y0: float, y1: float) -> None:
+        """Record an issue if a title-block text box is not inside its cell."""
+        m = TB_CELL_MARGIN
+        if box[0] < x0 + m or box[2] > x1 - m or box[1] < y0 + m / 2 or box[3] > y1 - m / 2:
+            self.cell_issues.append(f"title block: {what} does not fit its cell")
 
     # ---- notes -------------------------------------------------------------
     def notes_block(self, x: float, y_top: float, width: float, items: Iterable[str],
@@ -650,6 +668,23 @@ class View:
     def circle(self, c: Point, r: float, style: str = "outline", a0: float = 0.0,
                a1: float = FULL_CIRCLE_DEG, color: str = BLACK) -> None:
         self.sheet.circle(self.P(*c), r * self.scale, style, a0, a1, color)
+
+    def circle_except(self, c: Point, r: float, excluded: Sequence, style: str = "outline",
+                      step_deg: float = 0.5) -> None:
+        """Draw a circle (model units) except where any predicate in ``excluded`` (called with
+        model u, v) is true, e.g. where it lies inside another cut-away feature."""
+        n = int(round(FULL_CIRCLE_DEG / step_deg))
+        run: list[Point] = []
+        for i in range(n + 1):
+            p = polar(c, r, FULL_CIRCLE_DEG * i / n)
+            if any(f(*p) for f in excluded):
+                if len(run) > 1:
+                    self.polyline(run, style)
+                run = []
+            else:
+                run.append(p)
+        if len(run) > 1:
+            self.polyline(run, style)
 
     def hatch(self, pts: Sequence[Point], other: bool = False) -> None:
         """Hatch a model-space polygon (``other`` selects the second material hatch)."""

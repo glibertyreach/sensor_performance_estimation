@@ -87,13 +87,10 @@ RAMP_LOW_NOISE_PX = 0.003
 (0.03125 px), well below the 0.19 of the quantum at which the average over frames still shows the plateaus."""
 RAMP_LOW_PATTERN_MM = 0.05
 """Fixed-pattern amplitude (RMS at 1 m, mm) of that synthetic ramp: a fiftieth of the quantum at 1 m."""
-RAMP_PLATEAU_TEST_QUANTA = 4.0
-"""Expected quanta across the visible height of the synthetic ramps of the plateau tests. The plateau method needs a complete
-plateau, that is two steps inside the region of interest, which is the visible height less the boundary band on each side. The
-planner's default of 2 quanta leaves at most about 1.7 quanta there, so a plateau is complete only by luck of the quantizer
-phase (the analysis then falls back to the pooled depth levels, see
-``test_z_ramp_at_the_planned_two_quanta_falls_back_to_the_depth_levels``). These tests exercise the plateau method itself and
-so ramp through 4 quanta, the planner's former default."""
+RAMP_TEST_PLATE_MM = (2000.0, 2000.0)
+"""T2 of the synthetic ramps, larger than the field of view at every station (1488 x 1116 mm at 1600 mm), so that the ramp
+spans the whole image height. The 200 x 150 mm board of the procedure is 43 x 32 px on the 160 x 120 px test sensor at 1600 mm,
+and the boundary band would take 16 of those 32 rows; the real sensor sees 64 rows of the board at 1600 mm."""
 
 
 def _log_values(session_dir: Path) -> dict[str, float]:
@@ -1189,10 +1186,11 @@ def test_z_truth_rule_flags_rungs_through_the_analysis(session, tmp_path):
 # Analysis B-Z, Step 5: the ramp
 # ---------------------------------------------------------------------------
 def _write_ramp_session(root: Path, station: float, noise_px: float, pattern_mm: float, seed: int = 3,
-                        ramp_quanta: float = RAMP_PLATEAU_TEST_QUANTA):
+                        ramp_quanta: float | None = None):
     """A two-pose synthetic session on the quick geometry: the A center pose at the station (the fixed-pattern map of the
     ramp analysis) and the B-Z ramp pose of the planner at the same station, rendered with a model of the given disparity
-    noise and fixed-pattern amplitude, the ramp spanning ``ramp_quanta`` expected quanta. Returns (the model, the true depth
+    noise and fixed-pattern amplitude, the ramp spanning ``ramp_quanta`` expected quanta (None: the planner's default,
+    RAMP_QUANTA = 3). Returns (the model, the true depth
     quantum at the station, mm)."""
     from sensorperf.acquisition.plan import PlannedCapture, ramp_pose, ramp_tilt_deg
     from sensorperf.geometry.targets import fronto_parallel_pose, make_noise_plate, make_standard_target_set
@@ -1201,7 +1199,7 @@ def _write_ramp_session(root: Path, station: float, noise_px: float, pattern_mm:
     from sensorperf.simulate.session import write_synthetic_session
     from sensorperf.simulate.sensor_model import SyntheticSensorModel
     params = replace(scaled_parameters(CharacterizationParameters(), simulate_cli.QUICK_PIXEL_DIVISOR),
-                     ramp_quanta=ramp_quanta)
+                     noise_plate_size_mm=RAMP_TEST_PLATE_MM, ramp_quanta=CharacterizationParameters().ramp_quanta if ramp_quanta is None else ramp_quanta)
     full = SensorGeometry.indicative()
     geometry = scaled_geometry(full, simulate_cli.QUICK_PIXEL_DIVISOR)
     model = replace(SyntheticSensorModel.indicative_scaled(geometry, simulate_cli.QUICK_PIXEL_DIVISOR),
@@ -1239,32 +1237,41 @@ def test_z_ramp_plateau_widths_recover_the_simulator_quantum(tmp_path, station):
     assert ramp.q_px == pytest.approx(model.disparity_quantum_px, rel=RAMP_QUANTUM_TOLERANCE)
     assert ramp.plateaus >= resolution_depth.RAMP_MIN_COMPLETE_PLATEAUS and ramp.dithered is False
     assert not ramp.row_is_smooth and ramp.pixels_stepped
-    assert ramp.tilt_deg == pytest.approx(math.degrees(math.asin(4.0 * quantum / 400.0)), rel=0.02)
+    from sensorperf.parameters import SensorGeometry
+    from sensorperf.simulate.demo_plan import scaled_geometry
+    visible_height_mm = 2.0 * scaled_geometry(SensorGeometry.indicative(), simulate_cli.QUICK_PIXEL_DIVISOR).half_field_mm(station)[1]
+    assert ramp.tilt_deg == pytest.approx(math.degrees(math.asin(CharacterizationParameters().ramp_quanta * quantum
+                                                                  / visible_height_mm)), rel=0.02)
     # Each row lies at one true depth (the tilt axis is parallel to the baseline) and the rows span a few quanta.
-    assert ramp.row_true_spread_mm < 1e-6 and 2.0 < ramp.span_quanta < 4.5
+    assert ramp.row_true_spread_mm < 1e-6 and 2.0 < ramp.span_quanta < 3.5
     assert result.forward_model_terms()["depth_quantum_mm"][f"{station:g}"] == pytest.approx(ramp.quantum_mm)
 
 
 @pytest.mark.parametrize("station", [800.0, 1600.0])
-def test_z_ramp_at_the_planned_two_quanta_falls_back_to_the_depth_levels(tmp_path, station):
-    """The ramp as the planner now plans it (RAMP_QUANTA = 2 across the visible height) on a low-noise synthetic sensor: the
-    region of interest, which is the visible height less the boundary band on each side, holds fewer than two quanta, so no
-    complete plateau is found at the default phase, the note says so, and the quantum comes from the pooled depth levels
-    (or from the plateaus if the phase happens to give one); either way the implied q is the simulator's within the
-    tolerance and the ramp has enough rows per quantum for the plateau method (at least PLATEAU_MIN_STEPS_PER_QUANTUM)."""
-    root = tmp_path / "session"
-    model, quantum = _write_ramp_session(root, station, RAMP_LOW_NOISE_PX, RAMP_LOW_PATTERN_MM,
-                                         ramp_quanta=CharacterizationParameters().ramp_quanta)
-    session = Session.load(root)
-    result_a = noise.run_noise(session, tmp_path, {})
-    ramp = resolution_depth.run_depth_resolution(session, tmp_path, {"A": result_a}).ramp(station)
-    print(f"station {station:g}: {ramp.quantum_method}, {ramp.plateaus} plateaus, {ramp.rows} rows, "
-          f"{ramp.span_quanta:.2f} quanta, {ramp.rows_per_quantum:.1f} rows per quantum; {ramp.note}")
-    assert ramp.span_quanta <= CharacterizationParameters().ramp_quanta
-    assert ramp.rows_per_quantum >= resolution_depth.PLATEAU_MIN_STEPS_PER_QUANTUM
-    if ramp.quantum_method != "plateaus":
-        assert "plateaus not resolved" in ramp.note
-    assert ramp.q_px == pytest.approx(model.disparity_quantum_px, rel=RAMP_QUANTUM_TOLERANCE)
+def test_z_ramp_at_the_planned_quanta_has_a_complete_plateau_and_two_quanta_do_not_always(tmp_path, station):
+    """The ramp as the planner plans it (RAMP_QUANTA = 3 across the visible height) keeps about 2.3 quanta inside the region
+    of interest, which is the visible height less the boundary band on each side, so at least one plateau lies completely
+    between two steps and the plateau method is used. With 2 quanta only about 1.5 remain: no complete plateau is guaranteed
+    and the analysis falls back to the pooled depth levels, noting why (the reason for the value of RAMP_QUANTA). Either way
+    the implied q is the simulator's within the tolerance, and the ramp has enough rows per quantum for the plateau method."""
+    default_quanta = CharacterizationParameters().ramp_quanta
+    results = {}
+    for ramp_quanta in (default_quanta, 2.0):
+        root = tmp_path / f"session_{ramp_quanta:g}"
+        model, _ = _write_ramp_session(root, station, RAMP_LOW_NOISE_PX, RAMP_LOW_PATTERN_MM, ramp_quanta=ramp_quanta)
+        session = Session.load(root)
+        result_a = noise.run_noise(session, tmp_path, {})
+        ramp = resolution_depth.run_depth_resolution(session, tmp_path, {"A": result_a}).ramp(station)
+        print(f"station {station:g}, {ramp_quanta:g} quanta planned: {ramp.quantum_method}, {ramp.plateaus} plateaus, "
+              f"{ramp.rows} rows, {ramp.span_quanta:.2f} quanta in the region, {ramp.rows_per_quantum:.1f} rows per quantum")
+        assert ramp.rows_per_quantum >= resolution_depth.PLATEAU_MIN_STEPS_PER_QUANTUM
+        assert ramp.q_px == pytest.approx(model.disparity_quantum_px, rel=RAMP_QUANTUM_TOLERANCE)
+        results[ramp_quanta] = ramp
+    planned = results[default_quanta]
+    assert planned.quantum_method == "plateaus" and planned.plateaus >= resolution_depth.RAMP_MIN_COMPLETE_PLATEAUS
+    assert results[2.0].span_quanta < 2.0
+    if results[2.0].quantum_method != "plateaus":
+        assert "plateaus not resolved" in results[2.0].note
 
 
 def test_z_ramp_flags_a_dithered_quantizer(tmp_path):
@@ -1380,7 +1387,7 @@ def test_z_ramp_of_the_demonstration_session(result_z, result_a, session, truth,
         ramp = result_z.ramp(station)
         assert ramp.q_px == pytest.approx(truth["disparity_quantum_px"], rel=RAMP_QUANTUM_TOLERANCE), station
     low = result_z.ramp(400.0)
-    # Two quanta of 0.39 mm are 0.78 mm of depth; whether the pooled depth levels then resolve the quantum against the 0.1 mm
+    # Three quanta of 0.39 mm are 1.2 mm of depth; whether the pooled depth levels then resolve the quantum against the 0.1 mm
     # output LSB depends on the quantizer phase. Either the quantum is reported as not resolved, or the implied q is the truth.
     assert (math.isnan(low.q_px) and low.quantum_is_lsb and "output LSB" in low.note and "not resolved" in low.note) \
         or low.q_px == pytest.approx(truth["disparity_quantum_px"], rel=RAMP_QUANTUM_TOLERANCE)
@@ -1388,7 +1395,7 @@ def test_z_ramp_of_the_demonstration_session(result_z, result_a, session, truth,
     rows = {(r["station_z_mm"], r["patch_px"]): r for r in _read_csv(analysis_dir / resolution_depth.SUMMARY_CSV_NAME)}
     both = rows[("800.0", "1")]
     assert float(both["ramp_quantum_mm"]) == pytest.approx(float(both["staircase_quantum_mm"]), rel=0.1)
-    assert float(both["ramp_tilt_deg"]) == pytest.approx(0.444, rel=0.01)           # half of the 0.888 deg of the former 4 quanta
+    assert float(both["ramp_tilt_deg"]) == pytest.approx(0.666, rel=0.01)           # 3/4 of the 0.888 deg of the former 4 quanta
     ramp_rows = _read_csv(analysis_dir / resolution_depth.RAMP_CSV_NAME)
     assert {float(r["station_z_mm"]) for r in ramp_rows} == {400.0, 800.0, 1600.0}
 

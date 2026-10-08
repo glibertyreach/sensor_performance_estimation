@@ -1,6 +1,6 @@
 {
   "document": "performance_test_procedure.docx",
-  "built": "2026-10-08T18:21:22",
+  "built": "2026-10-08T18:48:00",
   "invariant_values": {
     "station_count": 9,
     "shape_station_count": 5,
@@ -15,8 +15,8 @@
     "detection_low_trials": 300,
     "z_min_mm": 400,
     "z_max_mm": 1600,
-    "total_poses": 7194,
-    "total_frames": 42520,
+    "total_poses": 7202,
+    "total_frames": 42920,
     "total_robot_hours": 7.2,
     "noise_station_frames": 100,
     "sentinel_frames": 30
@@ -278,8 +278,8 @@
       "source": "performance_test_procedure.template.md",
       "title": "13. Data layout, deliverables, and the capture budget",
       "asserts": {
-        "total_poses": 7194,
-        "total_frames": 42520,
+        "total_poses": 7202,
+        "total_frames": 42920,
         "total_robot_hours": 7.2
       },
       "refs": [
@@ -449,7 +449,7 @@
       "source": "figures/make_fig_plan.py",
       "caption": "The default full plan: target centers in the sensor frame, side view (H against Z) and front view (H against V), colored by series, with the frustum. Each cloud around a station is a set of random lateral offsets.",
       "asserts": {
-        "total_poses": 7194
+        "total_poses": 7202
       },
       "refs": [],
       "facts": "figures/fig_plan.facts.json"

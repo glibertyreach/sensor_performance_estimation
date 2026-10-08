@@ -331,11 +331,14 @@ class CharacterizationParameters:
     the pose, in the direction of increasing Z."""
     z_step_repeats: int = 10
     """ABAB cycles for each step size."""
-    ramp_quanta: float = 2.0
+    ramp_quanta: float = 3.0
     """The B-Z ramp tilts the plate about H so that the true depth across the plate's VISIBLE height (the smaller of the
-    plate height and the field height at that Z) spans this many expected depth quanta (Section 6.2). With the 150 mm high
-    stage-1 calibration board (T2) the visible height is the board height from about 380 mm on, so 2 quanta across it give
-    about 32 image rows per quantum at 1600 mm at the indicative geometry, and more at the nearer stations."""
+    plate height and the field height at that Z) spans this many expected depth quanta (Section 6.2). The analysis region
+    loses the boundary band (``boundary_band_half_width_px``, 8 px) on each side, so with the 150 mm high stage-1 board
+    (64.5 rows at 1600 mm) it keeps about 0.75 of the visible height: 2 quanta would leave only about 1.5 inside the region
+    and no guaranteed complete plateau, whereas 3 quanta leave about 2.3, so that at least one plateau lies completely between
+    two steps at every station (the plateau method needs two steps in the region). At the indicative geometry that is about
+    21 image rows per quantum at 1600 mm (150 mm x fy / 1600 mm / 3), and more at the nearer stations."""
     ramp_max_intermediate_fraction: float = 0.5
     """Classification of a B-Z ramp curve as stepped or smooth (Section 11.2, Step 14): the curve counts as stepped when
     fewer than this fraction of its changes over a half-quantum window are intermediate (fall inside
@@ -460,10 +463,14 @@ class CharacterizationParameters:
     flat to ``plate_flatness_mm``, on its board adapter. A tilt about H swings the half-height (75 mm) toward the sensor, a
     tilt about V the half-width (100 mm); the tilt-feasibility rule of the planner and the B-Z ramp use these half extents.
     It replaced the 400 x 400 mm noise plate (2026-10-08)."""
-    edge_plate_size_mm: tuple[float, float] = (400.0, 400.0)
-    """Back plate of T3a and front plate of T3b, width x height, mm. These plates carry a 160 mm square and must extend past
-    it by the boundary band plus the shadow, so they do NOT follow the smaller T2 board: they keep the 400 x 400 mm size
-    that the noise plate had when the edge targets were defined."""
+    edge_plate_size_mm: tuple[float, float] | None = None
+    """Override of the back plate of T3a and the front plate of T3b, width x height, mm. ``None`` (the default) derives the
+    size from the rule of ``geometry.targets.edge_plate_sizing``: the plate extends past the square by the larger of (a) the
+    boundary band at Z_MAX plus the shadow of the large gap (GAP_LARGE_MM times the tangent of the worst ray angle over the
+    poses used) and (b) the feature isolation at Z_MAX (the T3b front plate needs it around its window), and the side is
+    rounded up to ``edge_plate_size_step_mm``. These plates do NOT follow the smaller T2 board."""
+    edge_plate_size_step_mm: float = 10.0
+    """The derived side of the T3a and T3b plates is rounded up to a multiple of this (a plate is cut to a round size)."""
     plate_flatness_mm: float = 0.05
     """Required flatness of every plate."""
     plate_flatness_sigma_fraction: float = 0.25
@@ -524,8 +531,8 @@ class CharacterizationParameters:
     """Depth of the once-per-mount plane-fit check (Section 4, Step 8)."""
     mount_tilt_tolerance_deg: float = 0.05
     """Largest tilt difference between a mounted target's fitted front plane and the registered pose that the
-    mount check of Step 4.8 accepts (dagger: 0.05 degrees moves a plate edge 200 mm from center by about
-    0.17 mm). Z is held to registration_residual_accept_mm and H, V to frame_check_px."""
+    mount check of Step 4.8 accepts (dagger: 0.05 degrees moves a plate edge 100 mm from center (the half-width of
+    the T2 board) by about 0.09 mm). Z is held to registration_residual_accept_mm and H, V to frame_check_px."""
 
     # Equipment (redesign note, Section 4)
     adapter_remount_repeatability_mm: float = 0.02

@@ -78,7 +78,7 @@ from scipy.spatial.transform import Rotation
 from sensorperf.geometry.camera import PinholeCamera
 from sensorperf.geometry.registration import Registration
 from sensorperf.geometry.targets import (
-    FEATURE_POST, TARGET_KIND_PLATE, TargetSet, TwoPlaneTarget, fronto_parallel_pose,
+    FEATURE_POST, TARGET_KIND_PLATE, TargetSet, TwoPlaneTarget, edge_plate_sizing, edge_plate_size_mm, fronto_parallel_pose,
     make_standard_target_set, tilted_pose,
 )
 from sensorperf.geometry.transforms import RigidTransform
@@ -138,15 +138,15 @@ PERCENT = 100.0
 PLOT_GRID_ALPHA = 0.3
 """Opacity of the grid lines of plan.png."""
 
-DOCUMENT_ESTIMATE_POSES = 7194
-DOCUMENT_ESTIMATE_FRAMES = 42520
-DOCUMENT_ESTIMATE_HOURS = 7.18
+DOCUMENT_ESTIMATE_POSES = 7202
+DOCUMENT_ESTIMATE_FRAMES = 42920
+DOCUMENT_ESTIMATE_HOURS = 7.19
 """The capture-budget estimate printed in Section 9 of the procedure document (poses, frames, robot hours) for the
 redesigned plan: the totals of ``plan_full_session`` with the default parameters, the indicative geometry (10
-frames/s) and no optional variants (no filters-off repeat, no open-background variant, no staircase; 7,194 poses, 42,520
-frames, 7.18 h). The B-Z series has 369 poses: the step ladder (6 rungs x 10 cycles x 2 visits at the three reduced
+frames/s) and no optional variants (no filters-off repeat, no open-background variant, no staircase; 7,202 poses, 42,920
+frames, 7.19 h). The B-Z series has 369 poses: the step ladder (6 rungs x 10 cycles x 2 visits at the three reduced
 stations, 360 poses, 3,600 frames) and the ramp (one pose at each of the nine stations, 450 frames). The A series has
-47 main poses (nine ladder stations at five field positions plus the two legacy depths at the center), 16 tilt poses (the 800 and 1600 mm stations; every tilt at 400 mm is infeasible with the 200 x 150 mm T2 board) and the re-mount check, and the
+47 main poses (nine ladder stations at five field positions plus the two legacy depths at the center), 24 tilt poses (the 476, 800 and 1600 mm stations: every tilt at 400 mm is infeasible with the 200 x 150 mm T2 board, so its sweeps are planned at 476 mm) and the re-mount check, and the
 sentinels (11, on the mounted target) are part of the totals. plan_summary.txt compares the plan it summarizes with these
 numbers, so a change of the parameters shows up as a ratio away from 1. The optional sets (the filters-off repeat, the B-Z
 staircase, the B-HV lateral sweep, the drift run and the open-background variant of C) and the drift sentinels captured
@@ -673,6 +673,57 @@ def _feasible_tilt_angles(params: CharacterizationParameters, plate: TwoPlaneTar
     return feasible
 
 
+TILT_SUBSTITUTED_KEY = "tilt_station_substituted_for"
+"""Pose-note key of a tilt pose that was planned at another station of the ladder than the reduced station whose tilts
+were all infeasible; the value is that reduced station (Z, mm)."""
+
+
+def _substitute_tilt_station_mm(params: CharacterizationParameters, plate: TwoPlaneTarget, reduced_station_mm: float,
+                                tilt_axis: str) -> float | None:
+    """The station of the ladder that takes over the tilt sweep of a reduced station where no tilt is feasible: the nearest
+    station (a nearer-to-the-sensor tie goes to the farther one, where more tilts are feasible) that is not a reduced station
+    itself (those have their own sweep) and where every angle of TILT_ANGLES_DEG is feasible; failing that, the nearest where
+    at least one real tilt is. None when the ladder has none."""
+    reduced = set(params.z_reduced_stations_mm())
+    candidates = [z for z in params.z_stations_mm() if z not in reduced]
+    for require_complete in (True, False):
+        feasible = []
+        for z in candidates:
+            angles = _feasible_tilt_angles(params, plate, z, tilt_axis, None)
+            if len(angles) == len(params.tilt_angles_deg) if require_complete else bool(angles):
+                feasible.append(z)
+        if feasible:
+            return min(feasible, key=lambda z: (abs(z - reduced_station_mm), -z))
+    return None
+
+
+def plan_tilt_sweeps(params: CharacterizationParameters, plate: TwoPlaneTarget,
+                     diagnostics: PlanDiagnostics | None) -> list[tuple[float, str, list[float], float | None]]:
+    """The tilt sweeps of the A tilt sub-series, in plan order: (station, tilt axis, the feasible angles, the reduced station
+    that the sweep substitutes for or None). At each reduced station T2 is tilted about V and then about H through
+    TILT_ANGLES_DEG, minus the angles whose near edge would come closer than Z_MIN (listed as skipped poses). Where no real
+    tilt about an axis is feasible at a reduced station (400 mm with the 200 x 150 mm board), the sweep is not dropped: it is
+    planned at the nearest feasible station of the ladder instead (:func:`_substitute_tilt_station_mm`), and a note in
+    plan_summary.txt says so. The pose notes carry ``tilt_station_substituted_for``."""
+    sweeps = []
+    for z in params.z_reduced_stations_mm():
+        for axis in (TILT_AXIS_V, TILT_AXIS_H):
+            if _feasible_tilt_angles(params, plate, z, axis, None):
+                sweeps.append((z, axis, _feasible_tilt_angles(params, plate, z, axis, diagnostics), None))
+                continue
+            substitute = _substitute_tilt_station_mm(params, plate, z, axis)
+            if substitute is None:
+                _feasible_tilt_angles(params, plate, z, axis, diagnostics)           # records the skip and its reason
+                continue
+            if diagnostics is not None:
+                diagnostics.note(
+                    f"A tilt about {axis}: no tilt is feasible at the reduced station Z = {z:g} mm (the plate's near edge "
+                    f"would come closer than Z_MIN = {params.z_min_mm:g} mm), so the sweep is planned at the nearest feasible "
+                    f"station of the ladder, Z = {substitute:g} mm (pose note {TILT_SUBSTITUTED_KEY} = {z:g})")
+            sweeps.append((substitute, axis, _feasible_tilt_angles(params, plate, substitute, axis, diagnostics), z))
+    return sweeps
+
+
 def plan_noise_series(params: CharacterizationParameters, geometry: SensorGeometry, rng: np.random.Generator,
                       filters_off: bool = False, with_sentinels: bool = True, targets: TargetSet | None = None,
                       diagnostics: PlanDiagnostics | None = None) -> list[PlannedCapture]:
@@ -692,7 +743,8 @@ def plan_noise_series(params: CharacterizationParameters, geometry: SensorGeomet
     sweeps, as the procedure lists it). A tilt is planned only where the plate's near edge stays at or beyond Z_MIN
     (:func:`tilt_is_feasible`: Z - h sin(tilt) >= Z_MIN, h the half extent of the plate across the tilt axis); infeasible
     tilts are skipped and listed in plan_summary.txt with the reason. With the 200 x 150 mm board every tilt at 400 mm is
-    infeasible, which leaves the 800 and 1600 mm stations (476 mm would be feasible, but it is not a reduced station). Step 6: the repeat-mount check repeats the center station at
+    infeasible; that sweep is not dropped but planned at the nearest feasible station of the ladder, 476 mm, so the tilt
+    sub-series runs at 476, 800 and 1600 mm (:func:`plan_tilt_sweeps`, pose note ``tilt_station_substituted_for`` = 400). Step 6: the repeat-mount check repeats the center station at
     Z_REFERENCE_MM after the tilt sub-series (subseries "remount"). Step 3: the drift sentinels
     are inserted by :func:`insert_sentinels` when ``with_sentinels`` is true.
 
@@ -724,19 +776,20 @@ def plan_noise_series(params: CharacterizationParameters, geometry: SensorGeomet
         _warn_not_fitting(diagnostics, "A", plate, z, placement)
     # Step 5: tilt sub-series at the center, about V and then about H.
     camera = camera_of(geometry)
-    for z in params.z_reduced_stations_mm():
-        for axis in (TILT_AXIS_V, TILT_AXIS_H):
-            for angle in _feasible_tilt_angles(params, plate, z, axis, diagnostics):
-                pose = tilted_pose(0.0, 0.0, z, axis, angle)
-                notes = {"near_edge_mm": tilt_near_edge_mm(plate, z, axis, angle)}
-                plan.append(_new_capture(counter, PROCEDURE_NOISE, TARGET_NOISE_PLATE, None, z, FIELD_POSITION_CENTER,
-                                         params.frames_per_tilt_pose, SUBSERIES_FILTERS_OFF if filters_off
-                                         else SUBSERIES_TILT, pose, tilt_axis=axis, tilt_deg=angle, notes=notes))
-                if fit_violation_px(camera, plate, pose, margin) > fit_violation_px(
-                        camera, plate, fronto_parallel_pose(0.0, 0.0, z), margin) + FIT_VIOLATION_TOLERANCE_PX:
-                    _warn(diagnostics, f"A: the T2 plate tilted {angle:g} deg about {axis} at Z = {z:g} mm fits the "
-                                       "field of view worse than the untilted plate; check that it covers the "
-                                       "analysis region")
+    for z, axis, angles, substituted_for in plan_tilt_sweeps(params, plate, diagnostics):
+        for angle in angles:
+            pose = tilted_pose(0.0, 0.0, z, axis, angle)
+            notes = {"near_edge_mm": tilt_near_edge_mm(plate, z, axis, angle)}
+            if substituted_for is not None:
+                notes[TILT_SUBSTITUTED_KEY] = substituted_for
+            plan.append(_new_capture(counter, PROCEDURE_NOISE, TARGET_NOISE_PLATE, None, z, FIELD_POSITION_CENTER,
+                                     params.frames_per_tilt_pose, SUBSERIES_FILTERS_OFF if filters_off
+                                     else SUBSERIES_TILT, pose, tilt_axis=axis, tilt_deg=angle, notes=notes))
+            if fit_violation_px(camera, plate, pose, margin) > fit_violation_px(
+                    camera, plate, fronto_parallel_pose(0.0, 0.0, z), margin) + FIT_VIOLATION_TOLERANCE_PX:
+                _warn(diagnostics, f"A: the T2 plate tilted {angle:g} deg about {axis} at Z = {z:g} mm fits the "
+                                   "field of view worse than the untilted plate; check that it covers the "
+                                   "analysis region")
     # Step 6: repeat-mount check (not part of the filters-off repeat, which covers Steps 1-5).
     if not filters_off:
         z = params.z_reference_mm
@@ -973,7 +1026,7 @@ def plan_zstep_series(params: CharacterizationParameters, geometry: SensorGeomet
     The tilt is stored in ``tilt_deg`` and printed per station in plan_summary.txt. The tilt-feasibility rule of the A tilt
     sub-series applies (:func:`tilt_is_feasible`: the plate's near edge, Z - h sin(tilt), stays at or beyond Z_MIN). The
     ramp tilts are small, but the near edge of the 150 mm high board, 75 mm from its center, is still a little closer than
-    Z_MIN at Z0 = Z_MIN (0.39 mm at the indicative geometry); there (and wherever the rule would fail) the plate center is moved farther by exactly the shortfall so that the
+    Z_MIN at Z0 = Z_MIN (0.58 mm at the indicative geometry); there (and wherever the rule would fail) the plate center is moved farther by exactly the shortfall so that the
     near edge sits at Z_MIN (``notes["ramp_center_shift_mm"]``, noted in plan_summary.txt); the station stays Z0. A station
     whose ramp is geometrically impossible (span not less than the visible height) is skipped and listed with the reason.
 
@@ -1856,6 +1909,23 @@ def _zstep_lines(plan: Sequence[PlannedCapture], params: CharacterizationParamet
     return lines
 
 
+def _edge_plate_lines(params: CharacterizationParameters, geometry: SensorGeometry | None) -> list[str]:
+    """The lines of plan_summary.txt on the size of the T3a back plate and the T3b front plate and how it was derived
+    (:func:`sensorperf.geometry.targets.edge_plate_sizing`); nothing when the sensor geometry is unknown."""
+    if geometry is None or geometry.sensor_fx_px is None or geometry.sensor_baseline_mm is None:
+        return []
+    width, height = edge_plate_size_mm(params, geometry)
+    if params.edge_plate_size_mm is not None:
+        return ["", f"Edge plates (T3a back plate, T3b front plate): {width:g} x {height:g} mm (set by EDGE_PLATE_SIZE_MM)"]
+    sizing = edge_plate_sizing(params, geometry)
+    return ["", f"Edge plates (T3a back plate, T3b front plate): {width:g} x {height:g} mm, derived: the plate extends "
+                f"{sizing.extension_mm:.1f} mm past the {params.edge_square_size_mm:g} mm square, the larger of the boundary "
+                f"band at Z_MAX ({sizing.band_mm:.1f} mm) plus the shadow of the {params.gap_large_mm:g} mm gap "
+                f"({sizing.shadow_mm:.1f} mm, worst ray angle {sizing.worst_ray_angle_deg:.1f} deg) and the feature isolation "
+                f"at Z_MAX ({sizing.isolation_mm:.1f} mm); {sizing.derived_side_mm:.1f} mm rounded up to a multiple of "
+                f"{params.edge_plate_size_step_mm:g} mm"]
+
+
 def plan_summary_text(plan: Sequence[PlannedCapture], params: CharacterizationParameters | None = None,
                       geometry: SensorGeometry | None = None, diagnostics: PlanDiagnostics | None = None,
                       registration: Registration | None = None) -> str:
@@ -1878,6 +1948,7 @@ def plan_summary_text(plan: Sequence[PlannedCapture], params: CharacterizationPa
               + ", ".join(f"{z:g}" for z in params.detection_low_stations_mm()),
               "  Feature diameters (mm): " + ", ".join(f"{d:.1f}" for d in params.feature_diameters_mm(geometry))
               if geometry is not None and geometry.sensor_fx_px is not None else "  Feature diameters: geometry unknown"]
+    lines += _edge_plate_lines(params, geometry)
     lines += ["", f"Poses planned: {len(plan)}; frames: {sum(c.frames for c in plan)}", "",
               "Poses per station depth and series (R, the registration poses, span Z_MIN to Z_MAX and are not listed by station):"]
     lines += _station_table(plan)

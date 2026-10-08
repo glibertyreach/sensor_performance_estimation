@@ -287,7 +287,7 @@ the overshoot. plan_summary.txt states the rule for all poses and the exception.
 
 *Sentinels of an optional set* (follow-up F6). The sentinels captured while an optional set (filters-off repeat, staircase,
 lateral sweep, open-background variant of C) runs belong to that set: `insert_sentinels` keeps one clock for the main plan, which walks the main captures only (so
-its 11 sentinels, and the Section 9 totals of 7,194 poses, 42,520 frames and 7.18 h, are the same whichever optional flags are on), and
+its 11 sentinels, and the Section 9 totals of 7,202 poses, 42,920 frames and 7.19 h, are the same whichever optional flags are on), and
 one clock per optional set, which walks that set's captures only, with the same rules (a sentinel at the end of each of its series
 and whenever `drift_sentinel_interval_min` of its own clock is up; no opening sentinel). Such a sentinel is placed right after the
 capture it follows, has the set's label as sub-series, takes pose indices from the set's base (`OPTIONAL_POSE_INDEX_BASES`) and no
@@ -452,8 +452,8 @@ check; B-HV at the shape stations; B-Z: the step ladder at the reduced stations 
 {T4, T5} x {G small, G large} at all nine stations, the field sub-series and the open-background variant at Z_REFERENCE; D at
 all nine stations (60 trials per (feature, station), 300 at the three farthest). `plan_summary.txt` prints the station ladder
 and its subsets, the B-Z rungs and ramp tilts per station, the budget and the comparison with `DOCUMENT_ESTIMATE_*`, which are
-the totals of the default plan (`plan_stations --seed 1`): 7,194 poses, 42,520 frames, 7.18 h (10 frames/s, 3 s per move plus
-settle). Per series (poses / frames / hours): registration 30 / 300 / 0.03, A 64 / 5,600 / 0.21, B-HV 520 / 15,600 / 0.87,
+the totals of the default plan (`plan_stations --seed 1`): 7,202 poses, 42,920 frames, 7.19 h (10 frames/s, 3 s per move plus
+settle). Per series (poses / frames / hours): registration 30 / 300 / 0.03, A 72 / 6,000 / 0.23, B-HV 520 / 15,600 / 0.87,
 B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentinels 11 / 330 / 0.02.
 - *B-Z step ladder in quanta* (`z_step_rungs_mm`; parameters `z_step_ladder_quanta` = (0.25, 0.5, 1, 2, 4, 8) and
   `robot_min_resolvable_move_mm` = 0.1, which replace `z_step_ladder_mm`). At a reduced station Z0 the commanded rungs are the
@@ -464,13 +464,13 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
   1.55 to 50 mm at 1600 mm (the 50 mm rung moves the plate to 1650 mm, beyond Z_MAX; a planner note says so). 6 rungs x 10
   cycles x 2 visits x 3 stations = 360 poses, 3,600 frames. `plan_summary.txt` lists the millimeter rungs per station with the
   ratio of `robot_repeatability_mm` to each rung. Every visit is still approached from below.
-- *B-Z ramp* (`ramp_tilt_deg`, `ramp_pose`, `ramp_visible_height_mm`; parameters `ramp_quanta` = 2, `frames_per_ramp_pose` = 50;
+- *B-Z ramp* (`ramp_tilt_deg`, `ramp_pose`, `ramp_visible_height_mm`; parameters `ramp_quanta` = 3, `frames_per_ramp_pose` = 50;
   sub-series `ramp`, `SUBSERIES_RAMP`). At EVERY ladder station one pose of T2 tilted about H (parallel to the baseline, so each
   image row lies at one true depth) by asin(ramp_quanta dZ_q / visible height), the visible height being the smaller of the
-  plate height (150 mm, always the smaller one) and the field height at Z0: 0.296, 0.419, 0.593, 0.838, 1.184, 1.674, 2.367,
-  3.349 and 4.742 deg at the nine stations (0.3 deg at 400 mm, 4.7 deg at 1600 mm), 9 poses x 50 frames. The tilt is stored in the pose row and printed per
+  plate height (150 mm, always the smaller one) and the field height at Z0: 0.444, 0.629, 0.889, 1.257, 1.776, 2.511, 3.552,
+  5.027 and 7.123 deg at the nine stations (0.44 deg at 400 mm, 7.1 deg at 1600 mm), 9 poses x 50 frames. The tilt is stored in the pose row and printed per
   station. The tilt-feasibility rule below applies: the ramp tilts are small, but the near edge of the 150 mm high plate, 75 mm from
-  the center, is Z - 75 sin(tilt) = 399.61 mm at Z0 = 400 mm, closer than Z_MIN (every other station is well beyond it); rather than drop the 400 mm ramp, the plate center is moved 0.39 mm farther (exactly the shortfall, so the near edge is
+  the center, is Z - 75 sin(tilt) = 399.42 mm at Z0 = 400 mm, closer than Z_MIN (every other station is well beyond it); rather than drop the 400 mm ramp, the plate center is moved 0.58 mm farther (exactly the shortfall, so the near edge is
   at Z_MIN; `notes["ramp_center_shift_mm"]`, a planner note, a line of `plan_summary.txt`), and the station label stays 400. The far
   edge of the ramp at 1600 mm is 12 mm beyond Z_MAX, as the 1650 mm of the ladder.
 - *Optional B-Z staircase* (`plan_zstep_series(staircase=True)`, `plan_full_session(staircase=True)`, `plan_stations --staircase`).
@@ -502,7 +502,7 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
   sentinels captured during an optional set take that set's range.
   `plan_stations --drift-run` (`plan_full_session(drift_run=True)`) appends the 241 captures after the session's poses, whatever
   `--series` selects (`--series` without letters plans the run alone). The run is outside the main budget
-  (`SUBSERIES_DRIFT_RUN` is in `OPTIONAL_SUBSERIES`, so the totals stay 7,194 poses, 42,520 frames, 7.18 h), gets no drift sentinels
+  (`SUBSERIES_DRIFT_RUN` is in `OPTIONAL_SUBSERIES`, so the totals stay 7,202 poses, 42,920 frames, 7.19 h), gets no drift sentinels
   and is not counted by `count_sentinel_remounts`; plan_summary.txt lists its captures, frames, pose-index range and file names and
   says that the robot is idle and the plate stands on a fixed stand at the reference station. Each pose carries the nominal T2 pose
   (center field, fronto-parallel) and `notes["fixed_stand"] = True` (`FIXED_STAND_KEY`, carried into the manifest as the column
@@ -516,13 +516,13 @@ B-Z 369 / 4,050 / 0.42, C 1,160 / 11,600 / 1.29, D 5,040 / 5,040 / 4.34, sentine
   (3,960 instead of 5,040 D poses with the defaults); the extended poses of the far stations are not reduced. The Section 9
   budget stays WITHOUT reuse: `PlanDiagnostics.c_reuse` (`CReuse`) records what was left out, `capture_budget(..., c_reuse)` adds
   it back to the D row, each planned D pose notes `budget_clock_reused_share` so that the drift sentinels follow the same clock
-  (the totals stay 7,194 poses, 42,520 frames, 7.18 h), and `plan_summary.txt` says how many D poses were taken from C.
+  (the totals stay 7,202 poses, 42,920 frames, 7.19 h), and `plan_summary.txt` says how many D poses were taken from C.
 - *Tilt feasibility* (`tilt_is_feasible`, `tilt_near_edge_mm`). The A tilt sub-series runs at the reduced stations, and a tilt
   is planned only where the plate's near edge stays at or beyond `z_min_mm`: Z - h sin(tilt) >= Z_MIN, h the half extent of
   the plate across the tilt axis (100 mm for a tilt about V and 75 mm for a tilt about H with the 200 x 150 mm plate; the B-Z ramp uses the same rule, see above). Infeasible tilts are skipped and listed with the reason
   under "Skipped poses" in `plan_summary.txt` (`PlanDiagnostics.skipped`); a sweep left with no real tilt (only the zero angle)
   is skipped as a whole. With the 200 x 150 mm plate every tilt at 400 mm is skipped (15, 30 and 45 deg about V bring the edge to 374, 350
-  and 329 mm; about H to 381, 362 and 347 mm), leaving 800 and 1600 mm: 2 axes x 4 angles x 2 stations = 16 tilt poses instead of 24.
+  and 329 mm; about H to 381, 362 and 347 mm), and their sweeps are planned at the nearest feasible station of the ladder, 476 mm, instead of being dropped (`plan_tilt_sweeps`, pose note `tilt_station_substituted_for` = 400, a line in `plan_summary.txt`): 2 axes x 4 angles x 3 stations (476, 800, 1600) = 24 tilt poses.
 - *Legacy depths at the center only* (`legacy_extra_stations_mm`). The legacy metrics are center-box metrics, so 700 and
   1000 mm are single center poses, not five-position stations (55 main poses before, 47 now).
 - *Drift sentinels on the mounted target* (`insert_sentinels`). A sentinel is captured on the front plane of the target that
@@ -758,11 +758,16 @@ eliminated; T2 is now the stage-1 calibration board, 200 mm wide (H) by 150 mm h
 0.05 mm, on its existing board adapter. `noise_plate_size_mm` was already a (width, height) pair and is now (200, 150); its
 consumers (`make_noise_plate`, the field fit, `tilt_near_edge_mm` with the half extent across the tilt axis, 100 mm about V
 and 75 mm about H, the ramp's visible height, the simulator and the procedure builder) read the pair and needed no new logic.
-`make_edge_target` sized the T3a back plate and the T3b front plate like T2, and a 200 x 150 mm plate would not extend past
-the 160 mm square by the boundary band, so those plates now come from the new `edge_plate_size_mm` (400, 400, unchanged).
-`ramp_quanta` goes from 4 to 2, which keeps about 32 image rows per quantum at 1600 mm (64.5 rows of board height) and gives
-tilts of 0.30 deg at 400 mm to 4.74 deg at 1600 mm. Tilts are feasible from 476 mm on (45 deg about V leaves the edge at
-405 mm), but the sub-series runs at the reduced stations, so the planned tilt stations stay 800 and 1600 mm and the budget is
-unchanged (7,194 poses, 42,520 frames, 7.18 h). Because the board is only 21 x 16 px at 1600 mm on the `--quick` sensor,
-`scaled_parameters` divides `boundary_band_half_width_px` by the pixel divisor there, and the test region of `test_simulate`
-shrank to 28 x 28 px.
+`make_edge_target` sized the T3a back plate and the T3b front plate like T2, and a 200 x 150 mm plate cannot carry the 160 mm
+square, so those plates are sized by their own rule (`edge_plate_sizing`): they extend past the square by the larger of the
+boundary band at Z_MAX plus the shadow of the large gap (`worst_ray_angle_deg`, 24.3 deg at the indicative geometry) and the
+feature isolation at Z_MAX, rounded up to `edge_plate_size_step_mm` (10 mm): 300 x 300 mm, set by the isolation (69.8 mm
+against 45.7 mm); `edge_plate_size_mm` is an optional override (None = derived), and the derivation is recorded in
+targets.json ("derived") and plan_summary.txt. `ramp_quanta` goes from 4 to 3: the analysis region loses the 8 px boundary
+band on each side, which leaves about 75 % of the 64.5 rows of board at 1600 mm, so 2 quanta would leave about 1.5 inside the
+region and no guaranteed complete plateau, while 3 leave about 2.3 and at least one plateau between two steps; that is about
+21 image rows per quantum at 1600 mm, with tilts of 0.44 deg at 400 mm to 7.1 deg at 1600 mm. Tilts are feasible from 476 mm on
+(45 deg about V leaves the edge at 405 mm), but none at the reduced station 400 mm, so that sweep is substituted by 476 mm
+(`plan_tilt_sweeps`): the planned tilt stations are 476, 800 and 1600 mm and the budget becomes 7,202 poses, 42,920 frames,
+7.19 h (A: 72 poses, 6,000 frames). Because the board is only 21 x 16 px at 1600 mm on the `--quick` sensor, `--quick` keeps a 400 x 400 mm
+stand-in T2 (`scaled_parameters`), and the test region of `test_simulate` shrank to 28 x 28 px.

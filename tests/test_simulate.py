@@ -208,7 +208,7 @@ def test_cutout_array_depths_and_no_reads(params, model):
 # ---------------------------------------------------------------------------
 def _left_edge_profile(model, params, front_preference, rng):
     """(normalized height h along the center rows, column of the true left edge) for a T3a render without noise."""
-    target = make_edge_target(params, TARGET_KIND_RAISED_SQUARE, GAP_LARGE_MM)
+    target = make_edge_target(params, TARGET_KIND_RAISED_SQUARE, GAP_LARGE_MM, geometry=SensorGeometry.indicative())
     pose = fronto_parallel_pose(0.0, 0.0, STATION_MM)
     ideal = replace(_ideal(model), front_preference=front_preference)
     frame = render_frame(ideal, target, pose, rng)
@@ -256,7 +256,7 @@ def test_write_frame_round_trip(tmp_path, params, model):
     """The .mc file carries the XYZ matrix exactly and the header of the contract plus the extra entries."""
     rng = np.random.default_rng(TEST_SEED)
     pose = fronto_parallel_pose(0.0, 0.0, STATION_MM)
-    frame = render_frame(model, make_edge_target(params, TARGET_KIND_RAISED_SQUARE, GAP_LARGE_MM), pose, rng)
+    frame = render_frame(model, make_edge_target(params, TARGET_KIND_RAISED_SQUARE, GAP_LARGE_MM, geometry=SensorGeometry.indicative()), pose, rng)
     path = tmp_path / "frame.mc"
     write_frame(path, frame, model.geometry, {"note": "round trip", "index": 7})
     capture = read_matcloud(path)
@@ -388,7 +388,7 @@ def test_fixed_pattern_is_static_and_noise_is_not(params, model):
 # ---------------------------------------------------------------------------
 def test_truth_arrays_and_determinism(params, model):
     """The truth arrays follow the ideal ray cast; equal seeds give equal frames."""
-    target = make_edge_target(params, TARGET_KIND_RAISED_SQUARE, GAP_LARGE_MM)
+    target = make_edge_target(params, TARGET_KIND_RAISED_SQUARE, GAP_LARGE_MM, geometry=SensorGeometry.indicative())
     pose = fronto_parallel_pose(0.0, 0.0, STATION_MM)
     frame = render_frame(model, target, pose, np.random.default_rng(TEST_SEED))
     again = render_frame(model, target, pose, np.random.default_rng(TEST_SEED))
