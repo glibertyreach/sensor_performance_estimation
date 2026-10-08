@@ -44,4 +44,7 @@ Questions asked, in order, and the answers:
   prediction from the measured line spread function; grazing incidence beyond the tilt range unmeasured; lateral
   position, registration translation, angular reflectance to the tilt limit and the tool frame are recoverable with
   edged plates and tilts).
+- Q3 answered (Neil, 2026-10-08): the spigot-and-cross-pin design for the four feature targets (T3a, T3b, T4, T5).
+- Sphere decision (Neil, 2026-10-08): one sphere, the larger (stage-1 sphere B, 152.4 mm); the curvature sweep runs
+  in the calibration procedure, not here. Handoff written: docs/design/handoff_sphere_decision_2026-10-08.md.
 
