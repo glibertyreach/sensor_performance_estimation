@@ -290,13 +290,13 @@
           ],
           [
             "Flatness",
-            "0.05 mm over each front face, checked in-house with the run-out fixture after mounting",
+            "0.05 mm over each front face: by the fabricator before finishing, in-house with the run-out fixture after mounting",
             "same"
           ],
           [
             "Material and finish",
             "Finish-ground aluminum tooling plate; fine glass-bead blast on every face the sensor sees, all plates in one batch",
-            "same; disks turned from aluminum on 2 mm stainless posts"
+            "same; disks turned from aluminum on 2 mm stainless posts, which are not blasted"
           ],
           [
             "Mounting",
@@ -484,7 +484,7 @@
         "assets/PT-05_T3b_square_window.png"
       ],
       "caption": "Left: T3a, the raised 160 mm square on four hidden standoffs above a 300 mm back plate. Right: T3b, the 160 mm window countersunk from the back of a 300 mm front plate, standoffs at the corners.",
-      "notes": "The two targets have opposite edge polarity: front material inside the square, back plate inside the window. The square and the window are slanted 5 degrees so that every edge is slanted relative to the pixel grid for the slanted-edge analysis. The hidden standoffs of T3a sit on a 60 mm square, well inside the shadow of the square at the large gap; the corner standoffs of T3b are shown hidden at the 60 mm gap by the margin computed on the sheet. Drawing scripts part_04_t3a_raised_square.py and part_05_t3b_square_window.py; appendix F."
+      "notes": "The two targets have opposite edge polarity: front material inside the square, back plate inside the window. The square and the window are slanted 5 degrees so that every edge is slanted relative to the pixel grid for the slanted-edge analysis. The hidden standoffs of T3a sit on a 64 mm square, well inside the shadow of the square at the large gap; the corner standoffs of T3b are shown hidden at the 60 mm gap by the margin computed on the sheet. Drawing scripts part_04_t3a_raised_square.py and part_05_t3b_square_window.py; appendix F."
     },
     {
       "id": "feature_plate_drawings",
@@ -538,7 +538,7 @@
         "Each spigot drops into the adapter, its dowel in the keyway, and the ball-lock pin passes; no play",
         "Fabricator's inspection report received for every feature: size, land, bevel and position from the spigot datum, with uncertainties, entered in the as-built record",
         "Every plate flat to 0.05 mm after mounting, checked with the run-out fixture; width and length recorded",
-        "Standoffs measured and grouped; the measured lengths recorded as the gaps",
+        "Standoffs measured and grouped; the gap recorded is the measured body length plus the front part's thickness, checked with the depth rod of the calipers",
         "Every face the sensor sees matte, uniform, the same finish on all plates; posts of T4 not detected in the post check",
         "Each target weighed with its spigot and the adapter, for the robot's tool load data",
         "Screw torques recorded; witness lines marked across the adapter and the flange"

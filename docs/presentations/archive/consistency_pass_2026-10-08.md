@@ -36,3 +36,15 @@ The decks are built from `perf_build_deck_content.json` and `perf_procedure_deck
 ## Coverage
 
 Read in full: the governing procedure's extracted text (1,290 lines: sections 1 to 15, appendices A to F including the drawing table and the points for the shop); both deck content files (every slide's title, table, cards, points, steps, stats, captions, checklist and notes; 333 and 370 lines). The decks' slide text and notes equal the content files by the content check (`check_perf_content.py`, 0 problems); the pptx files were extracted after the final build to confirm (see the note at the end). Generated fields: the cost tables and the cost paragraph of section 1 and the cost slide's figures come from `costs.py`, and the plate sizes, masses, disk space and budget numbers of the procedure from `build.py`; those were checked as well and agree. The drawings (PNG) are images and were not text-extracted; their notes were read when the sheets were reviewed, and gap 4 comes from that review. Not covered: the characterization specification (Claude Docs), which is not among the three documents named; conflict 2 notes one place where it and the procedure disagree.
+
+## Fixes applied (2026-10-08, on Neil's instruction)
+
+- Conflict 1: section 1b and Table 3 (T5 column) now say that T5's spigot sits on the edge bracket PT-07.3 because its back plate is removable.
+- Conflict 2: the procedure's worked chamfer value now matches the specification's Section 3.3 (24 degrees for the centered square at Z_MIN, 29 degrees for the off-axis plates at 800 mm, 39 degrees with the margin); the deck notes already said 39.
+- Conflict 3: the build deck's acceptance item records the gap as the measured standoff body plus the front part's thickness, checked with the depth rod.
+- Conflict 4: the build deck's notes say the hidden standoffs sit on a 64 mm square.
+- Conflict 5: the build deck's flatness row carries the fabricator's check before finishing.
+- Gaps 1 and 2: section 1f (Robot) asks for the spigot fit check and the witness line across adapter and flange.
+- Gap 3: Table 3 points to drawing PT-03 for the standoffs' material (aluminum) and body tolerance (0.05 mm).
+- Gap 4: Table 3 says the 2 mm posts are left as drawn and not blasted, as drawing PT-06 says; the deck's material row says the same.
+Procedure gate: ALL CHECKS PASSED (baseline 2026-10-08_08); deck content, layout and package checks pass.
