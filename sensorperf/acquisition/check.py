@@ -39,7 +39,8 @@ noise of a stereo sensor grows with the square of the distance, the stated resid
 distance limits are the limits at the reference station and are multiplied by
 ``(Z / limit_reference_z_mm) ** limit_depth_exponent`` for a registered target distance Z beyond it
 (never reduced below the stated values). The angle limit is the larger of ``normal_warn_deg`` and
-``normal_sigma_factor`` times the standard error of the fitted plane's tilt; where that exceeds
+``normal_sigma_factor`` times the standard error of the fitted plane's tilt (computed from the number of independent
+samples, the fitted pixels divided by the correlation area of their residuals); where that exceeds
 ``normal_limit_cap_deg`` the tilt is reported as not testable from these frames instead of flagged.
 
 ``pilot_post_check`` implements the rule of Section 13, Step 2 on the first frame of each C pose of
@@ -91,6 +92,12 @@ STRUCTURE_SIZE = 3
 UNREADABLE_ERRORS = (OSError, ValueError, KeyError, EOFError, zlib.error, struct.error)
 """What reading a damaged or empty capture file can raise (the file system, the header, the decompressor, the
 Qt data stream); such a pose is flagged instead of stopping the check."""
+CORRELATION_MAX_LAG_PX = 8
+"""Largest lag (pixels, along each image axis) of the autocorrelation of the fit residuals."""
+CORRELATION_MIN_PIXELS = 4 * (2 * CORRELATION_MAX_LAG_PX + 1) ** 2
+"""Fewest fitted pixels for which the autocorrelation is estimated from the residuals (about four per lag)."""
+CORRELATION_FALLBACK_AREA_PX = (2 * CORRELATION_MAX_LAG_PX + 1) ** 2 / 4.0
+"""Correlation area assumed for a plane with fewer fitted pixels than CORRELATION_MIN_PIXELS (a quarter of the lag window)."""
 MINOR_IN_PLANE_AXIS = 1
 """Index of the minor principal axis in the plane among the singular values of centered plane points (descending:
 major axis, minor axis, normal)."""
@@ -153,7 +160,8 @@ class CheckParameters:
     sensor (sigma_Z grows with Z squared); 0 gives fixed limits."""
     normal_sigma_factor: float = 4.0
     """The tilt limit of a plane is at least this many standard errors of its fitted tilt (from the fit RMS, the
-    spread of the fitted points and their count), so that a plane fitted from few noisy pixels is not judged
+    spread of the fitted points and their effective count N / A_corr, A_corr being the correlation area of the
+    residuals measured from the fit), so that a plane fitted from few noisy pixels is not judged
     against an angle it cannot resolve."""
     normal_limit_cap_deg: float = 10.0
     """When the tilt limit of a plane (normal_sigma_factor standard errors) exceeds this, the fit cannot resolve a
@@ -177,7 +185,15 @@ class PlaneComparison:
     angle_deg: float = float("nan")
     sigma_angle_deg: float = float("nan")
     """Standard error of the fitted plane's tilt (degrees), from the fit RMS, the spread of the fitted points along the
-    minor in-plane axis and their count; infinite when the points do not span a plane."""
+    minor in-plane axis and their effective number; infinite when the points do not span a plane."""
+    correlation_area_px: float = float("nan")
+    """Correlation area A_corr of the residuals (pixels): the sum of the positive values of their normalized 2-D
+    autocorrelation over the lags of +/- CORRELATION_MAX_LAG_PX, at least 1 (1 = independent pixels)."""
+    effective_pixels: float = float("nan")
+    """N_eff = N / A_corr, the number of independent samples the tilt standard error is based on."""
+    correlation_estimated: bool = False
+    """True when A_corr was measured from the residuals; False when too few pixels were fitted and the fallback
+    CORRELATION_FALLBACK_AREA_PX stands in."""
     residual_limit_mm: float = float("nan")
     """The limit on ``rms_mm`` applied to this plane (the stated limit scaled for the depth of the target)."""
     offset_limit_mm: float = float("nan")
@@ -331,13 +347,49 @@ def depth_limit_scale(z_mm: float, params: CheckParameters) -> float:
     return max(LIMIT_SCALE_FLOOR, (z_mm / params.limit_reference_z_mm) ** params.limit_depth_exponent)
 
 
-def tilt_standard_error_deg(points: np.ndarray, rms_mm: float) -> float:
+def residual_correlation_area(residual_map: np.ndarray) -> float:
+    """Correlation area (pixels) of the residuals of a plane fit.
+
+    ``residual_map`` is an (H, W) array of the residuals in mm, NaN outside the fitted pixels. Its autocorrelation at
+    lag (dy, dx) is the mean product of the residuals of the pixel pairs that are both fitted (normalized by the count
+    of such pairs), divided by the mean square residual, so that lag zero is 1. The area is the sum of the positive
+    values over all lags of +/- CORRELATION_MAX_LAG_PX along each axis (the lag-zero 1 included), at least 1: it is how
+    many pixels share one independent sample of the noise (a 4 px block of correlated noise gives about 16 to 25).
+    The products are computed with FFTs of the bounding box of the fitted pixels, padded so that no lag wraps around."""
+    fitted = np.isfinite(residual_map)
+    rows, cols = np.nonzero(fitted)
+    box = (slice(rows.min(), rows.max() + 1), slice(cols.min(), cols.max() + 1))
+    mask = fitted[box].astype(np.float64)
+    values = np.where(fitted[box], residual_map[box], 0.0)
+    shape = (mask.shape[0] + CORRELATION_MAX_LAG_PX, mask.shape[1] + CORRELATION_MAX_LAG_PX)
+
+    def autocorrelate(image: np.ndarray) -> np.ndarray:
+        spectrum = np.fft.rfft2(image, s=shape)
+        return np.fft.irfft2(spectrum * np.conj(spectrum), s=shape)
+
+    products, counts = autocorrelate(values), autocorrelate(mask)
+    variance = products[0, 0] / counts[0, 0]
+    if not variance > 0.0:
+        return 1.0
+    lags = np.arange(-CORRELATION_MAX_LAG_PX, CORRELATION_MAX_LAG_PX + 1)
+    area = 0.0
+    for dy in lags:
+        for dx in lags:
+            count = counts[dy, dx]                      # negative lags wrap to the far end of the padded array
+            if count > 0.5:                             # the counts are integers up to FFT round-off
+                area += max(products[dy, dx] / count / variance, 0.0)
+    return max(area, 1.0)
+
+
+def tilt_standard_error_deg(points: np.ndarray, rms_mm: float, correlation_area_px: float = 1.0) -> float:
     """Standard error (degrees) of the tilt of a plane fitted to ``points`` (N, 3, mm) with residual RMS ``rms_mm``.
 
     The slope of a fitted plane along an in-plane direction has the standard error
-    sigma_slope = rms / (s * sqrt(N)), where s is the RMS spread of the points about their centroid along that
-    direction. The least favorable direction is the minor principal axis in the plane (the second singular value
-    of the centered points, the first being the major axis and the third the normal), so s = s_minor is used.
+    sigma_slope = rms / (s * sqrt(N_eff)), where s is the RMS spread of the points about their centroid along that
+    direction and N_eff = N / correlation_area_px the number of independent samples (N for independent pixels; the
+    depth noise of a stereo sensor is correlated over its matching window, see :func:`residual_correlation_area`).
+    The least favorable direction is the minor principal axis in the plane (the second singular value of the
+    centered points, the first being the major axis and the third the normal), so s = s_minor is used.
     The angle is atan(sigma_slope). Infinite when the points are too few or too collinear to span a plane."""
     count = len(points)
     if count < MIN_PLANE_POINTS:
@@ -346,7 +398,8 @@ def tilt_standard_error_deg(points: np.ndarray, rms_mm: float) -> float:
     s_minor = singular_values[MINOR_IN_PLANE_AXIS] / math.sqrt(count)      # RMS spread along the minor in-plane axis
     if not s_minor > 0.0:
         return float("inf")
-    return math.degrees(math.atan(rms_mm / (s_minor * math.sqrt(count))))
+    effective = count / max(correlation_area_px, 1.0)
+    return math.degrees(math.atan(rms_mm / (s_minor * math.sqrt(effective))))
 
 
 def _compare_plane(mask: np.ndarray, mean_depth: np.ndarray, valid_enough: np.ndarray, camera: PinholeCamera,
@@ -374,7 +427,16 @@ def _compare_plane(mask: np.ndarray, mean_depth: np.ndarray, valid_enough: np.nd
     scale = depth_limit_scale(target_z_mm, params)
     comparison.residual_limit_mm = params.plane_residual_warn_mm * scale
     comparison.offset_limit_mm = params.pose_residual_warn_mm * scale
-    comparison.sigma_angle_deg = tilt_standard_error_deg(points[fit.inliers], fit.rms_mm)
+    inlier_points = points[fit.inliers]
+    comparison.correlation_estimated = len(inlier_points) >= CORRELATION_MIN_PIXELS
+    if comparison.correlation_estimated:
+        residual_map = np.full(mask.shape, np.nan)
+        residual_map[np.nonzero(chosen)[0][fit.inliers], np.nonzero(chosen)[1][fit.inliers]] = fit.distance(inlier_points)
+        comparison.correlation_area_px = residual_correlation_area(residual_map)
+    else:
+        comparison.correlation_area_px = CORRELATION_FALLBACK_AREA_PX
+    comparison.effective_pixels = len(inlier_points) / comparison.correlation_area_px
+    comparison.sigma_angle_deg = tilt_standard_error_deg(inlier_points, fit.rms_mm, comparison.correlation_area_px)
     normal_limit = max(params.normal_warn_deg, params.normal_sigma_factor * comparison.sigma_angle_deg)
     if normal_limit > params.normal_limit_cap_deg:
         comparison.normal_untestable = True                            # no tilt limit: the tilt is not judged
@@ -401,7 +463,8 @@ def _untestable_note(label: str, comparison: PlaneComparison) -> list[str]:
     """The note of a plane whose tilt cannot be tested from the frames of the pose (empty list otherwise)."""
     if not comparison.normal_untestable:
         return []
-    return [f"{label} tilt not testable: {comparison.pixels} px, sigma {comparison.sigma_angle_deg:.1f} deg"]
+    return [f"{label} tilt not testable: {comparison.pixels} px, sigma {comparison.sigma_angle_deg:.1f} deg"
+            + ("" if comparison.correlation_estimated else " (assumed correlation area)")]
 
 
 def pose_name(record: FrameRecord) -> str:
@@ -497,6 +560,10 @@ def check_session(session: Session, check_params: CheckParameters | None = None)
     notes = []
     if session.registration is None:
         notes.append("no registration.json: the manifest's target poses are used as they are")
+    assumed = sum(1 for p in poses for c in (p.front, p.back) if c.pixels and not c.correlation_estimated)
+    if assumed:
+        notes.append(f"{assumed} plane(s) have fewer than {CORRELATION_MIN_PIXELS} fitted pixels, too few to measure the "
+                     f"correlation of their residuals: a correlation area of {CORRELATION_FALLBACK_AREA_PX:g} px is assumed")
     untestable = sum(p.front.normal_untestable + p.back.normal_untestable for p in poses)
     if untestable:
         notes.append(f"the tilt of {untestable} plane(s) is not testable from the frames of its pose (limit above "

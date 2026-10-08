@@ -538,16 +538,16 @@
         {
           "head": "Plane fit or plane position",
           "flag": "residual too large; plane far from the registered one",
-          "text": "A wrongly classified plane, a wrong pose, a wrong registration or a target that moved; the limits are loose on purpose"
+          "text": "A wrongly classified plane, a wrong pose, a wrong registration or a target that moved; the limits are loose on purpose and grow with distance beyond 800 mm"
         },
         {
           "head": "Normal disagrees",
-          "flag": "more than 2 degrees",
-          "text": "A tilted mount or a wrong pose"
+          "flag": "more than 2 degrees, or more than the fit can resolve",
+          "text": "A tilted mount or a wrong pose; where the fit cannot resolve 10 degrees the line says \"tilt not testable\""
         }
       ],
       "caption": "check_captures --session <folder> --out check.json prints one line per pose and a verdict; exit code 0 means nothing flagged. Re-capture flagged poses under a new pose_index; never delete lines from the log.",
-      "notes": "Procedure section 12. Run the quick check as soon as a series is complete, while the robot and targets are still set up, so that a flagged pose can be re-captured without a re-mount. The same tool does the mount check (--mount-check) and the post check of series D (--pilot 800). Its limits are options listed in appendix B."
+      "notes": "Procedure section 12. Run the quick check as soon as a series is complete, while the robot and targets are still set up, so that a flagged pose can be re-captured without a re-mount. The same tool does the mount check (--mount-check) and the post check of series D (--pilot 800). Its limits are options listed in appendix B. The limits scale with distance and with each fit's own precision (procedure section 12), so single frames at the far stations are not flagged for their noise; a clean synthetic session passes the check with no flags."
     },
     {
       "id": "spoilers",

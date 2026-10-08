@@ -338,8 +338,10 @@ sensor grows with the square of the distance, the plane-residual and pose-offset
 `max(normal_warn_deg, normal_sigma_factor * sigma)`, where sigma = atan(rms / (s_minor sqrt(N))) is the standard error of the fitted slope
 (s_minor the RMS spread of the fitted points along the minor in-plane axis, N their number); when that limit exceeds
 `normal_limit_cap_deg` the tilt cannot be judged from the frames of the pose, so no tilt flag is raised and the pose carries the note
-"tilt not testable" (`normal_untestable` in check.json, which also records the limits applied to every plane). The standard error assumes
-independent pixels; the synthetic sensor's noise is correlated over its 4 px blocks, so it is optimistic for planes of a few hundred pixels.
+"tilt not testable" (`normal_untestable` in check.json, which also records the limits applied to every plane). The depth noise
+is correlated over the matching window, so N is replaced by N_eff = N / A_corr, where the correlation area A_corr is the sum of the
+positive values of the normalized 2-D autocorrelation of the fit residuals over lags of +/- 8 px (at least 1; measured from the data, recorded
+per plane in check.json together with N_eff); planes with fewer than 4 * 17^2 fitted pixels cannot be measured and use A_corr = 17^2 / 4.
 
 ### acquisition/mount_check.py
 ```python

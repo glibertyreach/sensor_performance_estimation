@@ -17,7 +17,8 @@ import numpy as np
 import pytest
 
 from sensorperf.acquisition.check import (
-    FLAG_BACK_OFFSET, FLAG_FRONT_OFFSET, CheckParameters, check_session, depth_limit_scale, tilt_standard_error_deg,
+    CORRELATION_MAX_LAG_PX, FLAG_BACK_OFFSET, FLAG_FRONT_OFFSET, CheckParameters, check_session, depth_limit_scale,
+    residual_correlation_area, tilt_standard_error_deg,
 )
 from sensorperf.cli import check_captures as check_cli
 from sensorperf.cli import simulate as simulate_cli
@@ -27,10 +28,6 @@ from sensorperf.parameters import CharacterizationParameters
 
 SIMULATION_SEED = 3
 """Seed of the synthetic session."""
-CLEAN_STATION_LIMIT_MM = 1200.0
-"""Stations up to this distance are judged by the limits as stated or scaled; at the farthest station (1,600 mm) the
-pixel noise of the synthetic sensor is correlated over its 4 px blocks, which the independent-pixel standard error
-of the tilt does not know, so the clean-session test leaves that station out."""
 GROSS_SHIFT_MM = 50.0
 """The registered target of the corrupted pose is moved this far along the camera z axis."""
 CORRUPTED_STATION_MM = 800.0
@@ -57,12 +54,6 @@ def quick_session(tmp_path_factory) -> Session:
     root = tmp_path_factory.mktemp("quick_cd")
     assert simulate_cli.main(["--out", str(root), "--quick", "--series", "C", "D", "--seed", str(SIMULATION_SEED)]) == 0
     return Session.load(root)
-
-
-def near_stations(session: Session) -> Session:
-    """The session without the farthest station (see CLEAN_STATION_LIMIT_MM)."""
-    return dataclasses.replace(
-        session, records=[r for r in session.records if r.station_z_mm <= CLEAN_STATION_LIMIT_MM])
 
 
 def test_depth_limit_scale_follows_the_stereo_noise_law_and_never_tightens():
@@ -96,6 +87,27 @@ def test_tilt_standard_error_matches_the_scatter_of_fitted_slopes():
     assert math.isinf(tilt_standard_error_deg(line, 1.0))                                      # collinear: no plane
 
 
+BLOCK_PX = 4
+"""Side of the blocks of the correlated-noise residual map (the indicative sensor's noise block)."""
+MAP_SIDE_PX = 120
+"""Side of the square residual maps of the correlation-area test."""
+
+
+def test_correlation_area_is_one_for_independent_pixels_and_grows_with_the_noise_block():
+    """The correlation area of white residuals is about 1 (a little above, from the positive noise of the 288 other lags);
+    residuals constant over 4 x 4 px blocks give about the block area, 16; a gap in the fitted pixels does not matter."""
+    rng = np.random.default_rng(SIMULATION_SEED)
+    white = rng.normal(0.0, 1.0, (MAP_SIDE_PX, MAP_SIDE_PX))
+    blocks = np.kron(rng.normal(0.0, 1.0, (MAP_SIDE_PX // BLOCK_PX,) * 2), np.ones((BLOCK_PX, BLOCK_PX)))
+    assert 1.0 <= residual_correlation_area(white) < 2.5
+    area = residual_correlation_area(blocks)
+    assert 0.6 * BLOCK_PX ** 2 < area < 1.6 * BLOCK_PX ** 2
+    gapped = blocks.copy()
+    gapped[:, MAP_SIDE_PX // 3: MAP_SIDE_PX // 2] = np.nan
+    assert residual_correlation_area(gapped) == pytest.approx(area, rel=0.3)
+    assert CORRELATION_MAX_LAG_PX == 8
+
+
 def corrupted(session: Session, shift_mm: float) -> tuple[Session, str]:
     """The session with the registered target of one pose at the reference station moved by shift_mm along z in every
     frame of that pose (a wrong registration); returns it and the name of the corrupted pose."""
@@ -115,7 +127,7 @@ def test_clean_session_passes_and_a_gross_error_is_still_flagged(quick_session: 
     """A clean synthetic session flags nothing (and check.json records the limits and the new parameters); moving the
     registered target of one pose by 50 mm along z, or swapping its target, flags that pose and only that pose."""
     started = time.time()
-    clean = near_stations(quick_session)
+    clean = quick_session
     report = check_session(clean)
     assert report.to_dict()["n_flagged"] == 0, [(p.name, p.flags) for p in report.flagged]
     parameters = report.to_dict()["parameters"]
@@ -127,6 +139,7 @@ def test_clean_session_passes_and_a_gross_error_is_still_flagged(quick_session: 
     assert entry["residual_limit_mm"] >= CheckParameters().plane_residual_warn_mm
     assert entry["offset_limit_mm"] >= CheckParameters().pose_residual_warn_mm
     assert entry["normal_limit_deg"] >= CheckParameters().normal_warn_deg and entry["normal_untestable"] is False
+    assert entry["correlation_area_px"] >= 1.0 and entry["effective_pixels"] <= fitted.front.pixels
 
     broken, name = corrupted(clean, GROSS_SHIFT_MM)
     broken_report = check_session(broken)

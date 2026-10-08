@@ -495,8 +495,8 @@ It prints one line per pose and a verdict: the number of frames, the valid fract
 - Feature outline crossing the image border: the target is partly out of view, so a disk, cutout, or square is cut off. The pose is unusable; ask the engineer to re-plan it slightly inward.
 - Registered target does not appear in the field of view: the manifest or the registration is wrong for that pose.
 - Front or back plane fit residual too large: the plane was classified wrongly, or the pose is wrong.
-- Front or back plane far from the registered plane: a wrong registration or a target that moved. The limits are loose on purpose: the sensor's own bias is what the analyses measure.
-- Front or back plane normal disagrees with the registered normal by more than 2 degrees: a tilted mount or a wrong pose.
+- Front or back plane far from the registered plane: a wrong registration or a target that moved. The limits are loose on purpose: the sensor's own bias is what the analyses measure. Beyond the reference station the residual and distance limits grow with the square of the distance, as the depth noise does, so a single frame at the far stations is not flagged for its noise.
+- Front or back plane normal disagrees with the registered normal by more than 2 degrees, or by more than four times the precision the fit allows (from its residual, its area and the spatial correlation of the noise), whichever is larger: a tilted mount or a wrong pose. Where that precision is worse than 10 degrees, as for the disks of T4 at the far stations, the line says "tilt not testable" and the tilt raises no flag; the offset and residual of that plane are still checked.
 
 Re-capture flagged poses after fixing the cause. Do not delete the lines from the log; add corrected lines with a new `pose_index`. The tool's exit code is 0 when nothing is flagged, 1 when something is, and 2 when it cannot read the session. The limits are options of the tool (appendix B).
 
