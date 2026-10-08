@@ -806,3 +806,11 @@ Executed in the live specification after Neil's decision to eliminate the 400 mm
 - Section 9 budget: A row 72 poses, 6,000 frames, 0.23 h; totals 7,202 poses, 42,920 frames, 7.19 h (refresh_spec.py invariants updated).
 - Section 10, Step 10 and the Section 15 table and Limitations paragraph: tilt stations 476, 800 and 1600 mm.
 - Gate: ALL CHECKS PASSED against the 2026-10-07 archive, sections 2, 3.2, 5, 6, 9, 10, 15 changed as intended. Code: 254 tests pass (agent report; confirmed below when the local run finishes).
+
+## Pre-distribution dry run (2026-10-08, rev 125)
+
+A planner dry run at the indicative geometry and a full-resolution synthetic session (demonstration plan, 367 poses, 460 frames) through check_captures and all six analyses, made before distributing the three procedure documents:
+
+- Planner: 0 skipped poses, 21 field positions pulled inward (logged), the tilt sweep moved from 400 to 476 mm. It also showed that the 300 × 300 mm edge plates stand taller than the field at 400 mm (about 372 × 279 mm), which the planner allows because it judges fit by the features with their bands. Section 3.2 now says so in place of "each plate must fit the field of view at the near limit" (rev 125; gate passes, section 3.2 changed); the procedure's Section 2 says the same with the field size as derived values.
+- Analyses: all six run to forward_model_parameters.json on the synthetic session.
+- check_captures flagged 99 of 367 poses, all single-frame poses of T4 and T5 at 1131 and 1600 mm: its fixed limits (3 mm residual, 2° normal) do not scale with the Z² growth of the depth noise, and the tilt of a plane fitted from a few hundred pixels is not testable. Being fixed in the code: residual limits scale as (Z / 800 mm)², the tilt limit follows the fit's own precision, untestable tilts are reported rather than flagged; a regression test runs a clean synthetic session through the check.
