@@ -34,7 +34,13 @@ manifest's ``target_pose_camera`` of the first frame of the pose.
 A pose is flagged when a threshold of :class:`CheckParameters` is exceeded. The
 thresholds are for gross errors (wrong target, wrong registration, target
 moved), not for the sensor's own noise and bias, which are what the analyses
-measure; the defaults are therefore loose (millimeters, not tenths).
+measure; the defaults are therefore loose (millimeters, not tenths). Because the depth
+noise of a stereo sensor grows with the square of the distance, the stated residual and
+distance limits are the limits at the reference station and are multiplied by
+``(Z / limit_reference_z_mm) ** limit_depth_exponent`` for a registered target distance Z beyond it
+(never reduced below the stated values). The angle limit is the larger of ``normal_warn_deg`` and
+``normal_sigma_factor`` times the standard error of the fitted plane's tilt; where that exceeds
+``normal_limit_cap_deg`` the tilt is reported as not testable from these frames instead of flagged.
 
 ``pilot_post_check`` implements the rule of Section 13, Step 2 on the first frame of each C pose of
 the reference station and reports how often a bare support post of the disk plate is detected (it
@@ -55,7 +61,7 @@ from typing import Any, Sequence
 import numpy as np
 from scipy import ndimage
 
-from sensorperf.features.planes import PlaneFit, fit_plane_robust, plane_depth_image
+from sensorperf.features.planes import MIN_PLANE_POINTS, PlaneFit, fit_plane_robust, plane_depth_image
 from sensorperf.geometry.camera import PinholeCamera
 from sensorperf.geometry.targets import (
     FEATURE_BLANK, FEATURE_POST, SURFACE_BACK, SURFACE_FRONT, SURFACE_NONE,
@@ -85,6 +91,9 @@ STRUCTURE_SIZE = 3
 UNREADABLE_ERRORS = (OSError, ValueError, KeyError, EOFError, zlib.error, struct.error)
 """What reading a damaged or empty capture file can raise (the file system, the header, the decompressor, the
 Qt data stream); such a pose is flagged instead of stopping the check."""
+MINOR_IN_PLANE_AXIS = 1
+"""Index of the minor principal axis in the plane among the singular values of centered plane points (descending:
+major axis, minor axis, normal)."""
 FRAME_SEPARATOR = "_f"
 """Separator of the pose part and the frame index in a Section 9 file name."""
 
@@ -101,6 +110,14 @@ FLAG_BACK_RMS = "back plane fit residual too large"
 FLAG_BACK_OFFSET = "back plane is far from the registered back plane"
 FLAG_BACK_TILT = "back plane normal disagrees with the registered normal"
 
+LIMIT_SCALE_FLOOR = 1.0
+"""The depth scaling of the residual limits never goes below this (the stated limits are the tightest)."""
+SURFACE_FRONT_LABEL = "front"
+SURFACE_BACK_LABEL = "back"
+"""Names of the two surfaces in the notes of a pose."""
+NOTE_SEPARATOR = "; "
+"""Separator of the flags and notes on a printed pose line."""
+
 
 # ---------------------------------------------------------------------------
 # Parameters and report records
@@ -116,13 +133,31 @@ class CheckParameters:
     """Reads this close to the image border count as border contact, and a feature outline this close to it
     (or beyond) counts as cut off."""
     plane_residual_warn_mm: float = 3.0
-    """Flag a plane whose fit RMS exceeds this. Loose on purpose: a single frame at Z_MAX has a sigma_t of
-    millimeters with the indicative sensor; the check is for gross errors such as a wrongly classified surface."""
+    """Flag a plane whose fit RMS exceeds this at the reference station (scaled with depth beyond it, see
+    ``limit_depth_exponent``). Loose on purpose: a single frame at Z_MAX has a sigma_t of millimeters with the
+    indicative sensor; the check is for gross errors such as a wrongly classified surface."""
     pose_residual_warn_mm: float = 3.0
-    """Flag a plane whose signed distance to the registered plane exceeds this (the sensor's own depth bias is
-    what the analyses measure, so this catches a wrong registration or a target that moved, not the bias)."""
+    """Flag a plane whose signed distance to the registered plane exceeds this at the reference station (scaled
+    with depth beyond it; the sensor's own depth bias is what the analyses measure, so this catches a wrong
+    registration or a target that moved, not the bias)."""
     normal_warn_deg: float = 2.0
-    """Flag a plane whose normal differs from the registered one by more than this."""
+    """Flag a plane whose normal differs from the registered one by more than this, or by more than
+    ``normal_sigma_factor`` standard errors of the fitted tilt when that is larger (the angle limit is never
+    tighter than this value)."""
+    limit_reference_z_mm: float = CharacterizationParameters().z_reference_mm
+    """Registered target distance at which the residual limits hold as stated (the reference station, Z_REFERENCE_MM;
+    the command line takes it from the session's parameters.json unless given)."""
+    limit_depth_exponent: float = 2.0
+    """Exponent of the depth scaling of the residual limits: the plane-residual and pose-offset limits are multiplied
+    by max(1, (Z / limit_reference_z_mm) ** limit_depth_exponent). The default 2 is the depth-noise law of a stereo
+    sensor (sigma_Z grows with Z squared); 0 gives fixed limits."""
+    normal_sigma_factor: float = 4.0
+    """The tilt limit of a plane is at least this many standard errors of its fitted tilt (from the fit RMS, the
+    spread of the fitted points and their count), so that a plane fitted from few noisy pixels is not judged
+    against an angle it cannot resolve."""
+    normal_limit_cap_deg: float = 10.0
+    """When the tilt limit of a plane (normal_sigma_factor standard errors) exceeds this, the fit cannot resolve a
+    tilt worth testing: no tilt flag is raised and the plane is reported as 'tilt not testable'."""
     classification_margin_px: int = 4
     """The expected-front and expected-back pixel masks are eroded by this many pixels before a plane is fitted
     (not at the image border), because reads next to a surface boundary mix the two surfaces."""
@@ -140,6 +175,17 @@ class PlaneComparison:
     offset_mm: float = float("nan")
     """Signed distance of the fitted plane to the registered plane at the fit centroid; positive = nearer the sensor."""
     angle_deg: float = float("nan")
+    sigma_angle_deg: float = float("nan")
+    """Standard error of the fitted plane's tilt (degrees), from the fit RMS, the spread of the fitted points along the
+    minor in-plane axis and their count; infinite when the points do not span a plane."""
+    residual_limit_mm: float = float("nan")
+    """The limit on ``rms_mm`` applied to this plane (the stated limit scaled for the depth of the target)."""
+    offset_limit_mm: float = float("nan")
+    """The limit on ``|offset_mm|`` applied to this plane (the stated limit scaled for the depth of the target)."""
+    normal_limit_deg: float | None = None
+    """The limit on ``angle_deg`` applied to this plane; None when the plane was not fitted or its tilt is not testable."""
+    normal_untestable: bool = False
+    """True when the fit cannot resolve a tilt worth testing (limit above ``normal_limit_cap_deg``); no tilt flag is raised."""
 
 
 @dataclass
@@ -158,6 +204,10 @@ class PoseCheck:
     front: PlaneComparison = field(default_factory=PlaneComparison)
     back: PlaneComparison = field(default_factory=PlaneComparison)
     flags: list[str] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+    """Information that does not flag the pose, such as a tilt that could not be tested."""
+    target_z_mm: float = float("nan")
+    """Registered distance of the target (z of its pose in the camera frame), the Z of the limit scaling."""
 
 
 @dataclass
@@ -197,7 +247,7 @@ class CheckReport:
                 f"{'yes' if p.touches_border else 'no':>6} {p.features_cut:>3d} {_number(p.front.rms_mm, '.3f'):>7} "
                 f"{_number(p.front.offset_mm, '.3f'):>7} {_number(p.front.angle_deg, '.2f'):>6} "
                 f"{_number(p.back.rms_mm, '.3f'):>7} {_number(p.back.offset_mm, '.3f'):>7} "
-                f"{_number(p.back.angle_deg, '.2f'):>6}  {'; '.join(p.flags) if p.flags else 'ok'}")
+                f"{_number(p.back.angle_deg, '.2f'):>6}  {_flags_text(p)}")
         return "\n".join(lines)
 
     def to_dict(self) -> dict[str, Any]:
@@ -206,8 +256,8 @@ class CheckReport:
             "parameters": asdict(self.parameters),
             "poses": [{"pose": p.name, "target_id": p.target_id, "gap_mm": p.gap_mm, "frames": p.frames,
                        "valid_fraction": p.valid_fraction, "touches_border": p.touches_border,
-                       "features_cut": p.features_cut, "front": asdict(p.front), "back": asdict(p.back),
-                       "flags": p.flags} for p in self.poses],
+                       "features_cut": p.features_cut, "target_z_mm": p.target_z_mm, "front": asdict(p.front),
+                       "back": asdict(p.back), "flags": p.flags, "notes": p.notes} for p in self.poses],
             "notes": self.notes, "n_poses": len(self.poses), "n_flagged": len(self.flagged),
             "verdict": self.verdict()})
 
@@ -216,6 +266,12 @@ class CheckReport:
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         Path(path).write_text(json.dumps(self.to_dict(), indent=REPORT_JSON_INDENT), encoding="utf-8")
         return Path(path)
+
+
+def _flags_text(pose: PoseCheck) -> str:
+    """The last column of a pose line: the flags, or ok, followed by the notes of the pose in parentheses."""
+    text = NOTE_SEPARATOR.join(pose.flags) if pose.flags else "ok"
+    return f"{text} ({NOTE_SEPARATOR.join(pose.notes)})" if pose.notes else text
 
 
 def _number(value: float, spec: str) -> str:
@@ -265,10 +321,41 @@ def features_cut_by_border(target: TwoPlaneTarget, camera: PinholeCamera, pose, 
     return cut
 
 
+def depth_limit_scale(z_mm: float, params: CheckParameters) -> float:
+    """Factor of the residual limits at a registered target distance: max(1, (Z / limit_reference_z_mm) ** exponent).
+    The depth noise of a stereo sensor grows with Z squared, so a fixed millimeter limit would flag normal
+    behavior at the far stations; the factor is never below 1, so the stated limits are the tightest. A target
+    distance that is not a positive finite number (nothing to scale with) leaves the limits as stated."""
+    if not (np.isfinite(z_mm) and z_mm > 0.0 and params.limit_reference_z_mm > 0.0):
+        return LIMIT_SCALE_FLOOR
+    return max(LIMIT_SCALE_FLOOR, (z_mm / params.limit_reference_z_mm) ** params.limit_depth_exponent)
+
+
+def tilt_standard_error_deg(points: np.ndarray, rms_mm: float) -> float:
+    """Standard error (degrees) of the tilt of a plane fitted to ``points`` (N, 3, mm) with residual RMS ``rms_mm``.
+
+    The slope of a fitted plane along an in-plane direction has the standard error
+    sigma_slope = rms / (s * sqrt(N)), where s is the RMS spread of the points about their centroid along that
+    direction. The least favorable direction is the minor principal axis in the plane (the second singular value
+    of the centered points, the first being the major axis and the third the normal), so s = s_minor is used.
+    The angle is atan(sigma_slope). Infinite when the points are too few or too collinear to span a plane."""
+    count = len(points)
+    if count < MIN_PLANE_POINTS:
+        return float("inf")
+    singular_values = np.linalg.svd(points - points.mean(axis=0), compute_uv=False)
+    s_minor = singular_values[MINOR_IN_PLANE_AXIS] / math.sqrt(count)      # RMS spread along the minor in-plane axis
+    if not s_minor > 0.0:
+        return float("inf")
+    return math.degrees(math.atan(rms_mm / (s_minor * math.sqrt(count))))
+
+
 def _compare_plane(mask: np.ndarray, mean_depth: np.ndarray, valid_enough: np.ndarray, camera: PinholeCamera,
-                   registered: tuple[np.ndarray, np.ndarray], params: CheckParameters) -> PlaneComparison:
+                   registered: tuple[np.ndarray, np.ndarray], params: CheckParameters,
+                   target_z_mm: float = float("nan")) -> PlaneComparison:
     """Fit a plane to the mean points under the (eroded) mask and compare it with the registered plane
-    (point, unit normal toward the sensor). Returns pixels = 0 and NaNs when too few pixels are available."""
+    (point, unit normal toward the sensor), and set the limits that apply to it: the residual and offset limits
+    scaled for the depth ``target_z_mm`` of the target, and the tilt limit from the precision of the fit.
+    Returns pixels = 0 and NaNs when too few pixels are available."""
     eroded = ndimage.binary_erosion(mask, structure=np.ones((STRUCTURE_SIZE, STRUCTURE_SIZE), dtype=bool),
                                     iterations=params.classification_margin_px, border_value=1) \
         if params.classification_margin_px > 0 else mask
@@ -283,20 +370,38 @@ def _compare_plane(mask: np.ndarray, mean_depth: np.ndarray, valid_enough: np.nd
     comparison.rms_mm = fit.rms_mm
     comparison.offset_mm = float(normal @ (fit.point - point))
     comparison.angle_deg = float(np.degrees(np.arccos(np.clip(fit.normal @ normal, -1.0, 1.0))))
+    # Limits: the residual limits grow with the depth noise; the tilt limit follows what this fit can resolve.
+    scale = depth_limit_scale(target_z_mm, params)
+    comparison.residual_limit_mm = params.plane_residual_warn_mm * scale
+    comparison.offset_limit_mm = params.pose_residual_warn_mm * scale
+    comparison.sigma_angle_deg = tilt_standard_error_deg(points[fit.inliers], fit.rms_mm)
+    normal_limit = max(params.normal_warn_deg, params.normal_sigma_factor * comparison.sigma_angle_deg)
+    if normal_limit > params.normal_limit_cap_deg:
+        comparison.normal_untestable = True                            # no tilt limit: the tilt is not judged
+    else:
+        comparison.normal_limit_deg = normal_limit
     return comparison
 
 
 def _plane_flags(comparison: PlaneComparison, params: CheckParameters, rms_flag: str, offset_flag: str,
                  tilt_flag: str) -> list[str]:
-    """The flags a plane comparison earns against the thresholds."""
+    """The flags a plane comparison earns against the limits stored in it (see :func:`_compare_plane`)."""
     flags = []
-    if np.isfinite(comparison.rms_mm) and comparison.rms_mm > params.plane_residual_warn_mm:
+    if np.isfinite(comparison.rms_mm) and comparison.rms_mm > comparison.residual_limit_mm:
         flags.append(rms_flag)
-    if np.isfinite(comparison.offset_mm) and abs(comparison.offset_mm) > params.pose_residual_warn_mm:
+    if np.isfinite(comparison.offset_mm) and abs(comparison.offset_mm) > comparison.offset_limit_mm:
         flags.append(offset_flag)
-    if np.isfinite(comparison.angle_deg) and comparison.angle_deg > params.normal_warn_deg:
+    if (np.isfinite(comparison.angle_deg) and comparison.normal_limit_deg is not None
+            and comparison.angle_deg > comparison.normal_limit_deg):
         flags.append(tilt_flag)
     return flags
+
+
+def _untestable_note(label: str, comparison: PlaneComparison) -> list[str]:
+    """The note of a plane whose tilt cannot be tested from the frames of the pose (empty list otherwise)."""
+    if not comparison.normal_untestable:
+        return []
+    return [f"{label} tilt not testable: {comparison.pixels} px, sigma {comparison.sigma_angle_deg:.1f} deg"]
 
 
 def pose_name(record: FrameRecord) -> str:
@@ -318,6 +423,7 @@ def check_pose(session: Session, records: Sequence[FrameRecord], params: CheckPa
     # The target as mounted: the manifest's gap (None = no back plate, e.g. the open-background variant).
     target = template.with_gap(first.gap_mm)
     pose = first.target_pose_camera
+    check.target_z_mm = float(pose.translation[2])         # the registered distance that scales the residual limits
     depth_sum = depth_count = expected = None
     camera: PinholeCamera | None = None
     valid_fractions: list[float] = []
@@ -354,14 +460,18 @@ def check_pose(session: Session, records: Sequence[FrameRecord], params: CheckPa
     if check.features_cut:
         check.flags.append(f"{FLAG_FEATURE_CUT} ({check.features_cut})")
     front_mask = expected == SURFACE_FRONT
-    check.front = _compare_plane(front_mask, mean_depth, valid_enough, camera, target.front_plane_camera(pose), params)
+    check.front = _compare_plane(front_mask, mean_depth, valid_enough, camera, target.front_plane_camera(pose), params,
+                                 check.target_z_mm)
     check.flags += _plane_flags(check.front, params, FLAG_FRONT_RMS, FLAG_FRONT_OFFSET, FLAG_FRONT_TILT)
+    check.notes += _untestable_note(SURFACE_FRONT_LABEL, check.front)
     if check.front.pixels < params.min_plane_pixels and _eroded_count(front_mask, params) >= params.min_plane_pixels:
         check.flags.append(FLAG_FRONT_UNREAD)
     if target.gap_mm is not None:
         back_mask = expected == SURFACE_BACK
-        check.back = _compare_plane(back_mask, mean_depth, valid_enough, camera, target.back_plane_camera(pose), params)
+        check.back = _compare_plane(back_mask, mean_depth, valid_enough, camera, target.back_plane_camera(pose), params,
+                                    check.target_z_mm)
         check.flags += _plane_flags(check.back, params, FLAG_BACK_RMS, FLAG_BACK_OFFSET, FLAG_BACK_TILT)
+        check.notes += _untestable_note(SURFACE_BACK_LABEL, check.back)
     return check
 
 
@@ -376,14 +486,22 @@ def _eroded_count(mask: np.ndarray, params: CheckParameters) -> int:
 def check_session(session: Session, check_params: CheckParameters | None = None) -> CheckReport:
     """The quick-look check of every pose of the session (module docstring): frames, valid fraction, border
     contact, the front-plane fit against the registered front plane (RMS, distance, angle) and the back-plane
-    fit where the target has a back plate and enough pixels read it, with the flags of ``check_params``.
+    fit where the target has a back plate and enough pixels read it, with the flags of ``check_params`` (the
+    residual and distance limits scaled for the depth of each target, the tilt limit from the precision of each fit).
     Frames are streamed one at a time, so memory use does not grow with the frame count."""
-    check_params = CheckParameters() if check_params is None else check_params
+    if check_params is None:
+        # Without options the reference station of the limits is the session's own (parameters.json, else the default).
+        check_params = CheckParameters(limit_reference_z_mm=session.params.z_reference_mm)
     groups = group_by_pose(session.records)
     poses = [check_pose(session, records, check_params) for records in groups.values()]
     notes = []
     if session.registration is None:
         notes.append("no registration.json: the manifest's target poses are used as they are")
+    untestable = sum(p.front.normal_untestable + p.back.normal_untestable for p in poses)
+    if untestable:
+        notes.append(f"the tilt of {untestable} plane(s) is not testable from the frames of its pose (limit above "
+                     f"{check_params.normal_limit_cap_deg:g} deg, see the notes of the pose in check.json); the offset "
+                     "and residual of those planes are still checked")
     return CheckReport(poses=poses, parameters=check_params, notes=notes)
 
 

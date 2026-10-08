@@ -321,7 +321,8 @@ def build_manifest(pose_log_csv, captures_dir, plan_csv, registration: Registrat
 ### acquisition/check.py
 ```python
 @dataclass(frozen=True)
-class CheckParameters: min_valid_fraction, border_margin_px, plane_residual_warn_mm, pose_residual_warn_mm, normal_warn_deg
+class CheckParameters: min_valid_fraction, border_margin_px, plane_residual_warn_mm, pose_residual_warn_mm, normal_warn_deg,
+    # limit_reference_z_mm, limit_depth_exponent, normal_sigma_factor, normal_limit_cap_deg
 def check_session(session: Session, check_params) -> CheckReport   # per pose: frames, valid fraction, border contact,
     # front-plane fit vs registered front plane (distance and angle), back-plane fit where a back plate exists
 def pilot_post_check(session, params, geometry, station_z_mm=None, subseries=("jitter",)) -> dict   # Section 8, Step 1
@@ -329,6 +330,16 @@ def pilot_post_check(session, params, geometry, station_z_mm=None, subseries=("j
     # at Z_REFERENCE_MM; per (plate, gap) the blank-site threshold tau and the fraction of post-only sites detected (should
     # be about the false-alarm target). The pilot D_50 / D_0 and the level selection from them no longer exist.
 ```
+
+The limits of the capture check are for gross errors and depend on what each pose can show. Because the depth noise of a stereo
+sensor grows with the square of the distance, the plane-residual and pose-offset limits are the stated values multiplied by
+`max(1, (Z / limit_reference_z_mm) ** limit_depth_exponent)`, with Z the registered target distance (default reference
+`Z_REFERENCE_MM` of the session, exponent 2), so they are never tighter than stated. The tilt limit of a plane is
+`max(normal_warn_deg, normal_sigma_factor * sigma)`, where sigma = atan(rms / (s_minor sqrt(N))) is the standard error of the fitted slope
+(s_minor the RMS spread of the fitted points along the minor in-plane axis, N their number); when that limit exceeds
+`normal_limit_cap_deg` the tilt cannot be judged from the frames of the pose, so no tilt flag is raised and the pose carries the note
+"tilt not testable" (`normal_untestable` in check.json, which also records the limits applied to every plane). The standard error assumes
+independent pixels; the synthetic sensor's noise is correlated over its 4 px blocks, so it is optimistic for planes of a few hundred pixels.
 
 ### acquisition/mount_check.py
 ```python

@@ -20,6 +20,13 @@ What it checks, per pose (all frames of one commanded pose)
                     normals.
     back plane      the same for the back plate, where the target has one.
 
+The limits are for gross errors and loose on purpose. The depth noise of a stereo sensor grows with the square of
+the distance, so the residual and distance limits are multiplied by (Z / --limit-reference-z-mm) to the power
+--limit-depth-exponent for a target farther than the reference (never reduced below the stated values). The
+tilt limit of a plane is at least --normal-sigma-factor standard errors of its fitted tilt; where that exceeds
+--normal-limit-cap-deg the tilt is not testable from the frames of the pose (noted, not flagged). The limits applied
+are written to the JSON report.
+
 ``--pilot Z`` instead runs the post check of Section 8, Step 1 (formerly the D pilot), which keeps only the post
 check (the rule of Section 13, Step 2 on the first frame of each C pose at station Z, normally
 the reference station): per disk plate and gap the threshold and the fraction of post-only
@@ -84,11 +91,28 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--border-margin-px", type=int, default=d.border_margin_px,
                         help="reads and feature outlines within this many pixels of the border count as border contact")
     parser.add_argument("--plane-residual-warn-mm", type=float, default=d.plane_residual_warn_mm,
-                        help="flag a plane whose fit RMS exceeds this")
+                        help="flag a plane whose fit RMS exceeds this (mm) at the reference distance; farther away the "
+                             "limit grows with the depth noise (see --limit-depth-exponent)")
     parser.add_argument("--pose-residual-warn-mm", type=float, default=d.pose_residual_warn_mm,
-                        help="flag a plane whose distance to the registered plane exceeds this")
+                        help="flag a plane whose distance to the registered plane exceeds this (mm) at the reference "
+                             "distance; farther away the limit grows with the depth noise (see --limit-depth-exponent)")
     parser.add_argument("--normal-warn-deg", type=float, default=d.normal_warn_deg,
-                        help="flag a plane whose normal differs from the registered one by more than this")
+                        help="flag a plane whose normal differs from the registered one by more than this (degrees), "
+                             "or by more than --normal-sigma-factor standard errors of the fitted tilt when that is larger")
+    parser.add_argument("--limit-reference-z-mm", type=float, default=None, metavar="MM",
+                        help="target distance (mm) up to which the residual and distance limits hold as stated; beyond "
+                             "it they grow with depth (default: Z_REFERENCE_MM of the session's parameters.json, "
+                             f"{d.limit_reference_z_mm:g})")
+    parser.add_argument("--limit-depth-exponent", type=float, default=d.limit_depth_exponent,
+                        help="the residual and distance limits are multiplied by (Z / reference distance) to this power "
+                             "beyond the reference distance, never below 1; 2 is the depth-noise law of a stereo sensor, "
+                             "0 keeps the limits fixed")
+    parser.add_argument("--normal-sigma-factor", type=float, default=d.normal_sigma_factor,
+                        help="a plane's tilt limit is at least this many standard errors of its fitted tilt, so that a "
+                             "plane fitted from few noisy pixels is not judged against an angle it cannot resolve")
+    parser.add_argument("--normal-limit-cap-deg", type=float, default=d.normal_limit_cap_deg,
+                        help="where a plane's tilt limit would exceed this (degrees) its tilt cannot be tested from the "
+                             "frames of that pose: no tilt flag is raised and the pose line says 'tilt not testable'")
     parser.add_argument("--classification-margin-px", type=int, default=d.classification_margin_px,
                         help="erosion of the expected front and back masks before a plane is fitted")
     parser.add_argument("--min-plane-pixels", type=int, default=d.min_plane_pixels,
@@ -226,7 +250,11 @@ def main(argv: list[str] | None = None) -> int:
         min_valid_fraction=args.min_valid_fraction, border_margin_px=args.border_margin_px,
         plane_residual_warn_mm=args.plane_residual_warn_mm, pose_residual_warn_mm=args.pose_residual_warn_mm,
         normal_warn_deg=args.normal_warn_deg, classification_margin_px=args.classification_margin_px,
-        min_plane_pixels=args.min_plane_pixels)
+        min_plane_pixels=args.min_plane_pixels,
+        limit_reference_z_mm=session.params.z_reference_mm if args.limit_reference_z_mm is None
+        else args.limit_reference_z_mm,
+        limit_depth_exponent=args.limit_depth_exponent, normal_sigma_factor=args.normal_sigma_factor,
+        normal_limit_cap_deg=args.normal_limit_cap_deg)
     try:
         report = check_session(session, params)
     except UNREADABLE_ERRORS as error:
