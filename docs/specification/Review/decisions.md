@@ -794,3 +794,15 @@ technician records each plate's flatness, width and length. Executed (document r
 Section 3 lead paragraph and the as-built record paragraph of Section 3.3 rewritten accordingly. The technician
 procedure follows in the procedure-docs pass.
 
+
+## Procedure-docs pass: T2 board, ramp quanta, tilt substitution, edge plate size (2026-10-08, rev 124)
+
+Executed in the live specification after Neil's decision to eliminate the 400 mm noise plate (procedure_docs_decisions.md):
+
+- Section 2 table: NOISE_PLATE_SIZE_MM 400 × 400 → 200 × 150 (the stage-1 calibration board on its board adapter, at least 6 mm thick); RAMP_QUANTA 4 → 3 (my refinement of the 2 first proposed: 2 quanta left too little of the ramp inside the border rows at 1600 mm; 3 gives about 22 rows per quantum there); new rows EDGE_PLATE_SIZE_MM (derived, 300 × 300 at the indicative geometry) and EDGE_PLATE_SIZE_STEP_MM (10 mm).
+- Section 3.2: T2 row and T3a row (hidden standoffs set G); "Datum and plate extents" now takes the larger of the far-limit isolation and the band-plus-shadow extension, rounded up to 10 mm.
+- Section 5, Step 5: the plan tool moves a tilt sweep whose station allows no tilt to the nearest ladder station that does (400 → 476 mm); the sub-series runs at 476, 800 and 1600 mm.
+- Section 6.2 ramp: 3 quanta; tilts 0.4° at 400 mm to 7.1° at 1600 mm; about 86 to 22 rows per quantum.
+- Section 9 budget: A row 72 poses, 6,000 frames, 0.23 h; totals 7,202 poses, 42,920 frames, 7.19 h (refresh_spec.py invariants updated).
+- Section 10, Step 10 and the Section 15 table and Limitations paragraph: tilt stations 476, 800 and 1600 mm.
+- Gate: ALL CHECKS PASSED against the 2026-10-07 archive, sections 2, 3.2, 5, 6, 9, 10, 15 changed as intended. Code: 254 tests pass (agent report; confirmed below when the local run finishes).
