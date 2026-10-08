@@ -16,6 +16,9 @@ Placeholders in the template (all are replaced; an unknown one fails the build):
     {{PARAMETER_TABLE}}            Section 2 table generated from CharacterizationParameters
     {{BUDGET_TABLE}}               Section 9 capture budget computed from the default plan
     {{FIGURE_INDEX}}               the list of every figure in the document, generated
+    {{COST_TABLE_BUILD}}           Section 1b table of what must be built, from costs.py
+    {{COST_TABLE_BUY}}             Section 1c table of what must be bought, from costs.py
+    {{COST_PARAGRAPH}}             the cost estimate paragraph of Section 1c, from costs.py
     {{FILE_TABLE}}                 the package files with line counts (software appendix)
     {{CLI_HELP:<module>}}          the --help output of python3 -m sensorperf.cli.<module>
     {{VALUE:<field>}}              a CharacterizationParameters field, formatted
@@ -74,15 +77,32 @@ SECTION_NUMBER_PATTERN = re.compile(r"^(?:Appendix\s+)?(?P<num>[0-9]+(?:\.[0-9]+
 sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(FIGURES_DIR))
 import figfacts  # noqa: E402  (feature_diameters_text: the figure and the text format the diameters alike)
+sys.path.insert(0, str(HERE))
+import costs  # noqa: E402  (the cost tables and paragraph of Section 1)
 
 from sensorperf.acquisition import plan as planning  # noqa: E402
 from sensorperf.acquisition.plan import MIN_POSE_LOG_DECIMALS  # noqa: E402
+from sensorperf.geometry.targets import make_standard_target_set  # noqa: E402
 from sensorperf.io import manifest as manifest_module  # noqa: E402
-from sensorperf.parameters import CharacterizationParameters, SensorGeometry, parameter_table_rows  # noqa: E402
+from sensorperf.parameters import (CharacterizationParameters, SensorGeometry, TARGET_DISKS,  # noqa: E402
+                                   parameter_table_rows)
 
 BUDGET_FRAME_RATE_HZ = 10.0
 """Frame rate the capture budget assumes (Section 9: 'assumes 10 frames/s'); replaced by the
 measured frame rate once Step 4.5 fills in SensorGeometry.frame_rate_hz."""
+
+# Masses and disk space quoted in Section 1 (the drawings of appendix F govern the real parts).
+ALUMINUM_DENSITY_KG_PER_M3 = 2700.0
+FRONT_PLATE_THICKNESS_MM = 6.0
+BACK_PLATE_THICKNESS_MM = 8.0
+SPIGOT_MASS_KG = 0.5
+"""Steel spigot PT-02 with its flange."""
+ADAPTER_MASS_KG = 1.2
+"""Aluminum target adapter PT-01, 120 x 120 x 30 mm less the bore."""
+DISK_GB_PER_1000_FRAMES = 10
+"""Disk space per 1,000 frames of `.mc` files (the stage-1 figure)."""
+FRAMES_PER_DISK_ESTIMATE_UNIT = 1000
+MM_PER_M = 1000.0
 
 
 # ---------------------------------------------------------------------------
@@ -246,6 +266,39 @@ def optional_capture_values(params: CharacterizationParameters, geometry: Sensor
     return values
 
 
+def plate_mass_kg(width_mm: float, height_mm: float, thickness_mm: float) -> float:
+    """Mass of a rectangular aluminum plate (the plate stock of the targets)."""
+    volume_m3 = (width_mm / MM_PER_M) * (height_mm / MM_PER_M) * (thickness_mm / MM_PER_M)
+    return ALUMINUM_DENSITY_KG_PER_M3 * volume_m3
+
+
+def target_section_values(params: CharacterizationParameters, geometry: SensorGeometry, total_frames: int) -> dict:
+    """Plate sizes, masses and disk space quoted in Section 1, from the target set and the capture budget.
+
+    Edge target (T3b) = back plate + front plate + spigot; disk target (T5) = back plate + front plate + spigot;
+    the heaviest load on the robot is the heavier of the two plus the adapter. The plate sizes are those of the
+    target set (the edge plates are derived by the planner's rule, the disk plate from the feature
+    array), rounded up to whole millimeters."""
+    targets = make_standard_target_set(params, geometry)
+    edge_width, edge_height = targets.derived["edge_plate_size_mm"]
+    disk_plate = targets.get(TARGET_DISKS)
+    disk_width = 2 * math.ceil(disk_plate.half_width_mm)
+    disk_height = 2 * math.ceil(disk_plate.half_height_mm)
+    both_plates_mm = FRONT_PLATE_THICKNESS_MM + BACK_PLATE_THICKNESS_MM
+    edge_mass = plate_mass_kg(edge_width, edge_height, both_plates_mm) + SPIGOT_MASS_KG
+    disk_mass = plate_mass_kg(disk_width, disk_height, both_plates_mm) + SPIGOT_MASS_KG
+    return {
+        "edge_plate_size_text": f"{edge_width:g} x {edge_height:g}",
+        "disk_plate_size_text": f"{disk_width} x {disk_height}",
+        "edge_target_mass_kg": f"{edge_mass:.1f}",
+        "disk_target_mass_kg": f"{disk_mass:.1f}",
+        "heaviest_target_kg": f"{max(edge_mass, disk_mass) + ADAPTER_MASS_KG:.1f}",
+        "disk_gb_per_1000_frames": DISK_GB_PER_1000_FRAMES,
+        "disk_gb_session": math.ceil(total_frames / FRAMES_PER_DISK_ESTIMATE_UNIT * DISK_GB_PER_1000_FRAMES),
+        "max_tilt_deg": f"{max(params.tilt_angles_deg):.0f}",
+    }
+
+
 def derived_values(params: CharacterizationParameters, geometry: SensorGeometry, budget_totals: dict,
                    plan=None) -> dict:
     ladder = params.z_stations_mm()
@@ -357,6 +410,7 @@ def derived_values(params: CharacterizationParameters, geometry: SensorGeometry,
     }
     values.update(optional_capture_values(params, geometry))
     values.update(budget_totals)
+    values.update(target_section_values(params, geometry, budget_totals["total_frames"]))
     values["total_poses_text"] = f"{budget_totals['total_poses']:,}"
     values["total_frames_text"] = f"{budget_totals['total_frames']:,}"
     return values
@@ -379,6 +433,9 @@ def render(template: str, params: CharacterizationParameters, geometry: SensorGe
         "PARAMETER_TABLE": parameter_table(params),
         "BUDGET_TABLE": budget_md,
         "FILE_TABLE": file_table(),
+        "COST_TABLE_BUILD": costs.build_table(),
+        "COST_TABLE_BUY": costs.buy_table(),
+        "COST_PARAGRAPH": costs.cost_paragraph(),
     }
 
     def substitute(match: re.Match) -> str:
@@ -484,6 +541,7 @@ STALE_TERMS = (
 ALLOWED_STALE_LINES = (
     r"Design change: the specification of 2026-10-04 used a dial indicator",   # history of the Z-step truth, section 8
     r"\{fiducial,planes\}|no pattern needed\); fiducial:",                      # the register tool's own --help text
+    r"[Rr]un-out fixture",                                                      # stage-1 flatness check: a dial indicator on a magnetic base (section 1)
 )
 """Lines where a stale term is legitimate, with the reason in the comment (reported in the build summary)."""
 
@@ -500,17 +558,17 @@ def stale_term_hits(text: str) -> list[str]:
 
 
 MANIFEST_TABLE_HEADER = "| Group | Columns |"
-MANIFEST_TABLE_CAPTION = "Table 6."
+MANIFEST_TABLE_CAPTION = "Table 9."
 
 
 def manifest_table_problems(text: str) -> list[str]:
-    """Compare the columns listed in the manifest table of Section 11 (Table 6) with sensorperf.io.manifest.MANIFEST_COLUMNS:
+    """Compare the columns listed in the manifest table of Section 11 (Table 9) with sensorperf.io.manifest.MANIFEST_COLUMNS:
     the same names in the same order, so the document cannot drift from the module (specification Section 9, "in the order
     the manifest module writes them")."""
     start = text.find(MANIFEST_TABLE_HEADER)
     end = text.find(MANIFEST_TABLE_CAPTION, start)
     if start < 0 or end < 0:
-        return ["the manifest table (Table 6) was not found in the document"]
+        return ["the manifest table (Table 9) was not found in the document"]
     listed = []
     for row in text[start:end].splitlines()[2:]:
         cells = [c.strip() for c in row.strip().strip("|").split("|")]
@@ -521,7 +579,7 @@ def manifest_table_problems(text: str) -> list[str]:
         return []
     missing = [c for c in expected if c not in listed]
     extra = [c for c in listed if c not in expected]
-    return [f"Table 6 differs from MANIFEST_COLUMNS: missing {missing or 'none'}, not in the module {extra or 'none'}"
+    return [f"Table 9 differs from MANIFEST_COLUMNS: missing {missing or 'none'}, not in the module {extra or 'none'}"
             + ("" if (missing or extra) else ", order differs")]
 
 

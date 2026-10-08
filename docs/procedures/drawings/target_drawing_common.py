@@ -57,8 +57,33 @@ assert EDGE_LAND_MM + EDGE_LAND_TOL_MM <= EDGE_LAND_MAX_MM + 1e-9, "land toleran
 M5_MAJOR_MM = sp.SPIGOT_SCREW_DIAMETER_MM  # M5 major diameter
 M5_MINOR_MM = thread_minor_diameter(M5_MAJOR_MM, sp.M5_PITCH_MM)  # M5 minor diameter (ISO 262)
 M5_TAP_DRILL_MM = 4.2  # tap drill for M5 x 0.8
-FRONT_STUD_RECESS_MM = FRONT_PLATE_THICKNESS_MM - sp.STANDOFF_FRONT_STUD_LENGTH_MM  # stud end below the front face (0.5)
+FRONT_STUD_RECESS_MM = FRONT_PLATE_THICKNESS_MM - sp.STANDOFF_STUD_FRONT_LENGTH_MM  # stud end below the front face (0.5)
 assert abs(FRONT_STUD_RECESS_MM - 0.5) < 1e-9, "front stud must end 0.5 mm below the front face of a 6 mm plate"
+
+
+def check_against_part_scripts() -> list[str]:
+    """Cross-check the shared constants against PT-02 (spigot pattern) and PT-03 (standoff studs); raise on a
+    mismatch.  Returns one confirmation line per check."""
+    import part_02_target_spigot as p2
+    import part_03_standoffs as p3
+
+    out = []
+    pairs = [("spigot PCD", p2.MOUNT_PCD, sp.SPIGOT_PCD_MM), ("spigot screw diameter", p2.MOUNT_THREAD_D, sp.SPIGOT_SCREW_DIAMETER_MM),
+             ("flange diameter", p2.FLANGE_D, sp.SPIGOT_FLANGE_DIAMETER_MM), ("back plate thickness", p2.BACK_PLATE_T, BACK_PLATE_THICKNESS_MM),
+             ("stud back length", p3.STUD_BACK_LENGTH_MM, sp.STANDOFF_STUD_BACK_LENGTH_MM),
+             ("stud front length", p3.STUD_FRONT_LENGTH_MM, sp.STANDOFF_STUD_FRONT_LENGTH_MM),
+             ("standoff body diameter", p3.STANDOFF_D, sp.STANDOFF_BODY_DIAMETER_MM), ("M5 pitch", p3.STUD_PITCH, sp.M5_PITCH_MM)]
+    for name, theirs, mine in pairs:
+        if abs(theirs - mine) > 1e-9:
+            raise ValueError(f"{name}: PT-02/PT-03 say {theirs}, spigot_pattern.py says {mine}")
+    mine_pts = sorted((round(x, 6), round(y, 6)) for x, y in (polar((0.0, 0.0), sp.SPIGOT_PCD_MM / 2, a) for a in sp.SPIGOT_HOLE_ANGLES_DEG))
+    their_pts = sorted((round(x, 6), round(y, 6)) for x, y in p2.mount_hole_positions())
+    if mine_pts != their_pts:
+        raise ValueError(f"spigot hole positions differ: {mine_pts} against {their_pts}")
+    if p3.stud_recess(FRONT_PLATE_THICKNESS_MM, sp.STANDOFF_STUD_FRONT_LENGTH_MM) != FRONT_STUD_RECESS_MM:
+        raise ValueError("front stud recess differs from PT-03")
+    out.append("spigot pattern and standoff studs agree with PT-02 and PT-03")
+    return out
 
 EDGE_DETAIL_EXTRA_MM = 4.0  # material drawn beyond the end of the bevel in the 4:1 detail
 
@@ -72,8 +97,8 @@ NOTE_SIZE = 9.0  # smallest permitted note size
 NOTE_KNIFE_EDGE = (
     f"Every knife edge is beveled or countersunk FROM THE BACK at {BEVEL_DEG:g}° "
     f"({2 * BEVEL_DEG:g}° included for countersinks), leaving a flat land at the front face of "
-    f"{LAND_TEXT} mm (never more than {EDGE_LAND_MAX_MM:g} mm). Measure the land of every edge and "
-    f"record it in the as-built record."
+    f"{LAND_TEXT} mm (never more than {EDGE_LAND_MAX_MM:g} mm). Record the measured land of every edge "
+    f"in the as-built record."
 )
 NOTE_FINISH = (
     "Fine glass-bead blast, uniform, on every face the sensor can see. All plates and disks "
@@ -88,9 +113,9 @@ NOTE_SPIGOT = (
 )
 NOTE_STANDOFF_FRONT_THROUGH = (
     f"Standoffs PT-03, 15 mm set or 60 mm set; both sets delivered. Front plate: {sp.STANDOFF_STUD} through-tapped holes; "
-    f"the {sp.STANDOFF_FRONT_STUD_LENGTH_MM:g} mm front stud ends 0.5 below the front face. Nothing may protrude the front "
+    f"the {sp.STANDOFF_STUD_FRONT_LENGTH_MM:g} mm front stud ends 0.5 below the front face. Nothing may protrude the front "
     f"face; the plate is bead-blasted before assembly. Back plate: {sp.STANDOFF_STUD} through-tapped for the "
-    f"{sp.STANDOFF_STUD_LENGTH_MM:g} mm back studs, which must not stand proud of its back face."
+    f"{sp.STANDOFF_STUD_BACK_LENGTH_MM:g} mm back studs, which must not stand proud of its back face."
 )
 
 
@@ -184,6 +209,17 @@ def spigot_hole_points(center: tuple[float, float] = (0.0, 0.0)) -> list[tuple[f
     return [polar(center, sp.SPIGOT_PCD_MM / 2, a) for a in sp.SPIGOT_HOLE_ANGLES_DEG]
 
 
+def plan_tapped_hole(view: View, p: tuple[float, float], visible: bool = True) -> None:
+    """Draw a tapped M5 hole seen end-on: minor circle (thick), major diameter as a thin 3/4 arc, center cross.
+    Hidden holes are drawn as one dashed circle."""
+    if visible:
+        view.circle(p, M5_MINOR_MM / 2, "outline")
+        view.circle(p, M5_MAJOR_MM / 2, "thin", 0.0, 270.0)
+    else:
+        view.circle(p, M5_MAJOR_MM / 2, "hidden")
+    view.center_cross(p, M5_MAJOR_MM / 2)
+
+
 def plan_spigot_pattern(view: View, center: tuple[float, float] = (0.0, 0.0), style: str = "hidden") -> None:
     """Draw the spigot pattern of the back face in a front view: flange (phantom), pitch circle, four M5
     holes and the orientation arrow, all as hidden detail."""
@@ -242,8 +278,8 @@ def standoff_piece(u0: float, gap: float) -> list[tuple[float, float]]:
     """Section of one standoff on axis u0: body of the gap length, 8 mm stud into the back plate (through
     hole, flush with its back face) and the 5.5 mm front stud into the front part."""
     r_body, r_stud = sp.STANDOFF_BODY_DIAMETER_MM / 2, M5_MAJOR_MM / 2
-    low = sp.STANDOFF_STUD_LENGTH_MM  # stud in the back plate
-    up = sp.STANDOFF_FRONT_STUD_LENGTH_MM  # stud in the front part
+    low = sp.STANDOFF_STUD_BACK_LENGTH_MM  # stud in the back plate
+    up = sp.STANDOFF_STUD_FRONT_LENGTH_MM  # stud in the front part
     return [(u0 - r_stud, -low), (u0 + r_stud, -low), (u0 + r_stud, 0.0), (u0 + r_body, 0.0),
             (u0 + r_body, gap), (u0 + r_stud, gap), (u0 + r_stud, gap + up), (u0 - r_stud, gap + up),
             (u0 - r_stud, gap), (u0 - r_body, gap), (u0 - r_body, 0.0), (u0 - r_stud, 0.0)]

@@ -75,7 +75,7 @@ SEC_ORIGIN = (372.0, 212.0)  # paper position of (u = 0, z = 0): front face of t
 DET_SCALE = 4.0  # knife-edge detail at 4:1
 DET_ORIGIN = (346.0, 150.0)  # paper position of the front-face edge point of the detail
 NOTES_X = 12.0
-NOTES_TOP = 78.0
+NOTES_TOP = 80.0
 NOTES_W = 224.0
 CALL_X = 190.0  # left end of the plan callout texts
 CUT_END_U = PLATE_W / 2 + 8.0  # the cutting-plane line starts this far out (target frame)
@@ -103,8 +103,8 @@ def build(out_dir: str) -> list[str]:
     hb = BACK_OPENING / 2
     plan.polyline([wn(-hb, -hb), wn(hb, -hb), wn(hb, hb), wn(-hb, hb)], "hidden", closed=True)
     for p in STANDOFF_AXES:
-        plan.circle(p, BODY_D / 2, "hidden")
-        plan.center_cross(p, BODY_D / 2)
+        plan.circle(p, BODY_D / 2, "hidden")  # standoff body behind the front plate
+        c.plan_tapped_hole(plan, p, visible=True)  # M5 through-tapped hole, open at the front face
     c.plan_spigot_pattern(plan)
     plan.center_h(-hw - 6, hw + 6, 0.0)
     plan.center_v(-hh - 6, hh + 6, 0.0)
@@ -133,7 +133,7 @@ def build(out_dir: str) -> list[str]:
     callout((STANDOFF_AXES[3][0] + BODY_D / 2, STANDOFF_AXES[3][1]),
             f"4 × STANDOFF PT-03 AT (±{c.fmt(AXIS)}, ±{c.fmt(AXIS)}),\n"
             f"{c.fmt(CORNER_STANDOFF_INSET_MM)} FROM EACH EDGE, POSITION ±{c.fmt(c.POSITION_TOL_MM)}:\n"
-            f"M5 BLIND {c.fmt(sp.BLIND_TAP_THREAD_DEPTH_MM)} DEEP IN THE FRONT PLATE (BACK),\nM5 THRU IN THE BACK PLATE", 88.0)
+            f"M5 THRU-TAPPED IN THE FRONT PLATE AND IN THE BACK PLATE;\nBODY \u00d8{c.fmt(BODY_D)} BEHIND THE FRONT PLATE (HIDDEN)", 88.0)
     sh.text(PLAN_CENTER[0], PLAN_CENTER[1] - hh * PLAN_SCALE + LABEL_DY,
             "FRONT VIEW (FROM THE SENSOR)   SCALE 1:2", size=d.FONT_LABEL, ha="center", weight="bold")
 
@@ -147,9 +147,12 @@ def build(out_dir: str) -> list[str]:
     top = g + FRONT_T
     u_edge = -(WINDOW_SIDE / 2) / SECTION_COS  # window front edge in the plane y = 0
     run_s = RUN / SECTION_COS  # bevel run in that plane
-    back = c.notched_edge(u_edge - run_s, u_l, g, [u_axis], c.M5_MAJOR_MM, sp.BLIND_TAP_DRILL_DEPTH_MM, up=True)
-    poly = [(u_l, top), (u_edge, top), (u_edge, top - c.EDGE_LAND_MM)] + back
-    c.region(sec, poly)
+    hole_w = c.M5_MAJOR_MM  # through-tapped hole, open at both faces of the front plate
+    left_piece = [(u_l, top), (u_axis - hole_w / 2, top), (u_axis - hole_w / 2, g), (u_l, g)]
+    right_piece = [(u_axis + hole_w / 2, top), (u_edge, top), (u_edge, top - c.EDGE_LAND_MM), (u_edge - run_s, g),
+                   (u_axis + hole_w / 2, g)]
+    c.region(sec, left_piece)
+    c.region(sec, right_piece)
     c.region(sec, c.standoff_piece(u_axis, g), other=True)
     sec.center_v(-BACK_T - 4, top + 3, u_axis)
     # dimensions
@@ -171,11 +174,11 @@ def build(out_dir: str) -> list[str]:
     # ---------------- notes ----------------
     margins = window_hidden_margins()
     notes = [
-        f"Front plate PT-05.1 {c.fmt(PLATE_W)} \u00d7 {c.fmt(PLATE_H)} \u00d7 {c.fmt(FRONT_T)}, {c.fmt(WINDOW_SIDE)} square window; "
-        f"back plate PT-05.2 {c.fmt(PLATE_W)} \u00d7 {c.fmt(PLATE_H)} \u00d7 {c.fmt(BACK_T)}. Outlines rounded up to whole mm.",
+        f"Front plate PT-05.1 {c.fmt(PLATE_W)} \u00d7 {c.fmt(PLATE_H)} \u00d7 {c.fmt(FRONT_T)}; back plate PT-05.2 "
+        f"{c.fmt(PLATE_W)} \u00d7 {c.fmt(PLATE_H)} \u00d7 {c.fmt(BACK_T)}. Outlines rounded up to whole mm.",
         c.NOTE_KNIFE_EDGE + f" Opening in the back face {c.fmt(round(BACK_OPENING, 2))} square (computed: side + 2 \u00d7 (thickness \u2212 land)).",
-        c.NOTE_FINISH + " " + c.NOTE_FLATNESS + " The front face of the back plate is blasted too.",
-        c.NOTE_STANDOFF_ENDS,
+        c.NOTE_FINISH + " " + c.NOTE_FLATNESS + " Includes the front face of the back plate.",
+        c.NOTE_STANDOFF_FRONT_THROUGH,
         f"Standoffs hidden: nearest standoff axis {NEAREST_STANDOFF_MM:.1f} mm from the window; limit at the "
         f"{c.fmt(GAP_LARGE_MM)} mm gap = {c.fmt(GAP_LARGE_MM)} \u00d7 tan {c.fmt(c.HIDE_RAY_ANGLE_DEG)}\u00b0 + "
         f"{c.fmt(c.HIDE_MARGIN_MM)} = {c.hidden_threshold_mm(GAP_LARGE_MM):.1f} mm (margin {margins[GAP_LARGE_MM]:.1f} mm). OK.",
@@ -194,6 +197,9 @@ def build(out_dir: str) -> list[str]:
 
 
 def print_checks() -> None:
+    print("PT-05", *c.check_against_part_scripts())
+    print(f"PT-05 front stud {sp.STANDOFF_STUD_FRONT_LENGTH_MM:g} ends {c.FRONT_STUD_RECESS_MM:g} mm below the front face; "
+          f"back stud {sp.STANDOFF_STUD_BACK_LENGTH_MM:g} flush with the back face of the {BACK_T:g} mm plate")
     print(f"PT-05 plates {PLATE_W:g} x {PLATE_H:g}; window {WINDOW_SIDE:g} slant {WINDOW_ROT:g} deg; standoff axes at +/-{AXIS:g}")
     print(f"PT-05 countersink run {RUN:.3f} mm; back-face opening side {BACK_OPENING:.3f} mm")
     for g in (GAP_SMALL_MM, GAP_LARGE_MM):

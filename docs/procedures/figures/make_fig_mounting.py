@@ -12,19 +12,22 @@ What to see (section 1b):
     - the standoffs PT-03 hold the front plate at the gap G in front of the back plate. The gap shown is the
       small gap GAP_SMALL_MM; the large gap GAP_LARGE_MM uses longer standoffs.
 The axis of the stack runs up the page, robot at the top and sensor side at the bottom. The plates are 300 mm or
-more across and are drawn cut off with break lines.
+more across and are drawn cut off with wavy break lines. The parts are numbered on the drawing and named, with their
+drawing numbers, in the key at the right.
 
     python3 docs/procedures/figures/make_fig_mounting.py      (from the repository root)
 """
 from __future__ import annotations
 
+import math
 import sys
+import textwrap
 from pathlib import Path
 
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.patches import Polygon, Rectangle
+from matplotlib.patches import Circle, Polygon, Rectangle
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
@@ -34,7 +37,7 @@ from sensorperf.parameters import CharacterizationParameters  # noqa: E402
 PARAMS = CharacterizationParameters()
 
 OUTPUT_DPI = 200
-FIGURE_SIZE_IN = (13.0, 7.0)
+FIGURE_SIZE_IN = (13.0, 6.0)
 FIGURE_NAME = "fig_mounting"
 
 # Okabe-Ito palette (the same as make_fig_setup.py).
@@ -76,33 +79,42 @@ GAP_OTHER_MM = PARAMS.gap_large_mm
 # Layout of the sketch.
 PLATE_HALF_WIDTH_DRAWN_MM = 80.0          # the plates are cut off with break lines at this half width
 STANDOFF_RADIUS_MM = 62.0                 # radial position of the two standoffs drawn
-BREAK_TOOTH_MM = 4.0                      # size of the zigzag break line
-PIN_END_BEYOND_ADAPTER_MM = 26.0          # how far the pin's handle end sticks out of the adapter
-PIN_HANDLE_SIZE_MM = (8.0, 22.0)          # axial width, radial length of the T-handle
-LABEL_COLUMN_MM = 108.0                   # label text starts this far from the axis
+BREAK_WAVE_AMPLITUDE_MM = 1.6             # the wavy break line at the end of a cut-off plate
+BREAK_STEP_MM = 0.4                       # sampling of the wavy line
+PIN_END_BEYOND_ADAPTER_MM = 14.0          # how far the pin's handle end sticks out of the adapter
+PIN_HANDLE_SIZE_MM = (7.0, 16.0)          # axial width, radial length of the T-handle
+CALLOUT_X_MM = 100.0                      # column of the part numbers, right of the drawing
+CALLOUT_RADIUS_MM = 4.6
+CALLOUT_SPACING_MM = 10.0                 # least distance between two numbers in the column (two radii plus air)
+DOWEL_CALLOUT_X_MM = -80.0                # the dowel's number sits at the left, on its own side of the stack
+KEY_X_MM = 118.0                          # left edge of the key (the list of the numbered parts)
+KEY_WRAP_CHARACTERS = 52
+KEY_LINE_HEIGHT_MM = 4.3
+KEY_ITEM_GAP_MM = 3.0
 LABEL_FONT_SIZE = 8.5
 SMALL_FONT_SIZE = 7.5
 LEADER_LW = 0.8
+X_LIMITS_MM = (-150.0, 255.0)
 CENTERLINE_DASHES = (0, (8, 3, 1.5, 3))
 
 
 def broken_slab(ax, bottom: float, top: float, half_width: float, **style) -> None:
-    """A plate seen edge-on, cut off at both ends with a zigzag break line."""
-    teeth = int((top - bottom) / BREAK_TOOTH_MM)
-    ys = [bottom + (top - bottom) * i / max(teeth, 1) for i in range(teeth + 1)]
-    right = [(half_width + (BREAK_TOOTH_MM * 0.5 if i % 2 else -BREAK_TOOTH_MM * 0.5), y) for i, y in enumerate(ys)]
-    left = [(-half_width + (BREAK_TOOTH_MM * 0.5 if i % 2 else -BREAK_TOOTH_MM * 0.5), y) for i, y in enumerate(ys)]
+    """A plate seen edge-on, cut off at both ends with a wavy break line (one wave over the plate's thickness)."""
+    steps = max(int(round((top - bottom) / BREAK_STEP_MM)), 2)
+    ys = [bottom + (top - bottom) * i / steps for i in range(steps + 1)]
+    wave = [BREAK_WAVE_AMPLITUDE_MM * math.sin(2.0 * math.pi * (y - bottom) / (top - bottom)) for y in ys]
+    right = [(half_width + w, y) for w, y in zip(wave, ys)]
+    left = [(-half_width + w, y) for w, y in zip(wave, ys)]
     ax.add_patch(Polygon(right + left[::-1], closed=True, **style))
 
 
-def leader(ax, text: str, label_xy, target_xy, side: str, color: str = BLACK, size: float = LABEL_FONT_SIZE) -> None:
-    """Text at label_xy with a thin leader line to target_xy; side is 'left' or 'right' of the drawing."""
-    ax.annotate(text, xy=target_xy, xytext=label_xy, fontsize=size, color=color,
-                ha="left" if side == "right" else "right", va="center",
-                arrowprops=dict(arrowstyle="-", color=color, lw=LEADER_LW, shrinkA=2, shrinkB=0,
-                                connectionstyle="arc,angleA=180,angleB=0,armA=6,armB=0,rad=0"
-                                if side == "right" else
-                                "arc,angleA=0,angleB=180,armA=6,armB=0,rad=0"))
+def callout(ax, number: int, center_xy, target_xy, color: str = BLACK) -> None:
+    """A numbered circle at center_xy with a thin leader line to the part at target_xy."""
+    ax.plot([center_xy[0], target_xy[0]], [center_xy[1], target_xy[1]], color=color, lw=LEADER_LW, zorder=7)
+    ax.plot([target_xy[0]], [target_xy[1]], marker="o", color=color, ms=2.5, zorder=8)
+    ax.add_patch(Circle(center_xy, CALLOUT_RADIUS_MM, facecolor="white", edgecolor=color, lw=1.1, zorder=9))
+    ax.text(center_xy[0], center_xy[1], str(number), fontsize=LABEL_FONT_SIZE, ha="center", va="center", color=color,
+            fontweight="bold", zorder=10)
 
 
 def main() -> None:
@@ -179,45 +191,59 @@ def main() -> None:
             f"gap G\n{gap:g} mm shown\n({GAP_OTHER_MM:g} mm with the\nlong standoffs)", fontsize=LABEL_FONT_SIZE,
             color=VERMILLION, ha="right", va="center", fontweight="bold")
 
-    # Labels on the right: spigot, adapter, pin, robot flange. Left: plates, standoff, dowel.
-    xr, xl = LABEL_COLUMN_MM, -LABEL_COLUMN_MM
-    leader(ax, f"robot flange, ISO 9409-1-50-4-M6\n({FLANGE_DIAMETER_MM:g} mm diameter)",
-           (xr, adapter_top + FLANGE_THICKNESS_MM / 2.0 + 6.0), (FLANGE_DIAMETER_MM / 2.0, adapter_top + FLANGE_THICKNESS_MM / 2.0),
-           "right")
-    leader(ax, f"target adapter PT-01, aluminum\n{ADAPTER_WIDTH_MM:g} wide x {ADAPTER_THICKNESS_MM:g} thick, stays on the flange",
-           (xr, adapter_top - 5.0), (adapter_r, adapter_top - 6.0), "right", color=BLACK)
-    leader(ax, f"ball-lock pin, {CROSS_HOLE_DIAMETER_MM:g} mm, through the adapter's\ncross hole and the spigot's cross hole",
-           (xr, pin_y + 2.0), (pin_right + handle_w, pin_y), "right", color=BLACK)
-    leader(ax, f"spigot PT-02, steel: {SPIGOT_DIAMETER_MM:g} mm diameter x {SPIGOT_LENGTH_MM:g} mm long",
-           (xr, sflange_top + SPIGOT_LENGTH_MM * 0.85), (bore_r, sflange_top + SPIGOT_LENGTH_MM * 0.85), "right")
-    leader(ax, f"spigot flange, {SPIGOT_FLANGE_DIAMETER_MM:g} mm diameter x {SPIGOT_FLANGE_THICKNESS_MM:g} mm,\n"
-               "bolted to the back plate (4 x M5)",
-           (xr, sflange_bottom + SPIGOT_FLANGE_THICKNESS_MM / 2.0 - 4.0),
-           (SPIGOT_FLANGE_DIAMETER_MM / 2.0, sflange_bottom + SPIGOT_FLANGE_THICKNESS_MM / 2.0), "right")
-    leader(ax, f"back plate, {BACK_PLATE_THICKNESS_MM:g} mm (aluminum)", (xr, (back_bottom + back_top) / 2.0 - 3.0),
-           (PLATE_HALF_WIDTH_DRAWN_MM - 5.0, (back_bottom + back_top) / 2.0), "right")
-    leader(ax, f"standoff PT-03, {STANDOFF_DIAMETER_MM:g} mm diameter, one at each corner (two shown)",
-           (xr, (front_top + back_bottom) / 2.0 - 2.0), (STANDOFF_RADIUS_MM + STANDOFF_DIAMETER_MM / 2.0,
-                                                        (front_top + back_bottom) / 2.0), "right")
-    leader(ax, f"front plate, {FRONT_PLATE_THICKNESS_MM:g} mm (aluminum), the face the sensor sees",
-           (xr, front_bottom + FRONT_PLATE_THICKNESS_MM / 2.0 - 3.0),
-           (PLATE_HALF_WIDTH_DRAWN_MM - 5.0, front_bottom + FRONT_PLATE_THICKNESS_MM / 2.0), "right")
-    leader(ax, f"bore {BORE_DIAMETER_MM:g} mm x {BORE_DEPTH_MM:g} mm deep\nwith a {KEYWAY_WIDTH_MM:g} mm keyway",
-           (xl, bore_top + 12.0), (-bore_r - KEYWAY_DEPTH_MM, bore_top - 4.0), "left")
-    leader(ax, f"dowel, {DOWEL_DIAMETER_MM:g} mm, radial, in the keyway\nDOWEL DATUM: the dowel with the spigot axis,\n"
-               "the same for every target (section 2)",
-           (xl, dowel_y + 3.0), (-bore_r - KEYWAY_DEPTH_MM, dowel_y), "left", color=VERMILLION)
-    ax.text(3.0, robot_flange_top + 11.0, "spigot axis", fontsize=SMALL_FONT_SIZE, color=GRAY, ha="left", va="center")
+    # Part numbers on the drawing (the key at the right names them), the datum and the axis.
+    # The numbers stand CALLOUT_SPACING_MM apart or more in the column; the leaders slant to reach their parts.
+    callout(ax, 1, (CALLOUT_X_MM, adapter_top + FLANGE_THICKNESS_MM / 2.0 + CALLOUT_SPACING_MM / 3.0),
+            (FLANGE_DIAMETER_MM / 2.0, adapter_top + FLANGE_THICKNESS_MM / 2.0))
+    callout(ax, 2, (CALLOUT_X_MM, pin_y + 1.2 * CALLOUT_SPACING_MM), (adapter_r, adapter_top - 4.0))
+    callout(ax, 3, (CALLOUT_X_MM, pin_y), (pin_right + handle_w, pin_y))
+    callout(ax, 4, (CALLOUT_X_MM, sflange_top - 1.0), (bore_r, sflange_top + 4.0))
+    callout(ax, 6, (CALLOUT_X_MM, (back_bottom + back_top) / 2.0 + 1.5), (PLATE_HALF_WIDTH_DRAWN_MM - 6.0,
+                                                                          (back_bottom + back_top) / 2.0))
+    callout(ax, 7, (CALLOUT_X_MM, front_top + gap / 2.0 - 1.5), (STANDOFF_RADIUS_MM + STANDOFF_DIAMETER_MM / 2.0,
+                                                                 front_top + gap / 2.0))
+    callout(ax, 8, (CALLOUT_X_MM, front_bottom + FRONT_PLATE_THICKNESS_MM / 2.0 - 1.5),
+            (PLATE_HALF_WIDTH_DRAWN_MM - 6.0, front_bottom + FRONT_PLATE_THICKNESS_MM / 2.0))
+    callout(ax, 5, (DOWEL_CALLOUT_X_MM, dowel_y), (-bore_r - KEYWAY_DEPTH_MM / 2.0, dowel_y), color=VERMILLION)
+    ax.text(DOWEL_CALLOUT_X_MM - CALLOUT_RADIUS_MM - 3.0, dowel_y, "dowel datum:\nthe dowel and\nthe spigot axis",
+            fontsize=LABEL_FONT_SIZE, color=VERMILLION, ha="right", va="center", fontweight="bold")
+    ax.text(3.0, robot_flange_top + 9.0, "spigot axis", fontsize=SMALL_FONT_SIZE, color=GRAY, ha="left", va="center")
+
+    # The key: number, name and drawing number, size.
+    key = [
+        (1, f"Robot flange, ISO 9409-1-50-4-M6, {FLANGE_DIAMETER_MM:g} mm diameter."),
+        (2, f"Target adapter PT-01, aluminum, {ADAPTER_WIDTH_MM:g} mm wide x {ADAPTER_THICKNESS_MM:g} mm thick, with a "
+            f"{BORE_DIAMETER_MM:g} mm bore {BORE_DEPTH_MM:g} mm deep, a {KEYWAY_WIDTH_MM:g} mm keyway and an "
+            f"{CROSS_HOLE_DIAMETER_MM:g} mm cross hole through the bore. It stays on the flange."),
+        (3, f"Ball-lock pin, {CROSS_HOLE_DIAMETER_MM:g} mm, through the adapter's cross hole and the spigot's."),
+        (4, f"Spigot PT-02, steel, {SPIGOT_DIAMETER_MM:g} mm diameter x {SPIGOT_LENGTH_MM:g} mm long, with a "
+            f"{SPIGOT_FLANGE_DIAMETER_MM:g} mm diameter x {SPIGOT_FLANGE_THICKNESS_MM:g} mm flange, bolted to the back "
+            f"plate (4 x M5). One per feature target."),
+        (5, f"Dowel, {DOWEL_DIAMETER_MM:g} mm, radial on the spigot, in the keyway: it sets the target's orientation."),
+        (6, f"Back plate, {BACK_PLATE_THICKNESS_MM:g} mm."),
+        (7, f"Standoffs PT-03, {STANDOFF_DIAMETER_MM:g} mm diameter, {gap:g} mm long as drawn ({GAP_OTHER_MM:g} mm for "
+            "the large gap); one at each corner of the plate, two shown."),
+        (8, f"Front plate, {FRONT_PLATE_THICKNESS_MM:g} mm: the face the sensor sees."),
+    ]
+    y = robot_flange_top + 28.0
+    for number, text in key:
+        lines = textwrap.wrap(text, KEY_WRAP_CHARACTERS)
+        callout_xy = (KEY_X_MM, y - KEY_LINE_HEIGHT_MM / 2.0)
+        ax.add_patch(Circle(callout_xy, CALLOUT_RADIUS_MM * 0.8, facecolor="white", edgecolor=BLACK, lw=1.0))
+        ax.text(callout_xy[0], callout_xy[1], str(number), fontsize=SMALL_FONT_SIZE + 0.5, ha="center", va="center",
+                fontweight="bold")
+        ax.text(KEY_X_MM + CALLOUT_RADIUS_MM + 2.5, y, "\n".join(lines), fontsize=LABEL_FONT_SIZE, ha="left",
+                va="top", linespacing=1.25)
+        y -= len(lines) * KEY_LINE_HEIGHT_MM + KEY_ITEM_GAP_MM
 
     # Direction cues.
-    ax.text(0.0, front_bottom - 16.0, "toward the sensor", fontsize=LABEL_FONT_SIZE, color=BLACK, ha="center", va="top",
-            style="italic")
+    ax.text(0.0, front_bottom - 12.0, "toward the sensor", fontsize=LABEL_FONT_SIZE, color=BLACK, ha="center",
+            va="top", style="italic")
     ax.text(0.0, robot_flange_top + 20.0, "toward the robot", fontsize=LABEL_FONT_SIZE, color=BLACK, ha="center",
             va="bottom", style="italic")
 
-    extent_x = LABEL_COLUMN_MM + 125.0
-    ax.set_xlim(-extent_x, extent_x)
-    ax.set_ylim(front_bottom - 30.0, robot_flange_top + 34.0)
+    ax.set_xlim(X_LIMITS_MM[0], X_LIMITS_MM[1])
+    ax.set_ylim(front_bottom - 24.0, robot_flange_top + 38.0)
     ax.set_aspect("equal")
     ax.axis("off")
     fig.subplots_adjust(left=0.005, right=0.995, top=0.995, bottom=0.005)

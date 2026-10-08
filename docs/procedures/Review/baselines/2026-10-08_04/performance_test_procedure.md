@@ -61,7 +61,7 @@ The four feature targets (T3a, T3b, T4, T5) share one mounting system (Figure 3)
 
 Figure 3. The target mounting stack, cross-section, not to scale. The adapter (PT-01) stays on the robot flange; each feature target carries its own spigot (PT-02), which drops into the adapter's bore with its dowel in the keyway and is held by the ball-lock pin. The standoffs (PT-03) set the gap G.
 
-The two gaps are set by standoffs (PT-03) between the front and back plates of T3b and T5, hidden behind the raised square of T3a (the same standoffs, on a 60 mm square), and by the length of the disk posts of T4, which is delivered with a disk-and-post assembly for each gap.
+The two gaps are set by standoffs (PT-03) between the front and back plates of T3b and T5, and by the length of the hidden posts of T3a and T4; each of those two targets is delivered with posts for both gaps.
 
 ### 1c. What must be bought
 
@@ -85,13 +85,13 @@ Hand the tables below, with the drawings of appendix F, to the fabricator. The f
 
 | Requirement | T3a raised square | T3b square window | T4 disk plate | T5 cutout plate |
 |---|---|---|---|---|
-| Plates | Back plate 300 x 300 mm; raised square 160 mm on hidden standoffs | Front plate 300 x 300 mm with a 160 mm window; back plate the same size | Back plate 336 x 198 mm; 3 disks of 7.0, 19.7 and 55.8 mm on 2 mm posts; 1 post without a disk | Front plate 336 x 198 mm with 3 holes of 7.0, 19.7 and 55.8 mm; back plate the same size, removable |
-| Thickness | Front plates 6 mm, back plates 8 mm (they carry the spigot); the raised square 10 mm, so its standoff holes can be blind | same | same; disks 2, 3 and 4 mm thick from the smallest to the largest | same |
+| Plates | Back plate 300 x 300 mm; raised square 160 mm on hidden posts | Front plate 300 x 300 mm with a 160 mm window; back plate the same size | Back plate 336 x 198 mm; 3 disks of 7.0, 19.7 and 55.8 mm on 2 mm posts; 1 post without a disk | Front plate 336 x 198 mm with 3 holes of 7.0, 19.7 and 55.8 mm; back plate the same size, removable |
+| Thickness | At least 6 mm, every plate; the raised square at least 6 mm | same | same; disks at least 3 mm | same |
 | Knife edges | Every edge of the square beveled from the back at 45 degrees, land 0.2 mm or less (§2) | Window countersunk from the back at 45 degrees (90 degree included), land 0.2 mm or less | Disks beveled from the back at 45 degrees, land 0.2 mm or less | Holes countersunk from the back at 45 degrees, land 0.2 mm or less |
 | Feature sizes known to | The fabricator's inspection report gives each feature's front-face size, land width, bevel angle and position from the spigot datum, each with the instrument's uncertainty; the engineer enters them in `targets_asbuilt.csv` (§2). A value left out of the report falls back to the nominal with the drawing tolerance as its uncertainty | same | same | same |
 | Flatness | Every plate flat to 0.05 mm over its front face, checked by the fabricator before finishing and in-house with the run-out fixture after mounting (§2) | same | same | same |
-| Gap | Standoffs PT-03 for G = 15 and 60 mm, both sets, hidden behind the square | Standoffs PT-03, both sets | One disk-and-post assembly per disk per gap (post length is the gap plus the plate's blind hole), and a post-only part per gap | Standoffs PT-03, both sets |
-| Material | Aluminum tooling plate (MIC-6 or 6061-T6), finish-ground | same | same; disks turned from aluminum; posts 2 mm stainless steel drill rod | same |
+| Gap | Posts for G = 15 and 60 mm, both sets delivered | Standoffs PT-03, both sets | Posts for both gaps, both sets delivered | Standoffs PT-03, both sets |
+| Material | Aluminum tooling plate (MIC-6 or 6061-T6), finish-ground; posts in 2 mm stainless steel rod | same | same; disks in the same plate stock; posts 2 mm stainless steel rod | same |
 | Surface | One finish on every front and back face: fine glass-bead blast, uniform, light, mid-range reflectance at the projector wavelength; all plates blasted in one batch with one medium and one pressure. No paint on plates thinner than 10 mm unless the fabricator confirms flatness after painting | same | same, disks and posts included | same |
 | Mounting interface | Spigot PT-02 on the back of the back plate: four M5 tapped holes on a 60 mm pitch circle, oriented to the drawing | same | same | same |
 | Approximate mass | about 3.9 kg with spigot | same | about 3.0 kg with spigot | same |
@@ -258,7 +258,7 @@ Write the date, sensor serial number, firmware and SDK versions, robot model and
 
 Registration gives every later capture a ground-truth target pose in the sensor frame. Two things anchor it. Robot repeatability fixes relative motion. A plane-correspondence solve on the noise plate T2 fixes the camera's pose in the robot base, using the depth planes themselves: there is no pattern plate, no IR image to evaluate, and no emitter to switch. What the planes cannot observe, the sideways position of a target on the flange, comes from the as-built datum and a once-per-mount check against the left IR image (Step 4.8). After Step 4.7 below, the robot-base-to-sensor transform is known, so every commanded target pose is also a ground-truth pose in sensor coordinates (compare Figure 2).
 
-**Step 4.6. Registration capture.** Mount T2 on its board adapter. Take the registration rows of the plan: 30 poses (procedure letter `R`) that span Z_MIN (400 mm) to Z_MAX (1600 mm) and cover the field of view, with tilts about H and about V, of both signs, up to plus or minus 20 degrees (`REGISTRATION_TILT_RANGE_DEG`), so that the plate normals span all three directions. The plate must stay inside the field of view at every tilt (T2 must be fully visible). Registration comes first, so the robot cannot yet be commanded in sensor coordinates: jog the robot by hand to each pose, using the live depth image to reach about the planned depth, field position, and tilt. The exact pose is solved afterward, so hand-jogged poses are fine. At each pose, capture 10 depth frames and the read-back robot pose. Name the files as in §5. Leave the emitter on and the sensor configuration unchanged.
+**Step 4.6. Registration capture.** Mount T2 on the dowel-pinned adapter. Take the registration rows of the plan: 30 poses (procedure letter `R`) that span Z_MIN (400 mm) to Z_MAX (1600 mm) and cover the field of view, with tilts about H and about V, of both signs, up to plus or minus 20 degrees (`REGISTRATION_TILT_RANGE_DEG`), so that the plate normals span all three directions. The plate must stay inside the field of view at every tilt (T2 must be fully visible). Registration comes first, so the robot cannot yet be commanded in sensor coordinates: jog the robot by hand to each pose, using the live depth image to reach about the planned depth, field position, and tilt. The exact pose is solved afterward, so hand-jogged poses are fine. At each pose, capture 10 depth frames and the read-back robot pose. Name the files as in §5. Leave the emitter on and the sensor configuration unchanged.
 
 **Step 4.7. Registration solve and acceptance.** Engineer: fit the plate plane in the mean depth frame of each pose (its normal and distance in the camera frame) and solve the hand-eye problem from the plane correspondences: a closed-form start, then joint nonlinear least squares on the plane-normal and plane-distance residuals. The solve gives the camera-to-robot-base transform and the plate's normal and offset on the flange. The plate's sideways position on the flange and its rotation about its normal are not observable from planes, and they are not needed for T2. Write one row per pose into an observations file: `pose_id`, the read-back flange pose (`x_mm`, `y_mm`, `z_mm`, `rotation_type`, `r1` to `r9`, as in §11), and the fitted plane (`nx`, `ny`, `nz`, `distance_mm`). Then run:
 
@@ -281,7 +281,7 @@ If either is too large, add poses with larger tilts, up to plus or minus 20 degr
 - tilt within 0.05 degrees (`MOUNT_TILT_TOLERANCE_DEG`, a dagger parameter: 0.05 degrees moves a plate edge 100 mm from the center by about 0.09 mm);
 - for a target with features (T3a, T3b, T4, T5), also locate one feature edge or outline in the left IR image and compare its H and V position with the as-built datum offsets (§2): both within 0.5 px (`FRAME_CHECK_PX`).
 
-Otherwise re-seat the target or correct the datum record. This is what makes re-mounting on the target adapter safe without a new registration.
+Otherwise re-seat the target or correct the datum record. This is what makes re-mounting on the dowel-pinned adapter safe without a new registration.
 
 The check command does the fitting and the comparisons. After mounting, move the target to the mount-check station (centered and fronto-parallel, the pose the registration commands) and capture a few frames. Keep them in a folder of their own, for example `mount_check_T3a/` in the session folder; they are checks, not part of the plan, and need no pose-log lines. Then run, with the id of the mounted target:
 
@@ -638,7 +638,7 @@ The smallest Z steps and the absolute bias are the measurements most limited by 
 | Robot absolute accuracy | 0.2 to 1 mm over large moves | Bias, registration | Registration over many poses spanning the full Z range; tests run as local moves from registered stations |
 | Registration residual | Acceptance limit 0.15 mm RMS | Bias, edge offset, small-feature area | Do not skip the acceptance gate; report the residual with every result |
 | Plane-registration depth offset | About 0.1 mm (rough estimate: the plane-fit error amplified at the tilt limit, averaged over the poses) | Absolute bias only | Many poses over the full Z range; tilts to the limit of 20 degrees; residual reported with every result |
-| As-built diameter uncertainty | Set by the measuring instrument | True area (for example 0.6 percent at 7 mm with 0.02 mm uncertainty) | Take the value and its uncertainty from the fabricator's inspection report (§2) |
+| As-built diameter uncertainty | Set by the measuring instrument | True area (for example 0.6 percent at 7 mm with 0.02 mm uncertainty) | Measure with the comparator or microscope and record the uncertainty |
 | Plate flatness | 0.05 mm | Fixed-pattern noise, bias | Keep the flatness report; map the plate on a CMM if available |
 | Thermal drift | Unknown until the sentinels run | Bias, series Z | Warm-up gate, sentinels on the mounted target, the optional separate drift run (§3, Step 4.3), A, B, A, B order, randomized order |
 | Front-back interreflection | Unknown | Cutout and small-gap results | Matte finish; both gaps are captured |
@@ -658,7 +658,7 @@ Things that spoil a session in practice:
 - A change in the laboratory lighting during a session (the laboratory is enclosed, with constant lighting, by design).
 - Skipping the warm-up or the settle check, or shortening the settle wait.
 - Touching the sensor, the stand, or the plate, or cutting the power, during the optional drift run (§3, Step 4.3): the run is only useful as one unbroken record.
-- A loose adapter, a standoff that has loosened, or a target that has shifted on its spigot: do the mount check (Step 4.8) after every swap.
+- A loose adapter, a spacer that has moved, or a target that has shifted on its dowels: do the mount check (Step 4.8) after every swap.
 - Fingerprints, dust, or gloss on a target: wipe with isopropyl alcohol. A shiny spot returns a bright highlight and a bad read.
 - Different finish on the front and back plates.
 - Using two frames of one pose as two detection trials in series D (§10, step 4).

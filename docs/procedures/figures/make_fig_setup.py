@@ -5,7 +5,7 @@ the code (Z_MIN_MM, Z_MAX_MM, the indicative field of view) and a stylized robot
 What to see:
     - the sensor sits on its own rigid stand at the left; the robot stands on a separate base at
       the right, so robot motion cannot move the sensor (equipment table, section 1);
-    - the robot carries a target on the dowel-pinned quick-change adapter, here T2 at the
+    - the robot carries a target on the target adapter (PT-01), here T2 at the
       reference station, with ghost outlines at Z_MIN and Z_MAX;
     - Z runs along the left IR camera's optical axis from its optical center; V is vertical in
       this view and H points into the page;
@@ -160,7 +160,7 @@ def main() -> None:
                            facecolor=GRAY, edgecolor=BLACK, lw=1.2))
     ax.text(ROBOT_BASE_X_MM + 130, ROBOT_ELBOW_MM[1] - 40, "6-axis robot\n(sketch, not to scale)", fontsize=7.5,
             ha="left", va="center")
-    ax.annotate("dowel-pinned quick-change\nadapter", xy=(ax_x + ADAPTER_THICKNESS_MM / 2, ADAPTER_HALF_HEIGHT_MM),
+    ax.annotate("adapter on the robot flange\n(SC1-05 for T2, PT-01 for the others)", xy=(ax_x + ADAPTER_THICKNESS_MM / 2, ADAPTER_HALF_HEIGHT_MM),
                 xytext=(ax_x + 120, 300), fontsize=7.5, ha="left", color=BLACK,
                 arrowprops=dict(arrowstyle="-", color=BLACK, lw=0.8))
     ax.text(flange_x + 30, -FLANGE_HALF_HEIGHT_MM - 8, "robot flange", fontsize=7.5, va="top", ha="left")

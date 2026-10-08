@@ -59,7 +59,7 @@ FULL_DIA_DEPTH = HOLE_DRILL_DEPTH_MM - POINT_LEN  # depth to which the drill is 
 FLOOR_MIN = SQUARE_T - HOLE_DRILL_DEPTH_MM  # material left in front of the drill-point tip
 assert FLOOR_MIN >= 2.5 - 1e-9, "floor under the blind holes below 2.5 mm"
 assert FULL_DIA_DEPTH > HOLE_THREAD_DEPTH_MM, "thread would run into the drill point"
-assert sp.STANDOFF_FRONT_STUD_LENGTH_MM <= HOLE_THREAD_DEPTH_MM, "front stud longer than the thread"
+assert sp.STANDOFF_STUD_FRONT_LENGTH_MM <= HOLE_THREAD_DEPTH_MM, "front stud longer than the thread"
 
 
 def blind_hole_notch(u0: float) -> list[tuple[float, float]]:
@@ -206,9 +206,9 @@ def build(out_dir: str) -> list[str]:
         f"Standoffs PT-03, 15 mm set or 60 mm set; both sets delivered. Square: {sp.STANDOFF_STUD} blind holes, thread "
         f"{c.fmt(HOLE_THREAD_DEPTH_MM)} deep, tap drill \u00d8{c.M5_TAP_DRILL_MM:g} drilled {c.fmt(HOLE_DRILL_DEPTH_MM)} deep to the tip of a "
         f"{c.fmt(DRILL_POINT_DEG)}\u00b0 point (full diameter to {FULL_DIA_DEPTH:.2f}); floor under the tip {FLOOR_MIN:.1f} mm. The "
-        f"{c.fmt(sp.STANDOFF_FRONT_STUD_LENGTH_MM)} mm front stud seats {c.fmt(HOLE_THREAD_DEPTH_MM - sp.STANDOFF_FRONT_STUD_LENGTH_MM)} "
+        f"{c.fmt(sp.STANDOFF_STUD_FRONT_LENGTH_MM)} mm front stud seats {c.fmt(HOLE_THREAD_DEPTH_MM - sp.STANDOFF_STUD_FRONT_LENGTH_MM)} "
         f"mm short of the thread bottom. Back plate: M5 through-tapped (rotated {c.fmt(SQUARE_ROT)}\u00b0 with the square) "
-        f"for the {c.fmt(sp.STANDOFF_STUD_LENGTH_MM)} mm studs, not proud of the back face. Hole position \u00b1{c.fmt(c.POSITION_TOL_MM)}.",
+        f"for the {c.fmt(sp.STANDOFF_STUD_BACK_LENGTH_MM)} mm studs, not proud of the back face. Hole position \u00b1{c.fmt(c.POSITION_TOL_MM)}.",
         c.NOTE_SPIGOT,
     ]
     bottom = sh.notes_block(NOTES_X, NOTES_TOP, NOTES_W, notes, size=c.NOTE_SIZE)
@@ -223,6 +223,11 @@ def build(out_dir: str) -> list[str]:
 
 
 def print_checks() -> None:
+    print("PT-04", *c.check_against_part_scripts())
+    print(f"PT-04 blind M5 holes: thread {HOLE_THREAD_DEPTH_MM:g} deep, drill {HOLE_DRILL_DEPTH_MM:g} to the tip of a "
+          f"{DRILL_POINT_DEG:g} deg point (point length {POINT_LEN:.3f}, full diameter to {FULL_DIA_DEPTH:.3f}); "
+          f"floor under the tip {FLOOR_MIN:.2f} mm, at the hole wall {SQUARE_T - FULL_DIA_DEPTH:.2f} mm; "
+          f"front stud {sp.STANDOFF_STUD_FRONT_LENGTH_MM:g} ends {HOLE_THREAD_DEPTH_MM - sp.STANDOFF_STUD_FRONT_LENGTH_MM:g} mm short of the thread bottom")
     """Print the computed values that the drawing uses."""
     print(f"PT-04 plate {PLATE_W:g} x {PLATE_H:g} x {BACK_T:g}; square {SQUARE_SIDE:g} x {SQUARE_T:g}, slant {SQUARE_ROT:g} deg")
     print(f"PT-04 bevel run {RUN:.3f} mm, back face side {BACK_SIDE:.3f} mm")
