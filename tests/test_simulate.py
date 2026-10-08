@@ -42,7 +42,7 @@ MIN_FEATURE_PX = 10.0
 """The minimum feature diameter of the indicative synthetic matcher, pixels of the full-size sensor."""
 NOISE_FRAMES = 20
 """Frames of the temporal statistics in test (a)."""
-CENTER_ROI_HALF_PX = 20
+CENTER_ROI_HALF_PX = 14
 """Half side of the central pixel region used for plate statistics, pixels."""
 MEAN_DEPTH_TOLERANCE_MM = 0.5
 """Test (a): allowed difference between the mean rendered depth and the true plate depth."""
@@ -536,7 +536,7 @@ def test_quantizer_steps_the_rows_of_a_ramp_at_the_depth_quantum(params, geometr
     rows = np.flatnonzero(read[:, column])
     values = frame.depth[rows, column]
     jumps = np.flatnonzero(np.abs(np.diff(values)) > 0.5 * quantum)
-    assert len(jumps) >= 3                                                       # about four quanta over the plate
+    assert len(jumps) >= 2                                                       # two quanta over the plate (RAMP_QUANTA)
     ideal = frame.true_depth[rows, column]
     row_step = float(np.median(np.diff(ideal)))
     assert float(np.median(np.diff(jumps))) * row_step == pytest.approx(quantum, rel=0.1)

@@ -303,6 +303,11 @@ def test_legacy_depths_are_captured_at_the_center_only(full_plan):
     assert PARAMS.legacy_extra_stations_mm() == (700.0, 1000.0)
 
 
+NEAR_STATION_MM = PARAMS.z_min_mm
+"""Station of the field-fit tests: the nearest one, where even the 200 x 150 mm T2 board does not fit at the requested off-axis
+position (at 1000 mm it does, and nothing is pulled inward)."""
+
+
 def test_field_fraction_achieved_is_recorded_in_the_pose_notes(full_plan):
     """Section 5, Step 1: every pose placed at a field position records the achieved fraction of the requested offset in its
     notes; it is 1 for a position that fits (the center always) and equals the fraction kept of a pulled-in pose, which is
@@ -323,8 +328,8 @@ def test_field_fraction_achieved_is_recorded_in_the_pose_notes(full_plan):
     assert [c for c in plan if c.subseries == "tilt"][0].manifest_metadata() == {APPROACH_DIRECTION_KEY: APPROACH_STANDARD}
     # The fit margin is the ROI shrink of Analysis A: moving the margin changes the fraction kept.
     plate = make_standard_target_set(PARAMS, GEOMETRY).get(TARGET_NOISE_PLATE)
-    at_band = place_in_field(PARAMS, GEOMETRY, plate, 1000.0, (1.0, -1.0), PARAMS.boundary_band_half_width_px)
-    wider = place_in_field(PARAMS, GEOMETRY, plate, 1000.0, (1.0, -1.0), 2.0 * PARAMS.boundary_band_half_width_px)
+    at_band = place_in_field(PARAMS, GEOMETRY, plate, NEAR_STATION_MM, (1.0, -1.0), PARAMS.boundary_band_half_width_px)
+    wider = place_in_field(PARAMS, GEOMETRY, plate, NEAR_STATION_MM, (1.0, -1.0), 2.0 * PARAMS.boundary_band_half_width_px)
     assert wider.fraction_kept < at_band.fraction_kept
 
 
@@ -334,15 +339,15 @@ def test_field_positions_are_pulled_inward_until_the_target_fits():
     plate = make_standard_target_set(PARAMS, GEOMETRY).get(TARGET_NOISE_PLATE)
     margin = PARAMS.boundary_band_half_width_px
     camera = camera_of(GEOMETRY)
-    far = place_in_field(PARAMS, GEOMETRY, plate, 1000.0, (1.0, -1.0), margin)
-    half_h, half_v = GEOMETRY.half_field_mm(1000.0)
+    far = place_in_field(PARAMS, GEOMETRY, plate, NEAR_STATION_MM, (1.0, -1.0), margin)
+    half_h, half_v = GEOMETRY.half_field_mm(NEAR_STATION_MM)
     assert far.requested_h_mm == pytest.approx(PARAMS.field_offset_fraction * half_h)
     assert far.requested_v_mm == pytest.approx(-PARAMS.field_offset_fraction * half_v)
     assert 0.0 < far.fraction_kept < 1.0 and far.fits
     assert far.h_mm / far.requested_h_mm == pytest.approx(far.fraction_kept)
     assert far.v_mm / far.requested_v_mm == pytest.approx(far.fraction_kept)
-    assert fit_violation_px(camera, plate, fronto_parallel_pose(far.h_mm, far.v_mm, 1000.0), margin) == 0.0
-    assert fit_violation_px(camera, plate, fronto_parallel_pose(far.requested_h_mm, far.requested_v_mm, 1000.0),
+    assert fit_violation_px(camera, plate, fronto_parallel_pose(far.h_mm, far.v_mm, NEAR_STATION_MM), margin) == 0.0
+    assert fit_violation_px(camera, plate, fronto_parallel_pose(far.requested_h_mm, far.requested_v_mm, NEAR_STATION_MM),
                             margin) > 0.0
     center = place_in_field(PARAMS, GEOMETRY, plate, 800.0, (0.0, 0.0), margin)
     assert (center.h_mm, center.v_mm, center.fraction_kept) == (0.0, 0.0, 1.0)
@@ -1194,6 +1199,11 @@ def plane_session(tmp_path: Path, plane_offset_mm: float = 0.0, plane_tilt_deg: 
                    registration=None, targets=make_standard_target_set(PARAMS, GEOMETRY), records=records)
 
 
+MIN_PLANE_PIXELS = 500
+"""Pixels of the fitted front plane of the 160 x 120 px test stack: the 200 x 150 mm T2 board covers about 1,400 of them at
+800 mm, and 840 remain after the check's own edge exclusion."""
+
+
 def test_check_session_passes_a_flat_plane_and_flags_a_displaced_one(tmp_path: Path):
     """Section 4 Step 8 / quick look: a flat plane at Z_REFERENCE_MM (160 x 120 px stack, intrinsics / 4) matches the registered
     T2 and flags nothing; the same plane displaced by 5 mm, tilted by 6 degrees, or not read at all is flagged."""
@@ -1202,7 +1212,7 @@ def test_check_session_passes_a_flat_plane_and_flags_a_displaced_one(tmp_path: P
     pose = ok.poses[0]
     assert not pose.flags and ok.verdict().startswith("VERDICT: all 1 poses passed")
     assert pose.frames == CHECK_FRAMES and pose.valid_fraction == pytest.approx(1.0)
-    assert pose.front.pixels > 1000 and pose.front.rms_mm < 1e-3 and abs(pose.front.offset_mm) < 1e-3
+    assert pose.front.pixels > MIN_PLANE_PIXELS and pose.front.rms_mm < 1e-3 and abs(pose.front.offset_mm) < 1e-3
     assert pose.front.angle_deg < 1e-3 and np.isnan(pose.back.rms_mm)         # T2 has no back plate
     (tmp_path / "displaced").mkdir()
     displaced = check_session(plane_session(tmp_path / "displaced", plane_offset_mm=DISPLACEMENT_MM))

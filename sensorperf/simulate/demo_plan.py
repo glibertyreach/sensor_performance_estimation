@@ -124,6 +124,17 @@ def scaled_geometry(geometry: SensorGeometry, divisor: int) -> SensorGeometry:
         image_height_px=int(geometry.require("image_height_px")) // divisor)
 
 
+def scaled_parameters(params: CharacterizationParameters, divisor: int) -> CharacterizationParameters:
+    """The parameters for a sensor whose pixels are ``divisor`` times larger (:func:`scaled_geometry`): the width of the
+    boundary band (the ROI shrink of Analysis A, the field-fit margin of the planner), which is counted in pixels, is divided
+    by the same factor so that it covers the same millimeters of the target. Without this the 8 px band of the full-size sensor
+    would take 32 px of the --quick sensor and leave nothing of the 200 x 150 mm calibration board (T2), which is only 21 x 16
+    px there at 1600 mm. Every other parameter is kept."""
+    if divisor < 1:
+        raise ValueError("divisor must be at least 1")
+    return replace(params, boundary_band_half_width_px=params.boundary_band_half_width_px / divisor)
+
+
 def demo_registration() -> Registration:
     """The demonstration registration: a plausible camera -> base and target -> flange (module
     constants above), marked as simulated in its notes."""

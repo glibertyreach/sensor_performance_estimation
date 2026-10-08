@@ -15,7 +15,9 @@ so that the depth noise, the depth quantum and the minimum feature size in mm ar
 sensor (sigma_Z = sigma_d Z^2 / k and delta_Z = q Z^2 / k both keep their values; see
 ``SyntheticSensorModel.indicative_scaled``). The physical targets are always the
 standard set of the FULL-size indicative geometry, so a quick session uses the same targets as a full one
-and merely sees them with larger pixels.
+and merely sees them with larger pixels. The pixel width of the boundary band is divided by the same factor
+(:func:`sensorperf.simulate.demo_plan.scaled_parameters`), so that it covers the same millimeters of the 200 x 150 mm T2
+board, which is only 21 x 16 px on the quick sensor at 1600 mm.
 """
 from __future__ import annotations
 
@@ -30,7 +32,7 @@ import numpy as np
 from sensorperf.geometry.targets import make_standard_target_set
 from sensorperf.io.manifest import load_manifest, MANIFEST_FILE_NAME
 from sensorperf.parameters import CharacterizationParameters, SensorGeometry
-from sensorperf.simulate.demo_plan import ALL_SERIES, demo_plan, demo_registration, scaled_geometry
+from sensorperf.simulate.demo_plan import ALL_SERIES, demo_plan, demo_registration, scaled_geometry, scaled_parameters
 from sensorperf.simulate.sensor_model import SyntheticSensorModel
 from sensorperf.simulate.session import write_synthetic_session
 
@@ -65,9 +67,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command; returns the process exit code."""
     arguments = build_parser().parse_args(argv)
-    params = CharacterizationParameters()
     full_geometry = SensorGeometry.indicative()
     geometry = scaled_geometry(full_geometry, QUICK_PIXEL_DIVISOR) if arguments.quick else full_geometry
+    params = scaled_parameters(CharacterizationParameters(), QUICK_PIXEL_DIVISOR if arguments.quick else 1)
     frame_scale = (arguments.frame_scale if arguments.frame_scale is not None
                    else (QUICK_FRAME_SCALE if arguments.quick else 1.0))
     rng = np.random.default_rng(arguments.seed)

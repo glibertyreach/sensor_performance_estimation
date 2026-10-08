@@ -1188,10 +1188,10 @@ def _write_ramp_session(root: Path, station: float, noise_px: float, pattern_mm:
     from sensorperf.acquisition.plan import PlannedCapture, ramp_pose, ramp_tilt_deg
     from sensorperf.geometry.targets import fronto_parallel_pose, make_noise_plate, make_standard_target_set
     from sensorperf.parameters import CharacterizationParameters, SensorGeometry
-    from sensorperf.simulate.demo_plan import demo_registration, scaled_geometry
+    from sensorperf.simulate.demo_plan import demo_registration, scaled_geometry, scaled_parameters
     from sensorperf.simulate.session import write_synthetic_session
     from sensorperf.simulate.sensor_model import SyntheticSensorModel
-    params, full = CharacterizationParameters(), SensorGeometry.indicative()
+    params, full = scaled_parameters(CharacterizationParameters(), simulate_cli.QUICK_PIXEL_DIVISOR), SensorGeometry.indicative()
     geometry = scaled_geometry(full, simulate_cli.QUICK_PIXEL_DIVISOR)
     model = replace(SyntheticSensorModel.indicative_scaled(geometry, simulate_cli.QUICK_PIXEL_DIVISOR),
                     disparity_noise_px=noise_px, fixed_pattern_amplitude_mm=pattern_mm, fixed_pattern_seed=seed,
