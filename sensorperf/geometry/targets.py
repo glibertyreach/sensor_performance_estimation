@@ -530,7 +530,7 @@ def load_targets_asbuilt(path: str | Path) -> list[dict[str, Any]]:
 # Standard targets from the parameters (Section 3.2)
 # ---------------------------------------------------------------------------
 def make_noise_plate(params: CharacterizationParameters) -> TwoPlaneTarget:
-    """T2: the uniform matte plate of NOISE_PLATE_SIZE_MM. It is also the registration target: the plane-only
+    """T2: the uniform matte stage-1 calibration board of ``noise_plate_size_mm`` (width x height). It is also the registration target: the plane-only
     registration solve needs no pattern on it (redesign note, Section 3)."""
     width, height = params.noise_plate_size_mm
     return TwoPlaneTarget(TARGET_NOISE_PLATE, TARGET_KIND_PLATE, width / 2.0, height / 2.0)
@@ -540,9 +540,9 @@ def make_edge_target(params: CharacterizationParameters, kind: str, gap_mm: floa
                      plate_half_size_mm: tuple[float, float] | None = None) -> TwoPlaneTarget:
     """T3a (kind TARGET_KIND_RAISED_SQUARE) or T3b (TARGET_KIND_SQUARE_WINDOW): a
     square of EDGE_SQUARE_SIZE_MM rotated by EDGE_SLANT_DEG, with the back plate
-    (T3a) or the front plate (T3b) sized like the noise plate unless given."""
+    (T3a) or the front plate (T3b) of ``edge_plate_size_mm`` (not the smaller T2 board) unless given."""
     if plate_half_size_mm is None:
-        width, height = params.noise_plate_size_mm
+        width, height = params.edge_plate_size_mm
         plate_half_size_mm = (width / 2.0, height / 2.0)
     if kind == TARGET_KIND_RAISED_SQUARE:
         target_id, feature_kind = TARGET_RAISED_SQUARE, FEATURE_SQUARE_RAISED

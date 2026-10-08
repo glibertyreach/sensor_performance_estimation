@@ -34,7 +34,7 @@ from sensorperf.acquisition.plan import (
     camera_of, filters_off_budget, open_background_budget, fit_violation_px, format_budget_table, insert_sentinels, lateral_sweep_budget, staircase_budget, jitter_offset_mm, place_in_field,
     plan_detection_series, plan_drift_run, plan_edge_series, plan_full_session, plan_noise_series, plan_registration,
     plan_zstep_series, read_plan_csv, write_plan, APPROACH_FROM_BELOW, MIN_POSE_LOG_DECIMALS,
-    count_sentinel_remounts, tilt_is_feasible, tilt_near_edge_mm,
+    count_sentinel_remounts, ramp_visible_height_mm, tilt_is_feasible, tilt_near_edge_mm,
 )
 from sensorperf.acquisition.pose_log import PoseLogError, build_manifest, build_manifest_with_report
 from sensorperf.cli import check_captures as check_cli
@@ -207,18 +207,20 @@ def test_noise_station_order_is_a_permutation_of_the_station_list(full_plan):
 
 def test_tilt_feasibility_skips_tilts_that_bring_the_plate_edge_inside_z_min():
     """Section 5, Step 5 (tilt feasibility): a tilt is planned only where Z - h sin(tilt) >= Z_MIN, h the half extent of the
-    400 x 400 mm plate across the tilt axis (200 mm). At the indicative geometry every tilt at 400 mm is skipped, with its
+    200 x 150 mm T2 board across the tilt axis (100 mm about V, 75 mm about H). At the indicative geometry every tilt at 400 mm is skipped, with its
     reason listed in the diagnostics, and the tilt sub-series keeps the 800 and 1600 mm stations in both axes and all angles."""
     plate = make_standard_target_set(PARAMS, GEOMETRY).get(TARGET_NOISE_PLATE)
-    assert (plate.half_width_mm, plate.half_height_mm) == (200.0, 200.0)
-    # The rule itself, including its equality case (Z = 500 mm, 30 deg: the edge is exactly at Z_MIN).
-    assert tilt_near_edge_mm(plate, 800.0, "V", 30.0) == pytest.approx(700.0)
+    assert (plate.half_width_mm, plate.half_height_mm) == (100.0, 75.0)
+    # The rule itself, including its equality case (Z = 450 mm, 30 deg about V: the edge is exactly at Z_MIN).
+    assert tilt_near_edge_mm(plate, 800.0, "V", 30.0) == pytest.approx(750.0)             # 800 - 100 sin 30
+    assert tilt_near_edge_mm(plate, 800.0, "H", 30.0) == pytest.approx(762.5)             # 800 - 75 sin 30
     for axis in ("H", "V"):
         assert not any(tilt_is_feasible(PARAMS, plate, 400.0, axis, angle) for angle in (15.0, 30.0, 45.0))
         assert all(tilt_is_feasible(PARAMS, plate, z, axis, angle) for z in (800.0, 1600.0)
                    for angle in PARAMS.tilt_angles_deg)
-    assert tilt_is_feasible(PARAMS, plate, PARAMS.z_min_mm + 200.0 * np.sin(np.radians(30.0)), "V", 30.0)
-    assert not tilt_is_feasible(PARAMS, plate, PARAMS.z_min_mm + 200.0 * np.sin(np.radians(30.0)) - 0.01, "V", 30.0)
+    half_width_mm = plate.half_width_mm
+    assert tilt_is_feasible(PARAMS, plate, PARAMS.z_min_mm + half_width_mm * np.sin(np.radians(30.0)), "V", 30.0)
+    assert not tilt_is_feasible(PARAMS, plate, PARAMS.z_min_mm + half_width_mm * np.sin(np.radians(30.0)) - 0.01, "V", 30.0)
     diagnostics = PlanDiagnostics()
     plan = plan_noise_series(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), with_sentinels=False,
                              diagnostics=diagnostics)
@@ -244,6 +246,48 @@ def test_tilt_feasibility_follows_the_plate_size_and_z_min():
     assert not tilt_is_feasible(small_plate, plate, 400.0, "V", 15.0)
     low = dataclasses.replace(small_plate, z_min_mm=300.0)
     assert all(tilt_is_feasible(low, plate, 400.0, "H", angle) for angle in low.tilt_angles_deg)
+
+
+MIN_RAMP_ROWS_PER_QUANTUM = 30.0       # image rows per expected depth quantum that the 2-quanta ramp must offer at 1600 mm
+
+
+def test_tilt_sub_series_is_feasible_and_planned_from_476_mm_on():
+    """With the 200 x 150 mm T2 board (decision of 2026-10-08) every tilt of both axes is feasible from the second station of
+    the ladder, 476 mm, on (the worst case, 45 deg about V, leaves the near edge at 476 - 100 sin 45 = 405 mm >= Z_MIN) and
+    none at 400 mm. The planner takes the half extent across the tilt axis from the plate itself: 100 mm about V, 75 mm about
+    H. The tilt sub-series is planned at the reduced stations, so at the default parameters those are 800 and 1600 mm; when
+    the reduced stations include 476 mm (stride 1: every station), the sub-series is planned at every station from 476 mm on
+    and at none below it."""
+    plate = make_standard_target_set(PARAMS, GEOMETRY).get(TARGET_NOISE_PLATE)
+    second_station = PARAMS.z_stations_mm()[1]
+    assert second_station == 476.0
+    for axis, half_extent_mm in (("V", 100.0), ("H", 75.0)):
+        worst_edge_mm = second_station - half_extent_mm * math.sin(math.radians(max(PARAMS.tilt_angles_deg)))
+        assert tilt_near_edge_mm(plate, second_station, axis, max(PARAMS.tilt_angles_deg)) == pytest.approx(worst_edge_mm)
+        assert worst_edge_mm >= PARAMS.z_min_mm
+        assert all(tilt_is_feasible(PARAMS, plate, z, axis, angle)
+                   for z in PARAMS.z_stations_mm()[1:] for angle in PARAMS.tilt_angles_deg)
+        assert not any(tilt_is_feasible(PARAMS, plate, PARAMS.z_min_mm, axis, angle)
+                       for angle in PARAMS.tilt_angles_deg if angle != 0.0)
+    every_station = dataclasses.replace(PARAMS, z_reduced_station_stride=1)
+    plan = plan_noise_series(every_station, GEOMETRY, np.random.default_rng(MASTER_SEED), with_sentinels=False)
+    tilt_stations = sorted({c.station_z_mm for c in plan if c.subseries == "tilt"})
+    assert tilt_stations == list(PARAMS.z_stations_mm()[1:])
+    assert min(tilt_stations) == second_station
+
+
+def test_ramp_rows_per_quantum_at_1600_mm_are_at_least_30():
+    """Two expected quanta across the 150 mm visible height of the T2 board give about 32 image rows per quantum at 1600 mm
+    at the indicative geometry (the board is 150 mm x fy / 1600 mm = 64.5 rows high), and more at the nearer stations. At least
+    MIN_RAMP_ROWS_PER_QUANTUM rows per quantum keep the plateaus of the quantized ramp wide enough to measure."""
+    station = max(PARAMS.z_stations_mm())
+    visible_mm = ramp_visible_height_mm(GEOMETRY, make_standard_target_set(PARAMS, GEOMETRY).get(TARGET_NOISE_PLATE), station)
+    assert visible_mm == PARAMS.noise_plate_size_mm[1]
+    rows_per_quantum = visible_mm * GEOMETRY.sensor_fy_px / station / PARAMS.ramp_quanta
+    assert rows_per_quantum >= MIN_RAMP_ROWS_PER_QUANTUM
+    assert rows_per_quantum == pytest.approx(32.0, rel=0.05)
+    for z in PARAMS.z_stations_mm():                                    # nearer stations have more rows per quantum
+        assert PARAMS.noise_plate_size_mm[1] * GEOMETRY.sensor_fy_px / z / PARAMS.ramp_quanta >= rows_per_quantum
 
 
 def test_legacy_depths_are_captured_at_the_center_only(full_plan):
@@ -520,14 +564,14 @@ def test_zstep_ladder_alternates_with_the_right_displacement():
 def test_zstep_ramp_tilt_per_station():
     """Section 6.2, Ramp: one pose of T2 tilted about H at EVERY station of the ladder (nine), with FRAMES_PER_RAMP_POSE
     frames, sub-series "ramp", whose tilt makes the true depth across the plate's visible height (the smaller of the plate
-    height and the field height at that Z) span RAMP_QUANTA expected quanta: 0.3 deg at 400 mm and 3.6 deg at 1600 mm (within 10
-    percent) at the indicative geometry. The tilt is printed per station in plan_summary.txt."""
+    height and the field height at that Z) span RAMP_QUANTA (2) expected quanta: 0.3 deg at 400 mm and 4.7 deg at 1600 mm (within 10
+    percent) at the indicative geometry, where the visible height is the 150 mm height of the T2 board at every station. The tilt is printed per station in plan_summary.txt."""
     from sensorperf.acquisition.plan import plan_summary_text
     diagnostics = PlanDiagnostics()
     plan = plan_zstep_series(PARAMS, GEOMETRY, np.random.default_rng(MASTER_SEED), diagnostics=diagnostics)
     ramp = [c for c in plan if c.subseries == "ramp"]
     assert len(ramp) == 9 and [c.station_z_mm for c in ramp] == list(PARAMS.z_stations_mm())
-    plate_height = 400.0
+    plate_height = PARAMS.noise_plate_size_mm[1]                      # 150 mm: the height of the T2 board along V
     for c in ramp:
         z0 = c.station_z_mm
         assert c.tilt_axis == "H" and c.frames == PARAMS.frames_per_ramp_pose == 50 and c.field == 0
@@ -539,18 +583,18 @@ def test_zstep_ramp_tilt_per_station():
         assert c.target_to_camera.rotation == pytest.approx(
             Rotation.from_rotvec([math.radians(c.tilt_deg), 0.0, 0.0]).as_matrix())
     by_station = {c.station_z_mm: c.tilt_deg for c in ramp}
-    assert by_station[400.0] == pytest.approx(0.3, rel=0.1) and by_station[1600.0] == pytest.approx(3.6, rel=0.1)
+    assert by_station[400.0] == pytest.approx(0.3, rel=0.1) and by_station[1600.0] == pytest.approx(4.7, rel=0.1)
     # The tilt-feasibility rule (near edge at or beyond Z_MIN): every ramp keeps it, at Z_MIN by moving the plate center a
-    # millimeter farther (the tilt itself is 0.3 deg, but the plate is 400 mm high).
+    # fraction of a millimeter farther (the tilt itself is 0.3 deg and the board's near edge is 75 mm from its center).
     for c in ramp:
         assert c.notes["near_edge_mm"] >= PARAMS.z_min_mm - 1e-6
     shifts = {c.station_z_mm: c.notes["ramp_center_shift_mm"] for c in ramp}
-    assert shifts[400.0] == pytest.approx(200.0 * math.sin(math.radians(by_station[400.0])), rel=1e-6)
+    assert shifts[400.0] == pytest.approx(75.0 * math.sin(math.radians(by_station[400.0])), rel=1e-6)
     assert all(shifts[z] == 0.0 for z in shifts if z != 400.0)
     assert ramp[0].target_to_camera.translation[2] == pytest.approx(400.0 + shifts[400.0])
     assert any("moved" in note and "Z_MIN" in note for note in diagnostics.notes)
     text = plan_summary_text(plan, PARAMS, GEOMETRY, diagnostics)
-    assert "B-Z ramp per station" in text and "tilt 0.318 deg" in text and "tilt 3.555 deg" in text
+    assert "B-Z ramp per station" in text and "tilt 0.296 deg" in text and "tilt 4.742 deg" in text
     assert not any("ramp" in message for message in diagnostics.skipped)
 
 

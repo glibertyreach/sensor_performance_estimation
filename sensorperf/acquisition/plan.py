@@ -146,7 +146,7 @@ redesigned plan: the totals of ``plan_full_session`` with the default parameters
 frames/s) and no optional variants (no filters-off repeat, no open-background variant, no staircase; 7,194 poses, 42,520
 frames, 7.18 h). The B-Z series has 369 poses: the step ladder (6 rungs x 10 cycles x 2 visits at the three reduced
 stations, 360 poses, 3,600 frames) and the ramp (one pose at each of the nine stations, 450 frames). The A series has
-47 main poses (nine ladder stations at five field positions plus the two legacy depths at the center), 16 tilt poses (the 800 and 1600 mm stations; every tilt at 400 mm is infeasible) and the re-mount check, and the
+47 main poses (nine ladder stations at five field positions plus the two legacy depths at the center), 16 tilt poses (the 800 and 1600 mm stations; every tilt at 400 mm is infeasible with the 200 x 150 mm T2 board) and the re-mount check, and the
 sentinels (11, on the mounted target) are part of the totals. plan_summary.txt compares the plan it summarizes with these
 numbers, so a change of the parameters shows up as a ratio away from 1. The optional sets (the filters-off repeat, the B-Z
 staircase, the B-HV lateral sweep, the drift run and the open-background variant of C) and the drift sentinels captured
@@ -635,8 +635,8 @@ def plan_registration(params: CharacterizationParameters, geometry: SensorGeomet
 def tilt_near_edge_mm(plate: TwoPlaneTarget, station_z_mm: float, tilt_axis: str, tilt_deg: float) -> float:
     """Depth of the near edge of the plate when it is tilted by ``tilt_deg`` about ``tilt_axis`` through its center at
     ``station_z_mm``: Z - h sin(|tilt|), where h is the half extent of the plate across the tilt axis (the edge that swings
-    toward the sensor: half the width for a tilt about V, half the height for a tilt about H; both are 200 mm for the
-    400 x 400 mm plate)."""
+    toward the sensor: half the width for a tilt about V, half the height for a tilt about H; 100 mm and 75 mm for the
+    200 x 150 mm T2 board)."""
     half_extent = plate.half_width_mm if tilt_axis == TILT_AXIS_V else plate.half_height_mm
     return station_z_mm - half_extent * math.sin(math.radians(abs(tilt_deg)))
 
@@ -645,7 +645,8 @@ def tilt_is_feasible(params: CharacterizationParameters, plate: TwoPlaneTarget, 
                      tilt_deg: float) -> bool:
     """Whether a tilted plate keeps its near edge at or beyond Z_MIN (Section 5, Step 5, tilt feasibility): Z - h sin(tilt)
     >= Z_MIN, so that no part of the plate comes closer to the sensor than the nearest depth the sensor is specified to
-    read. With the 400 x 400 mm plate this rules out every tilt at Z = 400 mm and none at 800 and 1600 mm."""
+    read. With the 200 x 150 mm board this rules out every tilt at Z = 400 mm (even 15 deg about V puts the edge at 374 mm) and none
+    from the second station of the ladder (476 mm) on; the largest swing, 45 deg about V, puts the edge at 405 mm there."""
     return tilt_near_edge_mm(plate, station_z_mm, tilt_axis, tilt_deg) >= params.z_min_mm - TILT_NEAR_EDGE_TOLERANCE_MM
 
 
@@ -690,8 +691,8 @@ def plan_noise_series(params: CharacterizationParameters, geometry: SensorGeomet
     TILT_ANGLES_DEG (FRAMES_PER_TILT_POSE frames each; the zero angle is captured in both
     sweeps, as the procedure lists it). A tilt is planned only where the plate's near edge stays at or beyond Z_MIN
     (:func:`tilt_is_feasible`: Z - h sin(tilt) >= Z_MIN, h the half extent of the plate across the tilt axis); infeasible
-    tilts are skipped and listed in plan_summary.txt with the reason. With the 400 x 400 mm plate every tilt at 400 mm is
-    infeasible, which leaves the 800 and 1600 mm stations. Step 6: the repeat-mount check repeats the center station at
+    tilts are skipped and listed in plan_summary.txt with the reason. With the 200 x 150 mm board every tilt at 400 mm is
+    infeasible, which leaves the 800 and 1600 mm stations (476 mm would be feasible, but it is not a reduced station). Step 6: the repeat-mount check repeats the center station at
     Z_REFERENCE_MM after the tilt sub-series (subseries "remount"). Step 3: the drift sentinels
     are inserted by :func:`insert_sentinels` when ``with_sentinels`` is true.
 
@@ -885,7 +886,8 @@ def z_step_rungs_mm(params: CharacterizationParameters, expected_quantum_mm: flo
 
 def ramp_visible_height_mm(geometry: SensorGeometry, plate: TwoPlaneTarget, station_z_mm: float) -> float:
     """Height of the part of the plate the sensor sees at the station, mm: the smaller of the plate height and the field
-    height at that Z (the plate fills the image at 400 mm and is smaller than the image from about 550 mm on)."""
+    height at that Z (with the 150 mm high T2 board that is the board height at every station of the ladder: the field is 279 mm high at 400 mm
+    at the indicative geometry)."""
     field_height = 2.0 * geometry.half_field_mm(station_z_mm)[1]
     return min(2.0 * plate.half_height_mm, field_height)
 
@@ -970,8 +972,8 @@ def plan_zstep_series(params: CharacterizationParameters, geometry: SensorGeomet
     across the plate's visible height span RAMP_QUANTA expected quanta (:func:`ramp_tilt_deg`), FRAMES_PER_RAMP_POSE frames.
     The tilt is stored in ``tilt_deg`` and printed per station in plan_summary.txt. The tilt-feasibility rule of the A tilt
     sub-series applies (:func:`tilt_is_feasible`: the plate's near edge, Z - h sin(tilt), stays at or beyond Z_MIN). The
-    ramp tilts are small, but the plate is 400 mm high, so at Z0 = Z_MIN the near edge would be a millimeter closer than
-    Z_MIN; there (and wherever the rule would fail) the plate center is moved farther by exactly the shortfall so that the
+    ramp tilts are small, but the near edge of the 150 mm high board, 75 mm from its center, is still a little closer than
+    Z_MIN at Z0 = Z_MIN (0.39 mm at the indicative geometry); there (and wherever the rule would fail) the plate center is moved farther by exactly the shortfall so that the
     near edge sits at Z_MIN (``notes["ramp_center_shift_mm"]``, noted in plan_summary.txt); the station stays Z0. A station
     whose ramp is geometrically impossible (span not less than the visible height) is skipped and listed with the reason.
 

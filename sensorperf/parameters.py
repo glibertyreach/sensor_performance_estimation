@@ -331,9 +331,11 @@ class CharacterizationParameters:
     the pose, in the direction of increasing Z."""
     z_step_repeats: int = 10
     """ABAB cycles for each step size."""
-    ramp_quanta: float = 4.0
+    ramp_quanta: float = 2.0
     """The B-Z ramp tilts the plate about H so that the true depth across the plate's VISIBLE height (the smaller of the
-    plate height and the field height at that Z) spans this many expected depth quanta (Section 6.2)."""
+    plate height and the field height at that Z) spans this many expected depth quanta (Section 6.2). With the 150 mm high
+    stage-1 calibration board (T2) the visible height is the board height from about 380 mm on, so 2 quanta across it give
+    about 32 image rows per quantum at 1600 mm at the indicative geometry, and more at the nearer stations."""
     ramp_max_intermediate_fraction: float = 0.5
     """Classification of a B-Z ramp curve as stepped or smooth (Section 11.2, Step 14): the curve counts as stepped when
     fewer than this fraction of its changes over a half-quantum window are intermediate (fall inside
@@ -453,8 +455,16 @@ class CharacterizationParameters:
     """The correlation length is the lag where the normalized autocorrelation first falls to this (1/e)."""
 
     # Targets
-    noise_plate_size_mm: tuple[float, float] = (400.0, 400.0)
-    """Uniform matte plate (T2), width x height."""
+    noise_plate_size_mm: tuple[float, float] = (200.0, 150.0)
+    """Uniform matte plate (T2), the stage-1 calibration board: width (along H) x height (along V), mm. Decision of the
+    project owner, 2026-10-08: the former 400 x 400 mm noise plate is eliminated. The plate is at least 6 mm thick, matte
+    and flat to ``plate_flatness_mm``, and sits on its existing board adapter. A tilt about H swings the half-height
+    (75 mm) toward the sensor, a tilt about V the half-width (100 mm); the planner's tilt-feasibility rule and the B-Z
+    ramp use these half extents."""
+    edge_plate_size_mm: tuple[float, float] = (400.0, 400.0)
+    """Back plate of T3a and front plate of T3b, width x height, mm. These plates carry a 160 mm square and must extend past
+    it by the boundary band plus the shadow, so they do NOT follow the smaller T2 board: they keep the 400 x 400 mm size
+    that the noise plate had when the edge targets were defined."""
     plate_flatness_mm: float = 0.05
     """Required flatness of every plate."""
     plate_flatness_sigma_fraction: float = 0.25
