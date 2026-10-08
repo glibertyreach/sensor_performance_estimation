@@ -1,0 +1,616 @@
+{
+  "slides": [
+    {
+      "id": "title",
+      "builder": "title",
+      "layout": "title_dark",
+      "section": "Introduction",
+      "title": "VSX3000 Performance Testing: Test Procedure and Robot Program",
+      "subtitle": "Running the five capture series and what the robot program must do",
+      "footer": "Test procedure  ·  October 2026",
+      "notes": "This deck walks through the technician procedure for the VSX3000 characterization session: preparation, registration, the plan, the five capture series, the pose log and manifest, the checks, and the deliverables. It follows sections 3 to 15 of the procedure; the targets and fixtures are in the procurement and build deck and in section 1. The analysis definitions are in the characterization specification; the procedure says how to capture, not how to compute."
+    },
+    {
+      "id": "purpose",
+      "builder": "purpose",
+      "layout": "title_only",
+      "section": "Introduction",
+      "title": "What we are measuring, and why",
+      "columns": [
+        {
+          "head": "The five series",
+          "icon": "crosshairs",
+          "points": [
+            "A: depth noise against distance, incidence angle and drift, on the board",
+            "B: lateral resolution from the edge targets, at two step heights",
+            "Z: the smallest detectable depth step and the depth quantum",
+            "C: true against sensed area of disks and cutouts",
+            "D: the minimum detectable feature size, as a detection probability"
+          ]
+        },
+        {
+          "head": "What the robot gives us",
+          "icon": "robot",
+          "points": [
+            "Commanded, repeatable, logged target poses in front of a fixed sensor",
+            "Ground truth in the sensor frame through one registration from the board's plane",
+            "Read-back poses at 0.01 mm: the step truth of series Z",
+            "Every pose approached from the same direction, so backlash enters no comparison"
+          ]
+        },
+        {
+          "head": "What the session produces",
+          "icon": "clipboardCheck",
+          "points": [
+            "One session folder of raw .mc frames with a manifest that says, for every file, which target was where",
+            "Six analyses that write forward_model_parameters.json, the hand-off to the forward-noise simulator",
+            "Analysis E, boundary bias, reuses the B and C frames and needs no captures of its own"
+          ]
+        }
+      ],
+      "message": "If the manifest is wrong, the results are wrong: much of the procedure is about getting that table right.",
+      "notes": "Figure 1 of the procedure gives the order and the dependencies: registration feeds every analysis, the noise level from A sets the thresholds of B, C and D, the edge spread function from B predicts the area bias measured in C, and E reuses the B and C frames. Series run in the order A, B, Z, C, D without moving the sensor between them."
+    },
+    {
+      "id": "product",
+      "builder": "product",
+      "layout": "title_only",
+      "section": "Introduction",
+      "title": "One session folder, 7,202 poses, 42,920 frames",
+      "stats": [
+        {
+          "value": "7,202",
+          "label": "robot poses in the default plan, in the planner's order"
+        },
+        {
+          "value": "7.2 h",
+          "label": "of robot time at 10 frames per second and 3 s per move; two to three working days with swaps, checks and warm-up"
+        },
+        {
+          "value": "430 GB",
+          "label": "of .mc frames at 10 GB per 1,000 frames; check storage before starting"
+        }
+      ],
+      "message": "Save every frame raw, with one manifest row per frame, so any analysis can be re-run without re-capturing.",
+      "body": "The default plan is the capture budget of procedure section 13. Outside it are the optional captures the engineer plans only when needed: the filters-off repeat of A and B, the staircase of Z, the lateral sweep of B, the open-background variant of C, and the separate 8 hour drift run taken with the robot idle.",
+      "notes": "The budget assumes a frame rate of 10 frames per second and 3 seconds per move plus settle; the VSX3000 frame rate in the chosen trigger mode replaces them. The extended 5 percent detection series takes about a third of the robot time; the engineer can halve it by lowering the extended trials from 300 to 150, at the cost of a wider interval on the 5 percent point. Section 13 of the procedure has the budget table per series."
+    },
+    {
+      "id": "flow",
+      "builder": "flow",
+      "layout": "title_only",
+      "section": "Introduction",
+      "title": "The session at a glance",
+      "steps": [
+        {
+          "n": 1,
+          "head": "Prepare",
+          "text": "Loggers on; sensor configuration fixed and recorded; warm-up until the plane Z stops drifting; settle check"
+        },
+        {
+          "n": 2,
+          "head": "Register",
+          "text": "30 hand-jogged poses of the board; the plane-correspondence solve; accept at 0.15 mm RMS or better"
+        },
+        {
+          "n": 3,
+          "head": "Plan",
+          "text": "plan_stations writes poses.csv, the summary and the picture; record the seed"
+        },
+        {
+          "n": 4,
+          "head": "Series A and B",
+          "text": "Noise on the board, then edges on T3a and T3b at both gaps"
+        },
+        {
+          "n": 5,
+          "head": "Series Z",
+          "text": "Step ladder and ramp on the board, every pose approached from below"
+        },
+        {
+          "n": 6,
+          "head": "Series C and D",
+          "text": "Areas and detection trials on T4 and T5 at both gaps"
+        },
+        {
+          "n": 7,
+          "head": "Hand over",
+          "text": "Pose log, manifest, checks, session log, environment log, photos"
+        }
+      ],
+      "notes": "Every target swap is followed by the mount check of step 4.8, and the planner has already placed drift sentinels in the pose list before series A, every 60 minutes, and after the last pose of each series, on whatever target is mounted at that moment. Tell the engineer at once if a series stops early; later series depend on earlier ones."
+    },
+    {
+      "id": "prep",
+      "builder": "prep",
+      "layout": "title_only",
+      "section": "Introduction",
+      "title": "Preparation before the first session",
+      "columns": [
+        {
+          "head": "Robot",
+          "icon": "robot",
+          "points": [
+            "Flange confirmed against ISO 9409-1-50-4-M6; repeatability 0.05 mm or better",
+            "Controller reports the actual pose at 0.01 mm with a time stamp",
+            "Each fixture weighed; tool load data entered",
+            "Robot program written to the pose-list interface; dry run of every pose at reduced speed with the largest target",
+            "Safety review"
+          ]
+        },
+        {
+          "head": "Sensor and computers",
+          "icon": "camera",
+          "points": [
+            "Capture software set for the trigger and the pose-id file names",
+            "Production sensor configuration chosen and recorded in sensor_config.json; filters-off repeat decided",
+            "At least 430 GB free on the capture computer",
+            "This repository installed on the analysis computer and self-tested"
+          ]
+        },
+        {
+          "head": "Cell",
+          "icon": "layout",
+          "points": [
+            "Layout study: target centers from 400 to 1600 mm, the five field positions and tilts to 45 degrees inside the robot's reach, before the sensor mount is fixed",
+            "Run-out base plate bolted to the table",
+            "Robot base frame identified and recorded; temperature loggers started and their clocks checked"
+          ]
+        }
+      ],
+      "message": "The targets, the adapter and the tools themselves are in the procurement and build deck and in section 1 of the procedure.",
+      "notes": "Section 1f of the procedure. Once the robot model and controller are settled, the robot program can be written with Claude Code to the interface of section 11. The dry run must include the 2 mm back-off below each series Z pose and the approach retreat of every other pose."
+    },
+    {
+      "id": "setup",
+      "builder": "board",
+      "layout": "title_only",
+      "section": "Setup",
+      "title": "The sensor stays fixed; the robot carries the target",
+      "image": "assets/setup.png",
+      "points": [
+        "The sensor stands on its own rigid mount, mechanically separate from the robot base; a bump means a new session",
+        "The robot carries the target on the adapter anywhere between 400 and 1600 mm, the working range of the test",
+        "The laboratory is enclosed and its lighting constant: no light meter, no ambient-light log, no changes during the session",
+        "Sensor-housing and air temperatures are logged every minute into environment_log.csv",
+        "The origin of every pose is the optical center of the left IR camera; H and V are the image axes, Z the optical axis"
+      ],
+      "notes": "Figure 2 of the procedure. The robot must report its actual, encoder-derived flange pose at the capture time, to 0.01 mm, time-stamped against the frames; if it cannot, tell the engineer before starting, because for series Z the read-back pose is the step truth. Do not change the active base frame, the exposure or any sensor setting during the session."
+    },
+    {
+      "id": "warmup",
+      "builder": "checks",
+      "layout": "title_only",
+      "section": "Setup",
+      "title": "Configuration, warm-up, settle and frame checks",
+      "cards": [
+        {
+          "head": "Sensor configuration (engineer)",
+          "flag": "step 4.2",
+          "text": "Auto-exposure off; exposure, gain, emitter power and trigger mode fixed; every filter setting, the SDK and firmware versions in sensor_config.json under a config_id"
+        },
+        {
+          "head": "Warm-up",
+          "flag": "step 4.3",
+          "text": "Power for at least 45 minutes; then the board at 800 mm, 10 frames every minute, until the mean plane Z drifts less than 0.1 of its temporal noise over 10 minutes"
+        },
+        {
+          "head": "Settle and vibration",
+          "flag": "step 4.4",
+          "text": "At 400 mm, 100 frames with the servos on after a move and 100 with the brakes on; raise the 2 s settle time or stiffen the mount if the servo-on noise exceeds the brakes-on noise by more than 10 percent"
+        },
+        {
+          "head": "Intrinsics and frame checks (engineer)",
+          "flag": "step 4.5",
+          "text": "Dagger values from the SDK into sensor_config.json; valid depth at 400 and 1600 mm; depth registered to the left IR image within 0.5 px; baseline direction from the occlusion band"
+        }
+      ],
+      "caption": "Procedure section 3. Whatever settle time passes the check is the one the robot program uses; write the date, serial numbers, versions, base frame and plate reports in session_log.md.",
+      "notes": "The optional separate drift run also belongs here: on the same day or the day before, the board on a fixed stand at 800 mm, the sensor powered from cold, 30 frames every 2 minutes for 8 hours with the loggers running and nothing touched. It measures the sensor's own drift against its temperature; the sentinels in the session stay required because only they see the robot and the mounts."
+    },
+    {
+      "id": "registration",
+      "builder": "loop",
+      "layout": "title_only",
+      "section": "Setup",
+      "title": "Registration: 30 hand-jogged poses of the board",
+      "steps": [
+        {
+          "n": 1,
+          "head": "Mount",
+          "text": "The board on its adapter; mount check"
+        },
+        {
+          "n": 2,
+          "head": "Jog",
+          "text": "To each of the 30 registration poses of the plan: 400 to 1600 mm, across the field, tilted about H and V up to plus or minus 20 degrees, the board fully visible"
+        },
+        {
+          "n": 3,
+          "head": "Capture",
+          "text": "10 depth frames and the read-back robot pose at each; files named by the rule of section 5"
+        },
+        {
+          "n": 4,
+          "head": "Solve (engineer)",
+          "text": "Fit the plane of each capture; register --observations observations.csv --out registration.json"
+        }
+      ],
+      "stats": [
+        {
+          "value": "0.15 mm",
+          "label": "RMS plane-distance residual to accept"
+        },
+        {
+          "value": "~0.1 mm",
+          "label": "expected standard error of the camera's Z offset, recorded with the result"
+        }
+      ],
+      "message": "If the residual is larger, add poses with larger tilts or check the mount, then solve again. Registration comes first, so the poses are jogged by hand; the exact pose is solved afterward.",
+      "notes": "Procedure section 4. The plane-correspondence solve fixes the camera's pose in the robot base from the depth planes alone: no pattern plate, no IR image, no emitter switching. What planes cannot observe, the sideways position of a target on the flange, comes from the as-built datum and the once-per-mount check against the left IR image. The registration's translation cancels in series Z, which is a difference of registered poses."
+    },
+    {
+      "id": "mount_check",
+      "builder": "board",
+      "layout": "title_only",
+      "section": "Setup",
+      "title": "The mount check after every target swap",
+      "image": "assets/mounting.png",
+      "points": [
+        "Move the mounted target to the mount-check station, 800 mm, centered and fronto-parallel; capture a few frames into a folder of their own",
+        "check_captures --mount-check fits the front plane and compares it with the registered pose: Z within 0.15 mm, tilt within 0.05 degrees",
+        "For a feature target it also locates one feature outline in the image and compares H and V with the as-built datum offsets: within 0.5 px",
+        "PASS or FAIL per check with the measured value; otherwise re-seat the target or correct the datum record",
+        "The spigot and dowel return every target to the same datum, so a passed check makes re-mounting safe"
+      ],
+      "notes": "Procedure step 4.8. The check frames are not part of the plan and need no pose-log lines; keep them in mount_check_<target>/ in the session folder. The tool reads targets.json, targets_asbuilt.csv and parameters.json from the folder of registration.json. For the board, which has no features, H and V are skipped and the verdict says so."
+    },
+    {
+      "id": "plan",
+      "builder": "plan",
+      "layout": "title_only",
+      "section": "Capture",
+      "title": "One plan, 9 stations, 5 field positions",
+      "image": "assets/plan_example.png",
+      "stats": [
+        {
+          "value": "9",
+          "label": "stations of one geometric ladder, 400 to 1600 mm at a ratio of 2 to the quarter power"
+        },
+        {
+          "value": "5",
+          "label": "field positions: the center and four corners at 0.6 of the half field"
+        },
+        {
+          "value": "1 seed",
+          "label": "logged in session_log.md; the same seed and inputs give the same plan again"
+        }
+      ],
+      "caption": "The default plan: target centers in the sensor frame, side and front views, colored by series. Each cloud around a station is a set of random lateral offsets.",
+      "notes": "Procedure section 5. Run plan_stations once the registration is accepted and the sensor values are in sensor_config.json; it writes poses.csv, plan_summary.txt, plan.png, targets.json and parameters.json. Read plan_summary.txt before starting: it lists every pose the coverage rule pulled inward, every adjustment and every warning. Decide the optional captures before the first capture and plan once; adding the filters-off repeat, the open-background variant or the C-frame reuse later changes the random offsets of later series."
+    },
+    {
+      "id": "stations",
+      "builder": "board",
+      "layout": "title_only",
+      "section": "Capture",
+      "title": "Which series visits which stations",
+      "image": "assets/stations_left.png",
+      "points": [
+        "All 9 stations: series A, C and D, and the ramp of Z; A adds the legacy depths 700 and 1000 mm at the center",
+        "Every second station, the 5 shape stations 400, 566, 800, 1131 and 1600 mm: series B",
+        "Every fourth station, the 3 reduced stations 400, 800 and 1600 mm: the step ladder of Z; the tilt sub-series of A at 476, 800 and 1600 mm",
+        "The 3 farthest stations: the extended detection trials of D",
+        "The reference station 800 mm: warm-up check, sentinels, mount check, field sub-series of C, open-background variant, lateral sweep"
+      ],
+      "notes": "Figure 6 of the procedure. A target that would not fit the field at a corner is pulled inward by the coverage rule and the achieved field fraction is logged in the row; do not move it back out. The tilt sub-series cannot run at 400 mm with the 200 x 150 mm board because the tilted board's near edge would come closer than the near limit, so the planner moves that sweep to 476 mm."
+    },
+    {
+      "id": "robot_program",
+      "builder": "robot_program",
+      "layout": "title_only",
+      "section": "Capture",
+      "title": "What the robot program must do",
+      "columns": [
+        {
+          "head": "Inputs",
+          "icon": "input",
+          "points": [
+            "poses.csv from the planner: one row per pose in execution order, with the wanted target pose in the camera frame and the flange pose from the registration",
+            "The settle time of step 4.4, 2 s unless the check raised it"
+          ]
+        },
+        {
+          "head": "Behavior",
+          "icon": "cogs",
+          "points": [
+            "Joint move to a point short of the pose along the approach, then a linear move onto it: from below in Z and from the negative side of H and V, every pose, every series",
+            "Series Z: back off 2 mm toward smaller Z, then move up onto the pose",
+            "Never change the base frame, the speed settings or the sensor configuration"
+          ]
+        },
+        {
+          "head": "Outputs",
+          "icon": "output",
+          "points": [
+            "Trigger the row's frames through the capture software, named <proc>_<target>_G<gap>_Z<zzzz>_F<field>_P<pose>_f<frame>.mc",
+            "Append the REPORTED flange pose, the temperatures and a time stamp to the pose log; note where it is written"
+          ]
+        }
+      ],
+      "message": "Once the robot model and controller are settled, the robot program can be written with Claude Code.",
+      "notes": "Procedure section 5, robot program outline, and section 11 for the pose log. The one exception to the approach rule is the optional lateral sweep of series B, where odd-numbered poses approach from the negative side and even-numbered from the positive side, so that hysteresis can be measured; the row says so in its approach_direction note."
+    },
+    {
+      "id": "loop",
+      "builder": "loop",
+      "layout": "title_only",
+      "section": "Capture",
+      "title": "The per-pose loop",
+      "steps": [
+        {
+          "n": 1,
+          "head": "Move",
+          "text": "Joint move to the approach point, linear move onto the pose, always from the same side"
+        },
+        {
+          "n": 2,
+          "head": "Settle",
+          "text": "Wait the settle time for vibration to die out"
+        },
+        {
+          "n": 3,
+          "head": "Capture",
+          "text": "The row's frames, named from the row: for example C_T5_G15_Z0800_F0_P017_f03.mc"
+        },
+        {
+          "n": 4,
+          "head": "Log",
+          "text": "Read the actual, encoder-derived flange pose and append it with the temperatures and a time stamp"
+        }
+      ],
+      "stats": [
+        {
+          "value": "3 s",
+          "label": "assumed per move plus settle in the budget"
+        },
+        {
+          "value": "10 fps",
+          "label": "assumed frame rate; the real one replaces it"
+        }
+      ],
+      "message": "Follow the order column. Do not choose stations, positions or order yourself, and do not delete any frames.",
+      "notes": "Procedure section 5. Pose numbers have three digits; the optional captures planned outside the budget number their poses from 1000, 2000, 3000, 4000 and 5000 and so have four. A target without a back plate (the board) writes G0 in the file name."
+    },
+    {
+      "id": "series_ab",
+      "builder": "checks",
+      "layout": "title_only",
+      "section": "Capture",
+      "title": "Series A and B: the board, then the edge targets",
+      "cards": [
+        {
+          "head": "A, noise on the board",
+          "flag": "T2, 100 frames per pose",
+          "text": "All 9 stations at the 5 field positions plus the legacy depths at the center, in randomized order; then the tilt sub-series at 476, 800 and 1600 mm (0, 15, 30, 45 degrees about V then H, 50 frames); then dismount, re-mount and repeat the 800 mm center station"
+        },
+        {
+          "head": "B, edges",
+          "flag": "T3a then T3b, 30 frames per pose",
+          "text": "At each of the 5 shape stations: 1 nominal pose and 25 jitter poses with logged random offsets up to plus or minus 4 px; the gap at 15 mm, then at 60 mm; the square's 5 degree slant is part of the target"
+        },
+        {
+          "head": "Sentinels",
+          "flag": "30 frames at 800 mm",
+          "text": "Captured on whatever target is mounted, before A, every 60 minutes, after the last pose of each series; never swap a target for one"
+        },
+        {
+          "head": "Optional",
+          "flag": "engineer decides",
+          "text": "The filters-off repeat of A and B with a new config_id; the lateral sweep of T3a at 800 mm, 20 poses in H and 20 in V in 0.1 px steps, approached from alternating sides"
+        }
+      ],
+      "caption": "Procedure sections 6 and 7. Each target stays mounted as long as the plan allows; the mount check follows every swap.",
+      "notes": "The random lateral offsets sample every sub-pixel phase of each edge; the plan holds them in millimeters so the robot only executes the row. Comparing the two gaps tests whether the normalized edge response depends on step height. The left and right edges of the square have opposite occlusion geometry relative to the baseline, which is why both polarities and all four edges are captured."
+    },
+    {
+      "id": "series_z",
+      "builder": "approach",
+      "layout": "title_only",
+      "section": "Capture",
+      "title": "Series Z: step ladder and ramp, approached from below",
+      "image": "assets/zstep.png",
+      "steps": [
+        {
+          "n": 1,
+          "text": "Mount the board centered and fronto-parallel; mount check; every pose of the series backs off 2 mm and moves up onto its pose"
+        },
+        {
+          "n": 2,
+          "text": "Step ladder at 400, 800 and 1600 mm: six rungs of 0.25 to 8 expected quanta, never below 0.1 mm; alternate Z0 and Z0 plus the step for 10 cycles, 10 frames per visit"
+        },
+        {
+          "n": 3,
+          "text": "Ramp at all 9 stations: the board tilted about H so the true depth across its height spans 3 expected quanta, 0.4 degrees near to 7.1 degrees far; 50 frames; the tilt is in the row"
+        },
+        {
+          "n": 4,
+          "text": "Log the read-back pose as it is: it is the step truth; never correct it by hand"
+        },
+        {
+          "n": 5,
+          "text": "Optional staircase, planned later with the same seed, only if the ramp measured a quantum of at least 0.1 mm"
+        }
+      ],
+      "notes": "Procedure section 8 and Figure 8. The true step between two visits is the difference of their registered front-plane depths, so the registration's translation cancels and only the robot's relative motion matters; the smallest rung, 0.1 mm, is twice the robot repeatability. The ramp finds the quantum without small Z moves: each image row lies at one true depth and the rows step through the quanta."
+    },
+    {
+      "id": "series_cd",
+      "builder": "robot_program",
+      "layout": "title_only",
+      "section": "Capture",
+      "title": "Series C and D: areas and detection trials",
+      "columns": [
+        {
+          "head": "C, areas",
+          "icon": "crosshairs",
+          "points": [
+            "T4 and T5, each gap, all 9 stations, centered: 30 poses of 10 frames with random offsets",
+            "Field sub-series at 800 mm and the small gap: the four corners, 10 poses each, pulled inward where needed",
+            "Optional open-background variant at 800 mm: back plate off, 800 mm of clear space behind the holes"
+          ]
+        },
+        {
+          "head": "D, detection trials",
+          "icon": "eye",
+          "points": [
+            "One frame per pose at a fresh random offset: one trial for every feature and blank site on the plate at once",
+            "60 trials per feature and station; 300 at the 3 farthest stations for the 5 percent level",
+            "Shuffled order with a logged seed; the first frame of each C pose may count as a trial if the engineer asked for it"
+          ]
+        },
+        {
+          "head": "Rules",
+          "icon": "sliders",
+          "points": [
+            "Never use two frames of one pose as two trials",
+            "Post check first: check_captures --pilot 800 on the first C frames; posts seen above the false-alarm rate are remade thinner",
+            "Keep frame f00 of every C pose"
+          ]
+        }
+      ],
+      "message": "The detection levels are the feature-and-station pairs: 27 values of subtended size, spaced by the station ratio, overlapping by half an octave.",
+      "notes": "Procedure sections 9 and 10. Sensed area depends on where a feature's edge falls relative to the pixel grid and the projector dots, so the random offsets average over the phase and also measure its spread. The 0 percent detection level is not measured; the analysis predicts it from the fitted curve below the 5 percent point and labels it a prediction. If time is short, 150 extended trials still measure the 5 percent level, to about plus or minus 3.5 percent."
+    },
+    {
+      "id": "manifest",
+      "builder": "manifest",
+      "layout": "title_only",
+      "section": "Capture",
+      "title": "The pose log and the manifest",
+      "columns": [
+        {
+          "head": "What the log holds, per pose",
+          "points": [
+            "procedure, target_id, gap_mm, station_z_mm, field, pose_index, frames: exactly the plan row, which also names the files",
+            "x_mm, y_mm, z_mm: the REPORTED flange position in the base frame, at least 2 decimals",
+            "rotation_type and r1 to r9: the orientation in the controller's own form",
+            "timestamp, sensor_temp_c, air_temp_c"
+          ]
+        },
+        {
+          "head": "Rotation forms the tools accept",
+          "points": [
+            "quaternion_wxyz (ABB) or quaternion_xyzw",
+            "euler_zyx_deg: KUKA A, B, C",
+            "fixed_xyz_deg: FANUC W, P, R",
+            "rotvec_deg: Universal Robots, in degrees",
+            "matrix: nine numbers, row by row",
+            "make_manifest converts them all and names every file or pose that does not match"
+          ]
+        }
+      ],
+      "example": "C,T5,15,800,0,17,10,812.40,-33.21,455.02,euler_zyx_deg,-91.3,19.8,0.4,",
+      "notes": "Procedure section 11. After the session the engineer runs make_manifest with the pose log, the capture folder, the plan and the registration; it matches every file to its plan row by name, takes the read-back pose from the log and computes the target pose in the camera frame. A pose without files or a file without a pose is a warning; problems in the log or plan stop the tool. Never use poses.csv as the pose log: it holds the commanded poses, and the analysis needs the reported ones. A log rounded to 0.1 mm makes the smallest Z rungs meaningless."
+    },
+    {
+      "id": "checks",
+      "builder": "checks",
+      "layout": "title_only",
+      "section": "Checks",
+      "title": "Check each series while the targets are still set up",
+      "cards": [
+        {
+          "head": "Low valid fraction",
+          "flag": "below half of the target's pixels",
+          "text": "Exposure, or the target was outside the field"
+        },
+        {
+          "head": "Outline crossing the border",
+          "flag": "a disk, cutout or square cut off",
+          "text": "The pose is unusable; ask the engineer to re-plan it slightly inward"
+        },
+        {
+          "head": "Target not in the field",
+          "flag": "registered target absent",
+          "text": "The manifest or the registration is wrong for that pose"
+        },
+        {
+          "head": "Plane fit or plane position",
+          "flag": "residual too large; plane far from the registered one",
+          "text": "A wrongly classified plane, a wrong pose, a wrong registration or a target that moved; the limits are loose on purpose"
+        },
+        {
+          "head": "Normal disagrees",
+          "flag": "more than 2 degrees",
+          "text": "A tilted mount or a wrong pose"
+        }
+      ],
+      "caption": "check_captures --session <folder> --out check.json prints one line per pose and a verdict; exit code 0 means nothing flagged. Re-capture flagged poses under a new pose_index; never delete lines from the log.",
+      "notes": "Procedure section 12. Run the quick check as soon as a series is complete, while the robot and targets are still set up, so that a flagged pose can be re-captured without a re-mount. The same tool does the mount check (--mount-check) and the post check of series D (--pilot 800). Its limits are options listed in appendix B."
+    },
+    {
+      "id": "spoilers",
+      "builder": "spoilers",
+      "layout": "title_only",
+      "section": "Wrap-up",
+      "title": "Things that spoil a session",
+      "items": [
+        {
+          "icon": "move",
+          "text": "Moving or bumping the sensor: everything after it is a new session"
+        },
+        {
+          "icon": "sliders",
+          "text": "Changing exposure, gain, any filter, the base frame or the lighting mid-session"
+        },
+        {
+          "icon": "edit",
+          "text": "Logging the commanded pose instead of the reported one, or rounding it to 0.1 mm: for series Z the read-back pose is the step truth"
+        },
+        {
+          "icon": "swap",
+          "text": "Approaching a series Z pose from above or from different directions: backlash then enters the difference between visits"
+        },
+        {
+          "icon": "tool",
+          "text": "A loose adapter, a loosened standoff or a target shifted on its spigot: do the mount check after every swap; never swap a target to take a sentinel"
+        },
+        {
+          "icon": "hand",
+          "text": "Fingerprints, dust or gloss on a target, or different finishes on front and back plates: wipe with isopropyl alcohol"
+        },
+        {
+          "icon": "eye",
+          "text": "Using two frames of one pose as two detection trials; skipping the warm-up or shortening the settle wait; losing the plan's seed"
+        }
+      ],
+      "notes": "Procedure section 15, which also tabulates the sources of error: robot repeatability and absolute accuracy, the registration residual, the plane-registration depth offset, the as-built uncertainties, plate flatness, thermal drift, interreflection, the sensor's temporal filter. The relative measurements are robust; the smallest Z steps and the absolute bias are the ones most limited by the setup."
+    },
+    {
+      "id": "deliverables",
+      "builder": "deliverables",
+      "layout": "title_only",
+      "section": "Wrap-up",
+      "title": "What to hand over at the end of the session",
+      "checklist": [
+        "Characterization_<YYYYMMDD>/ with every .mc file in its series sub-folder, named by the rule of section 5",
+        "sensor_config.json with every filter setting and the dagger values filled in; registration.json, accepted, with its residual in session_log.md",
+        "targets_asbuilt.csv with the uncertainties; poses.csv, plan_summary.txt, plan.png, targets.json and parameters.json of the plan used, and the seed",
+        "The pose log, and manifest.csv produced by make_manifest without errors; check.json with no flags, or a note on each",
+        "environment_log.csv and the temperature logs; the drift run's 241 captures in sentinels/ if it was made",
+        "session_log.md: date, serial number, warm-up and settle times, base frame, plate flatness and finish, mount-check results, target changes with times, anything unusual",
+        "Photos of the sensor stand and of each target on the adapter (a phone camera is fine)"
+      ],
+      "software": {
+        "head": "Software",
+        "points": [
+          "plan_stations, make_manifest, check_captures, register and analyze in sensorperf.cli",
+          "Install and self-test: procedure appendix C; every tool prints its options with --help, quoted in appendix B",
+          "The engineer runs analyze on the finished folder; results go into analysis/"
+        ]
+      },
+      "notes": "Procedure section 13. The engineer runs the six analyses in the order A, B, Z, C, D, E with one command; A supplies the noise level that B, C and D use, and B supplies the edge spread function that C compares with. The output forward_model_parameters.json is the hand-off to the forward-noise simulator."
+    }
+  ]
+}

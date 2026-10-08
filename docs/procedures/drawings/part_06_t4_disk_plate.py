@@ -232,15 +232,19 @@ def build_sheet1(out_dir: str) -> list[str]:
 # ---------------------------------------------------------------------------
 S2_SCALE = 2.0  # disk assemblies at 2:1
 S2_Z0_Y = 143.0  # paper y of z = 0 (front face of the plate, phantom) in the assembly row
-S2_COLUMNS_X = {2: 66.0, 1: 165.0, 0: 224.0}  # paper x of each assembly axis, by level_index
-S2_POST_ONLY = (298.0, 216.0)  # paper position of (post axis, z = 0) of the post-only drawing
-S2_DET_ORIGIN = (338.0, 238.0)  # paper position of the front-face edge point of the 4:1 detail
+S2_COLUMNS_X = {2: 78.0, 1: 205.0, 0: 300.0}  # paper x of each assembly axis, by level_index
+S2_POST_ONLY = (205.0, 222.0)  # paper position of (post axis, z = 0) of the post-only drawing
+S2_DET_ORIGIN = (338.0, 236.0)  # paper position of the front-face edge point of the 4:1 detail
 S2_DET_SCALE = 4.0  # disk edge detail at 4:1
 S2_TABLE = (12.0, 256.0)  # table left edge and top
 S2_NOTES_TOP = 112.0
 S2_NOTES_W = 224.0
 S2_LABEL_DY = 11.0  # first label line below the lowest point of an assembly (paper)
 S2_PLATE_PHANTOM_HALF = 4.0  # phantom plate line extends this far beyond the disk (model mm)
+MEDIUM_DISK_R_MM = 12.0  # disks smaller than this take their back diameter text outside
+SMALL_DISK_R_MM = 5.0  # disks smaller than this take their diameter text outside the dimension
+S2_BORE_LEADER_DROP = 18.0  # the bore leader's elbow lies this far below the disk's back face (paper)
+S2_SMALL_SIDE_DIM = 36.0  # offset of the gap and seat dimension lines of the small disk (paper)
 S2_DIM_ROW = 8.0  # offset of dimension lines from the feature (paper)
 
 
@@ -263,13 +267,17 @@ def draw_assembly(sh: Sheet, f, cx: float) -> None:
     c.region(v, [(-rp, -POST_HOLE_DEPTH_MM), (rp, -POST_HOLE_DEPTH_MM), (rp, g + bore), (-rp, g + bore)], other=True)
     v.center_v(-POST_HOLE_DEPTH_MM - 3.0, top + 3.0, 0.0)
     # dimensions: front diameter above, thickness at the right, back diameter below the disk, post seat and gap
-    v.dim_h(-R, R, top, top, 7.0, f"\u00d8{c.fmt2(f.diameter_mm)} \u00b1{c.fmt(DISK_DIAMETER_TOL_MM)}")
-    v.dim_v(R, R - run, top, g, S2_DIM_ROW, c.fmt(t))
-    v.dim_h(-(R - run), R - run, g, g, -S2_DIM_ROW - 3.0, f"\u00d8{c.fmt2(G['back_d'])}", text_pos=0.2, base_v=g)
-    v.dim_v(rp, rp, 0.0, g, S2_DIM_ROW + 2.0, c.fmt(g), base_u=R - run + 1.0)
-    v.dim_v(rp, rp, -POST_HOLE_DEPTH_MM, 0.0, S2_DIM_ROW + 2.0, c.fmt(POST_HOLE_DEPTH_MM), base_u=R - run + 1.0)
-    v.leader((-rp, g + bore / 2), f"BORE \u00d82 {POST_HOLE_TOL} \u00d7 {c.fmt(bore)}", -20.0, -(bore + 5.0) * S2_SCALE,
-             terminator="dot")
+    v.dim_h(-R, R, top, top, 7.0, f"\u00d8{c.fmt2(f.diameter_mm)} \u00b1{c.fmt(DISK_DIAMETER_TOL_MM)}",
+            outside="left" if R < SMALL_DISK_R_MM else None)
+    small = R < SMALL_DISK_R_MM
+    v.dim_v(R, R - run, top, g, 2 * S2_DIM_ROW if small else S2_DIM_ROW, c.fmt(t))
+    v.dim_h(-(R - run), R - run, g, g, -S2_DIM_ROW + 1.0, f"\u00d8{c.fmt2(G['back_d'])}", text_pos=0.2, base_v=g,
+            outside="right" if small else ("left" if R < MEDIUM_DISK_R_MM else None))
+    side_off = S2_SMALL_SIDE_DIM if small else S2_DIM_ROW + 2.0  # the small disk's diameter text sits left of this line
+    v.dim_v(rp, rp, 0.0, g, side_off, c.fmt(g), base_u=R - run + 1.0)
+    v.dim_v(rp, rp, -POST_HOLE_DEPTH_MM, 0.0, side_off, c.fmt(POST_HOLE_DEPTH_MM), base_u=R - run + 1.0)
+    v.leader((-rp, g + bore / 2), f"BORE \u00d8{c.fmt(POST_DIAMETER_MM)} {POST_HOLE_TOL}\n\u00d7 {c.fmt(bore)} DEEP", -20.0,
+             -(S2_BORE_LEADER_DROP + bore), terminator="dot")
     low = S2_Z0_Y - POST_HOLE_DEPTH_MM * S2_SCALE
     sh.text(cx, low - S2_LABEL_DY, f"{f.site_id}  ({LEVEL_NAMES[f.level_index].upper()}, t = {c.fmt(t)})", size=d.FONT_NOTE,
             ha="center", weight="bold")
@@ -298,7 +306,7 @@ def draw_post_only(sh: Sheet) -> None:
     sh.text(x0, y0 - 5.8, f"\u00d8{c.fmt(POST_DIAMETER_MM)} {POST_ROD_TOL} stainless drill rod", size=d.FONT_NOTE)
     sh.text(x0, y0 - 10.6, f"L = G + {c.fmt(POST_HOLE_DEPTH_MM)}: {c.fmt(post_only_length(GAP_SMALL_MM))} (G {c.fmt(GAP_SMALL_MM)}),",
             size=d.FONT_NOTE)
-    sh.text(x0, y0 - 15.4, f"{c.fmt(post_only_length(GAP_LARGE_MM))} (G {c.fmt(GAP_LARGE_MM)}): same part, longer", size=d.FONT_NOTE)
+    sh.text(x0, y0 - 15.4, f"{c.fmt(post_only_length(GAP_LARGE_MM))} (G {c.fmt(GAP_LARGE_MM)}), same part", size=d.FONT_NOTE)
     sh.text(S2_POST_ONLY[0], S2_POST_ONLY[1] - POST_HOLE_DEPTH_MM * S2_SCALE - S2_LABEL_DY,
             "POST-ONLY SITE, 15 mm SET   SCALE 2:1", size=d.FONT_LABEL, ha="center", weight="bold")
 

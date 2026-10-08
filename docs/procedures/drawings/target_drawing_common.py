@@ -289,7 +289,8 @@ def standoff_piece(u0: float, gap: float) -> list[tuple[float, float]]:
 # The 4:1 knife-edge detail (used by PT-04, PT-05, PT-06 and PT-07)
 # ---------------------------------------------------------------------------
 def draw_edge_detail(sh: Sheet, origin: tuple[float, float], scale: float, thickness: float, material_side: int,
-                     title: str, subtitle: str = "") -> dict[str, float]:
+                     title: str, subtitle: str = "", face_label: str = "FRONT FACE (SENSOR SIDE)",
+                     land_label: str | None = None, extra_mm: float = EDGE_DETAIL_EXTRA_MM) -> dict[str, float]:
     """Draw a section through one knife edge, perpendicular to the edge.
 
     ``origin`` is the paper position of the front-face edge point (u = 0, z = 0).  ``material_side`` is +1
@@ -302,14 +303,14 @@ def draw_edge_detail(sh: Sheet, origin: tuple[float, float], scale: float, thick
     """
     m = material_side
     run = bevel_run(thickness)
-    span = run + EDGE_DETAIL_EXTRA_MM  # material shown beyond the end of the bevel
+    span = run + extra_mm  # material shown beyond the end of the bevel
     v = View(sh, origin, scale)
     poly = [(0.0, 0.0), (m * span, 0.0), (m * span, -thickness), (m * run, -thickness), (0.0, -EDGE_LAND_MM)]
     region(v, poly, crop_u=(m * span,))
     break_line(v, m * span, 0.0, -thickness)
     open_sgn = -m  # the side of the opening
     # front and back face labels
-    sh.text(origin[0] - open_sgn * 2.0, origin[1] + 2.0, "FRONT FACE (SENSOR SIDE)", size=d.FONT_NOTE,
+    sh.text(origin[0] - open_sgn * 2.0, origin[1] + 2.0, face_label, size=d.FONT_NOTE,
             ha="left" if open_sgn < 0 else "right")
     # thickness: vertical dimension on the opening side
     off = 20.0 * open_sgn
@@ -317,7 +318,7 @@ def draw_edge_detail(sh: Sheet, origin: tuple[float, float], scale: float, thick
     # horizontal run of the bevel, below the back face
     v.dim_h(0.0, m * run, -thickness, -thickness, -9.0, fmt(round(run, 2)), ext0=True, ext1=True)
     # the land: leader to the land with its tolerance
-    v.leader((0.0, -EDGE_LAND_MM / 2), f"LAND {LAND_TEXT}", open_sgn * 16.0, 8.0, terminator="dot")
+    v.leader((0.0, -EDGE_LAND_MM / 2), land_label or f"LAND {LAND_TEXT}", open_sgn * 16.0, 8.0, terminator="dot")
     # bevel angle from the plate normal
     ang0 = -90.0
     ang1 = math.degrees(math.atan2(-(thickness - EDGE_LAND_MM), m * run))

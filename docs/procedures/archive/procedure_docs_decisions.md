@@ -48,3 +48,16 @@ Questions asked, in order, and the answers:
 - Sphere decision (Neil, 2026-10-08): one sphere, the larger (stage-1 sphere B, 152.4 mm); the curvature sweep runs
   in the calibration procedure, not here. Handoff written: docs/design/handoff_sphere_decision_2026-10-08.md.
 
+- Execution (2026-10-08, after the sphere decision): specification rev 124 (board, ramp quanta 3, tilt substitution 400 → 476 mm,
+  derived edge plate size 300 × 300 mm, budget 7,202 poses / 42,920 frames / 7.19 h); procedure Section 1 (scope of work,
+  1a to 1f) with the cost script as the single source; Appendix E suppliers; mounting figure.
+- Reviewer's design choices in the drawings, flagged for Neil: the target adapter PT-01 is aluminum 6061-T6 (not steel) so the
+  heaviest target with its adapter stays near 5 kg for an unchosen robot; T5 is carried from its left short edge by a bracket,
+  because the open-background variant removes the back plate and a center spigot would be seen through the largest cutout;
+  T3a's hidden supports are the same PT-03 standoffs on a 60 mm square; standoff studs are asymmetric (8 mm back, 5.5 mm
+  front) because a blind M5 hole cannot be made in a 6 mm plate, so the 6 mm front plates are through-tapped with the stud
+  end 0.5 mm below the face; the raised square is 10 mm thick so its holes can be blind; the disks are 2, 3 and 4 mm thick by
+  size on 2 mm stainless posts, one disk-and-post assembly per gap, slip-fitted into reamed blind holes with removable
+  retaining compound.
+- Drawings accepted after review: PT-01, PT-02, PT-03 (two corrections: keyway clearance 4.5 mm; asymmetric studs), PT-04,
+  PT-06 sheets 1 and 2; PT-05 and PT-07 reviewed when drawn.

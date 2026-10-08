@@ -1,0 +1,549 @@
+{
+  "slides": [
+    {
+      "id": "title",
+      "builder": "title",
+      "layout": "title_dark",
+      "section": "Introduction",
+      "title": "VSX3000 Performance Testing: Procurement and Build",
+      "subtitle": "The targets, the mounting system and the fixtures needed for the characterization captures",
+      "footer": "Procurement and mechanical build  ·  October 2026",
+      "notes": "This deck covers what must be built and bought before the VSX3000 performance-testing session, and how the parts go together. It follows section 1 and appendices E and F of the technician procedure. The companion deck covers the test procedure and the robot program. The robot model is not yet chosen, so every flange part is drawn to the ISO 9409-1-50-4-M6 interface and must be confirmed against the chosen robot's flange drawing before machining."
+    },
+    {
+      "id": "targets",
+      "builder": "fixtures",
+      "layout": "title_only",
+      "section": "Introduction",
+      "title": "Five targets, one two-plane construction",
+      "image": "assets/targets.png",
+      "caption": "Front views of T2, T3a, T3b, T4 and T5 to one scale, from the code's own target definitions at the indicative sensor geometry. Gray is the back plate, dashed circles are blank sites, the dot on T4 is the post-only site.",
+      "cards": [
+        {
+          "head": "T2, the board",
+          "text": "The stage-1 calibration board, 200 x 150 mm, flat to 0.05 mm, on its own board adapter: registration, noise, depth steps and the drift sentinels"
+        },
+        {
+          "head": "T3a and T3b, the edge targets",
+          "text": "A raised 160 mm square on hidden standoffs, and a 160 mm window in a front plate; 300 x 300 mm back plates; both edge polarities for lateral resolution"
+        },
+        {
+          "head": "T4 and T5, the feature plates",
+          "text": "Three disks of 7.0, 19.7 and 55.8 mm on 2 mm posts, and three holes of the same sizes in a front plate; 336 x 198 mm; blank sites give the false-alarm rate"
+        },
+        {
+          "head": "Two gaps",
+          "text": "Standoffs of 15 mm and 60 mm set the gap between front and back plates, so every result is measured at two step heights"
+        }
+      ],
+      "notes": "Every target except the board is a two-plane construction: a front surface with knife edges standing a known gap in front of a back plate of the same finish. One geometry serves the edge, area, detection and boundary-bias tests. The board is the stage-1 calibration board on its SC1-05 adapter, which replaced a 400 mm noise plate; it also carries the registration. Feature sizes follow a ladder of 2 square root 2, so that over the 400 to 1600 mm working range each feature covers two octaves of subtended size and neighbors overlap by half an octave. Procedure section 2 and the specification's section 3.2 give the construction; the drawings are in appendix F."
+    },
+    {
+      "id": "edges",
+      "builder": "fixtures",
+      "layout": "title_only",
+      "section": "Introduction",
+      "title": "Every boundary is a knife edge beveled from the back",
+      "image": "assets/chamfer.png",
+      "caption": "Cross-section of a cutout and a disk on its post, not to scale. The three viewpoints pass the knife edge in open space and never meet the beveled wall.",
+      "cards": [
+        {
+          "head": "Bevel",
+          "text": "45 degrees from the plate normal, cut from the back: holes and the window widen away from the sensor, disks and the square narrow away from it"
+        },
+        {
+          "head": "Land",
+          "text": "The flat land at the front edge is 0.2 mm or less, dimensioned 0.1 plus or minus 0.1 mm"
+        },
+        {
+          "head": "Posts",
+          "text": "Disks stand on 2 mm stainless posts, thinner than half the expected minimum detectable size; a post-only site shows whether the post itself is seen"
+        },
+        {
+          "head": "One finish",
+          "text": "Fine glass-bead blast on every face the sensor sees, all plates in one batch, so no reflectance difference biases an edge"
+        }
+      ],
+      "notes": "An unchamfered wall would be seen as a third surface by one camera and not the other, which corrupts exactly the edge measurements the procedure makes. The bevel angle must exceed the worst-case ray angle plus a 10 degree margin; at the indicative geometry that is 39 degrees, so the standard 45 degree bevel passes, but the engineer recomputes it once the sensor geometry is known. The land tolerance and the bevel are on every plate drawing, PT-04 to PT-07. Procedure section 2, chamfered boundaries."
+    },
+    {
+      "id": "build_list",
+      "builder": "build_list",
+      "layout": "title_only",
+      "section": "Scope of work",
+      "title": "What must be built",
+      "table": {
+        "header": [
+          "Item",
+          "Quantity",
+          "Drawing",
+          "From"
+        ],
+        "rows": [
+          [
+            "Target adapter: flange plate with the spigot bore and the cross-pin hole",
+            "1",
+            "PT-01",
+            "new"
+          ],
+          [
+            "Target spigots, one per feature target",
+            "4",
+            "PT-02",
+            "new"
+          ],
+          [
+            "Standoff sets, 15 mm and 60 mm gaps",
+            "3 sets of 8, plus 4 spares",
+            "PT-03",
+            "new"
+          ],
+          [
+            "T3a, raised square",
+            "1",
+            "PT-04",
+            "new"
+          ],
+          [
+            "T3b, square window",
+            "1",
+            "PT-05",
+            "new"
+          ],
+          [
+            "T4, disk plate",
+            "1",
+            "PT-06",
+            "new"
+          ],
+          [
+            "T5, cutout plate with its edge bracket",
+            "1",
+            "PT-07",
+            "new"
+          ],
+          [
+            "Noise and registration board (T2) with its adapter",
+            "1",
+            "SC1-05",
+            "stage 1"
+          ],
+          [
+            "Run-out fixture",
+            "1",
+            "none needed",
+            "stage 1"
+          ],
+          [
+            "Rigid sensor mount",
+            "1",
+            "existing drawing",
+            "stage 1"
+          ]
+        ]
+      },
+      "caption": "Section 1b of the procedure. The stage-1 items exist if the stage-1 calibration project has been run; otherwise they are built to the stage-1 drawing and specification.",
+      "notes": "The new items are the mounting system (adapter, spigots, standoffs) and the four feature targets. The board, its adapter, the run-out fixture and the rigid sensor mount come from the stage-1 calibration project and cost nothing more when it has been run. The drawings are in appendix F of the procedure and in the repository folder docs/procedures/drawings; the PNG files print at full size and are the copies to send to the shop."
+    },
+    {
+      "id": "buy_list",
+      "builder": "buy_list",
+      "layout": "title_only",
+      "section": "Scope of work",
+      "title": "What must be bought",
+      "table": {
+        "header": [
+          "Item",
+          "Purpose",
+          "Estimated cost (USD)",
+          "From"
+        ],
+        "rows": [
+          [
+            "Ball-lock pins, 8 mm, 2 off",
+            "Hold a target's spigot in the adapter; one spare",
+            "$40 to $120",
+            "new"
+          ],
+          [
+            "Calipers, 600 mm, or a 500 mm steel rule",
+            "Plate width and length, the in-house size check",
+            "$40 to $250",
+            "new"
+          ],
+          [
+            "Calipers with depth rod, 150 mm",
+            "Gap G and standoff lengths",
+            "$30 to $150",
+            "stage 1"
+          ],
+          [
+            "Torque wrench",
+            "Recorded adapter and spigot screw torques",
+            "$80 to $250",
+            "stage 1"
+          ],
+          [
+            "Temperature loggers, 2",
+            "Sensor housing and air, one sample per minute",
+            "$60 to $200",
+            "new"
+          ],
+          [
+            "Consumables",
+            "Thread locker, retaining compound for the disk posts, isopropyl alcohol, padded cases",
+            "$40 to $120",
+            "new"
+          ]
+        ]
+      },
+      "caption": "A phone camera is enough for the setup photos. Already in hand: the sensor on its rigid mount, the robot, the capture computer with the VSX3000 SDK and the robot interface, the analysis computer.",
+      "notes": "Section 1c of the procedure. No feature-level metrology is bought: the fabricator's inspection report supplies the as-built feature sizes, and in-house the technician checks only each plate's flatness with the stage-1 run-out fixture and its width and length with the long calipers or a steel rule. The temperature loggers feed the drift attribution of analysis A."
+    },
+    {
+      "id": "cost",
+      "builder": "cost",
+      "layout": "title_only",
+      "section": "Scope of work",
+      "title": "New spending: $2,440 to $6,450",
+      "table": {
+        "header": [
+          "Item to build",
+          "Estimated cost (USD)"
+        ],
+        "rows": [
+          [
+            "Target adapter (PT-01)",
+            "$300 to $700"
+          ],
+          [
+            "Target spigots, 4 (PT-02)",
+            "$240 to $600"
+          ],
+          [
+            "Standoff sets (PT-03)",
+            "$120 to $360"
+          ],
+          [
+            "T3a, raised square (PT-04)",
+            "$350 to $900"
+          ],
+          [
+            "T3b, square window (PT-05)",
+            "$350 to $900"
+          ],
+          [
+            "T4, disk plate (PT-06)",
+            "$450 to $1,200"
+          ],
+          [
+            "T5, cutout plate (PT-07)",
+            "$450 to $1,100"
+          ]
+        ]
+      },
+      "stats": [
+        {
+          "value": "$2,440 to $6,450",
+          "label": "new items: $2,260 to $5,760 to build, $180 to $690 to buy"
+        },
+        {
+          "value": "$3,090 to $8,420",
+          "label": "if stage 1 has not been run: its board, adapter, run-out fixture, calipers and torque wrench added"
+        }
+      ],
+      "caption": "Estimates of October 2026 from suppliers' list prices and job-shop rates of $80 to $150 per hour, plus or minus 50 percent; the four two-plane targets are the least certain figures.",
+      "notes": "All cost figures come from one script, docs/procedures/build/costs.py, which also fills the procedure's section 1, so the deck and the procedure cannot disagree. The knife edges, the back bevels and the bead-blast finish are each a shop's judgment, which is why the targets are the least certain items. Get quotes before ordering."
+    },
+    {
+      "id": "target_spec",
+      "builder": "plate_spec",
+      "layout": "title_only",
+      "section": "Procurement",
+      "title": "Purchase specification: the four feature targets",
+      "table": {
+        "header": [
+          "Requirement",
+          "T3a and T3b (edge targets)",
+          "T4 and T5 (feature plates)"
+        ],
+        "rows": [
+          [
+            "Plates",
+            "300 x 300 mm; the raised square and the window 160 mm, slanted 5 degrees",
+            "336 x 198 mm; disks and holes of 7.0, 19.7 and 55.8 mm; three blank sites each, one post-only site on T4"
+          ],
+          [
+            "Thickness",
+            "Front plate 6 mm, back plates 8 mm, raised square 10 mm",
+            "Front plate 6 mm, back plates 8 mm; disks 2, 3 and 4 mm"
+          ],
+          [
+            "Knife edges",
+            "Beveled or countersunk from the back at 45 degrees; land 0.2 mm or less",
+            "same"
+          ],
+          [
+            "Sizes known to",
+            "The fabricator's inspection report: size, land, bevel, position from the spigot datum, each with its uncertainty",
+            "same"
+          ],
+          [
+            "Flatness",
+            "0.05 mm over each front face, checked in-house with the run-out fixture after mounting",
+            "same"
+          ],
+          [
+            "Material and finish",
+            "Finish-ground aluminum tooling plate; fine glass-bead blast on every face the sensor sees, all plates in one batch",
+            "same; disks turned from aluminum on 2 mm stainless posts"
+          ],
+          [
+            "Mounting",
+            "Spigot PT-02 on the back plate: four M5 on a 60 mm pitch circle; standoffs PT-03 for both gaps",
+            "same; T5's spigot sits on an edge bracket so the back plate can be removed"
+          ]
+        ]
+      },
+      "caption": "Procedure section 1d, Table 3; hand it to the fabricator with the drawings of appendix F. The four targets are one order so that every surface has the same finish.",
+      "notes": "The drawings carry tolerances and the fabricator's inspection report fills the as-built record; where the report leaves a value out, the nominal value stands with the drawing tolerance as its uncertainty. The approximate masses are 3.9 kg for an edge target with its spigot and 3.0 kg for a feature plate; the heaviest target with the adapter is about 5.1 kg, which the robot's payload must exceed. Thermal growth of aluminum is small at these sizes but the session temperature is logged anyway."
+    },
+    {
+      "id": "board_spec",
+      "builder": "plate_spec",
+      "layout": "title_only",
+      "section": "Procurement",
+      "title": "Purchase specification: the board (from stage 1)",
+      "table": {
+        "header": [
+          "Requirement",
+          "Noise and registration board (T2)"
+        ],
+        "rows": [
+          [
+            "Size",
+            "200 x 150 mm, at least 6 mm thick"
+          ],
+          [
+            "Material",
+            "Finish-ground aluminum tooling plate (for example MIC-6) or float glass"
+          ],
+          [
+            "Flatness",
+            "0.05 mm over the front face, checked in-house with the run-out fixture after mounting on the board adapter"
+          ],
+          [
+            "Front face",
+            "Thin, even matte light-gray paint, or bead blast if the plate is 10 mm or thicker; the same mid-range reflectance as the feature targets"
+          ],
+          [
+            "Edges",
+            "Bottom long edge and left short edge square and clean: they rest on the adapter's edge pins"
+          ],
+          [
+            "Documents",
+            "Supplier's flatness report, kept with the session notes"
+          ]
+        ]
+      },
+      "caption": "Procedure section 1d, Table 4: the stage-1 specification repeated. The board stays on its SC1-05 adapter; it never uses the spigot.",
+      "notes": "The board replaced a 400 mm noise plate. It serves registration, the noise series, the depth-step series (step ladder and ramp), the warm-up and settle checks, the drift sentinels and the optional drift run. The tilt sub-series of the noise series therefore runs at 476, 800 and 1600 mm rather than at 400 mm, where no tilt keeps the board's near edge beyond the near limit."
+    },
+    {
+      "id": "suppliers",
+      "builder": "suppliers",
+      "layout": "title_only",
+      "section": "Procurement",
+      "title": "Candidate suppliers",
+      "table": {
+        "header": [
+          "Item",
+          "Candidate suppliers",
+          "Notes"
+        ],
+        "rows": [
+          [
+            "Plate stock and machining",
+            "McMaster-Carr MIC-6 plate; any job shop with a CNC mill, a lathe and bead blasting",
+            "Finish-grind the front faces; ask for the inspection report with the quote"
+          ],
+          [
+            "Posts and spigot stock",
+            "McMaster-Carr, MSC Industrial",
+            "2 mm stainless drill rod; precision ground bar for the spigots"
+          ],
+          [
+            "Ball-lock pins",
+            "McMaster-Carr, Carr Lane, Jergens",
+            "8 mm, T-handle, grip length as on PT-01; about $20 to $60 each"
+          ],
+          [
+            "Temperature loggers",
+            "Lascar EL-USB-1, Onset HOBO MX100",
+            "0.1 degree C resolution, CSV export; about $30 to $100 each"
+          ],
+          [
+            "Measuring instruments",
+            "Mitutoyo, Starrett, iGaging; McMaster-Carr, Transcat, MSI-Viking",
+            "600 mm calipers or a 500 mm steel rule; the stage-1 calipers, dial indicator, magnetic base and torque wrench"
+          ],
+          [
+            "Board",
+            "McMaster-Carr MIC-6 plus a grinding shop; Edmund Optics float glass",
+            "Stage 1; flatness report, matte paint, re-checked after mounting"
+          ]
+        ]
+      },
+      "caption": "From suppliers' web pages, October 2026; not an endorsement. Confirm sizes, finishes and prices before ordering.",
+      "notes": "Appendix E of the procedure. The targets are made to order; the only stock items are the pins, the loggers and the measuring tools. Keep the machining and the bead blasting with one shop, or have the shop send all plates out together, so that every surface the sensor sees has the same finish."
+    },
+    {
+      "id": "mounting",
+      "builder": "fixtures",
+      "layout": "title_only",
+      "section": "Mechanical build",
+      "title": "One adapter, one spigot per target",
+      "image": "assets/mounting.png",
+      "caption": "The mounting stack in cross-section, not to scale: robot flange, adapter, spigot with its dowel in the keyway, ball-lock pin, back plate, standoffs, front plate.",
+      "cards": [
+        {
+          "head": "Target adapter PT-01",
+          "text": "Aluminum, 120 x 120 x 30 mm, on the ISO 9409-1-50-4-M6 flange; 40 mm H7 bore 25 mm deep with a keyway and an 8 mm cross hole"
+        },
+        {
+          "head": "Spigot PT-02",
+          "text": "Stainless, 40 mm h6 body, 80 mm flange bolted to the target's back plate with four M5; a radial dowel sets the orientation"
+        },
+        {
+          "head": "Ball-lock pin",
+          "text": "Through the adapter's cross hole and the spigot's: pull it, lift the target off, drop the next one in"
+        },
+        {
+          "head": "The datum",
+          "text": "The spigot axis and the dowel are the datum every as-built offset refers to; the once-per-mount check confirms each mount"
+        }
+      ],
+      "notes": "Changing targets takes seconds and returns to the same datum each time, so no re-registration is needed, only the mount check of procedure step 4.8. The board T2 keeps its own stage-1 adapter, so swapping between the board and a feature target means swapping the adapter on the flange. The adapter is aluminum to keep the heaviest target with its adapter near 5 kg for a robot that is not yet chosen. Drawings PT-01 and PT-02, appendix F."
+    },
+    {
+      "id": "adapter_drawing",
+      "builder": "board",
+      "layout": "title_only",
+      "section": "Mechanical build",
+      "title": "Target adapter PT-01",
+      "image": "assets/PT-01_target_adapter.png",
+      "points": [
+        "Aluminum 6061-T6, 120 x 120 x 30 mm, machined in one setup: back face, spigot, front face, bore and keyway",
+        "ISO 9409-1-50-4-M6 side: 31.5 mm g6 spigot, four M6 x 30 on the 50 mm pitch circle, 6 mm dowel at +Xm; confirm against the robot's flange drawing",
+        "Bore 40 mm H7, 25 mm deep, with a 6 mm keyway 4.5 mm deep for the spigot's dowel",
+        "Cross hole 8 mm H7 from the +Xm side, 15 mm below the front face, for the ball-lock pin; 9 mm clearance on the far side",
+        "Bore axis square to the back face within 0.02 mm per 100 mm; hard anodize optional"
+      ],
+      "notes": "The adapter stays on the robot flange for the whole session; a witness line across the adapter and the flange shows whether it has moved. Points for the shop to confirm are listed on the sheet and in appendix F: the counterbores notch the bore by 0.5 mm, the dowel-hole drill point stops 1.2 mm from the cross hole, and the ball-lock pin's grip length. The drawing is generated by docs/procedures/drawings/part_01_target_adapter.py."
+    },
+    {
+      "id": "spigot_drawing",
+      "builder": "board",
+      "layout": "title_only",
+      "section": "Mechanical build",
+      "title": "Target spigot PT-02 and its mating pattern",
+      "image": "assets/PT-02_target_spigot.png",
+      "points": [
+        "303 or 17-4 PH stainless, turned from 82 mm bar; body 40 mm h6, ground, 24 mm long; flange 80 x 8 mm",
+        "Dowel pin 6 mm, 4 mm proud at +Ym, in a radial hole 6 mm from the flange face: it fixes the target's roll",
+        "Cross hole 8.2 mm along x, 15 mm from the flange face, for the ball-lock pin",
+        "Four M5 x 10 screws on a 60 mm pitch circle at 45, 135, 225 and 315 degrees from the dowel, counterbored from the body side",
+        "Every target's back plate carries the same pattern: four M5 tapped through the 8 mm plate, centered on the plate axis"
+      ],
+      "notes": "One spigot per feature target, four in all; they stay bolted to their targets. The mating pattern (detail M on the sheet) is shared by the plate drawings through the script spigot_pattern.py, so the plates and the spigot cannot disagree. The flange faces are machined with the body in one setup so the target face is square to the spigot axis within 0.02 mm over 80 mm. Drawing script part_02_target_spigot.py."
+    },
+    {
+      "id": "standoff_drawing",
+      "builder": "board",
+      "layout": "title_only",
+      "section": "Mechanical build",
+      "title": "Standoff set PT-03: the body length is the gap",
+      "image": "assets/PT-03_standoff_set.png",
+      "points": [
+        "Aluminum, 10 mm body, length 15.0 or 60.0 mm plus or minus 0.05 mm; shoulder faces square within 0.02 mm",
+        "Asymmetric studs: M5 x 8 at the back end into the 8 mm back plate, M5 x 5.5 at the front end so it sits 0.5 mm below a 6 mm front face; a groove marks the front end",
+        "Four standoffs of one group are matched in length within 0.02 mm; the measured length is recorded as the gap in the as-built record",
+        "Three targets use them: hidden behind the raised square of T3a, at the corners of T3b and T5; 28 pieces with spares",
+        "Bead blast to match the plates, then measure"
+      ],
+      "notes": "The gap G between the planes is set by the standoff body alone, which is why its length and squareness are the tight dimensions. The disks of T4 stand on their own posts instead, one disk-and-post assembly per gap. Drawing script part_03_standoffs.py; the asymmetric studs are also read by the plate drawings."
+    },
+    {
+      "id": "edge_target_drawings",
+      "builder": "pair",
+      "layout": "title_only",
+      "section": "Mechanical build",
+      "title": "Edge targets PT-04 and PT-05",
+      "images": [
+        "assets/PT-04_T3a_raised_square.png",
+        "assets/PT-05_T3b_square_window.png"
+      ],
+      "caption": "Left: T3a, the raised 160 mm square on four hidden standoffs above a 300 mm back plate. Right: T3b, the 160 mm window countersunk from the back of a 300 mm front plate, standoffs at the corners.",
+      "notes": "The two targets have opposite edge polarity: front material inside the square, back plate inside the window. The square and the window are slanted 5 degrees so that every edge is slanted relative to the pixel grid for the slanted-edge analysis. The hidden standoffs of T3a sit on a 60 mm square, well inside the shadow of the square at the large gap; the corner standoffs of T3b are shown hidden at the 60 mm gap by the margin computed on the sheet. Drawing scripts part_04_t3a_raised_square.py and part_05_t3b_square_window.py; appendix F."
+    },
+    {
+      "id": "feature_plate_drawings",
+      "builder": "pair",
+      "layout": "title_only",
+      "section": "Mechanical build",
+      "title": "Feature plates PT-06 and PT-07",
+      "images": [
+        "assets/PT-06_T4_disk_plate_sheet1.png",
+        "assets/PT-07_T5_cutout_plate.png"
+      ],
+      "caption": "Left: T4, the disk plate; the site table gives each disk, post and blank site from the plate center. Right: T5, the cutout plate with its removable back plate and the edge bracket that carries the spigot.",
+      "notes": "Site positions and diameters come from the code's target definitions (targets.json), never typed, and the same positions go into the as-built record. T5 is carried from its left short edge: in the open-background variant the back plate is removed and nothing may sit behind the holes within the sensor's range, so the spigot cannot be at the plate center. The disk-and-post assemblies of T4 are on sheet 2 of PT-06. Drawing scripts part_06_t4_disk_plate.py and part_07_t5_cutout_plate.py; appendix F."
+    },
+    {
+      "id": "fixtures_bought",
+      "builder": "runout",
+      "layout": "title_only",
+      "section": "Mechanical build",
+      "title": "Fixtures that are bought, not drawn",
+      "cards": [
+        {
+          "head": "Run-out fixture",
+          "text": "Stage 1: dial indicator, 0.01 mm graduation, on an articulating magnetic base on a steel plate bolted to the cell table; the in-house flatness check of every plate"
+        },
+        {
+          "head": "Drift-run stand",
+          "text": "Any rigid laboratory stand that holds the board on its adapter without creeping, for the optional 8 hour drift run with the robot idle; no drawing"
+        },
+        {
+          "head": "Ball-lock pins",
+          "text": "Two 8 mm quick-release pins with a T-handle, one spare, grip length as on PT-01"
+        },
+        {
+          "head": "Temperature loggers",
+          "text": "Two, 0.1 degree C resolution, one strapped to the sensor housing and one in the air near the target, one sample per minute, CSV export"
+        }
+      ],
+      "image": "assets/setup.png",
+      "caption": "The setup: the sensor on its rigid stand, the robot carrying a target on the adapter, the working range 400 to 1600 mm, the enclosed laboratory with constant lighting.",
+      "notes": "Section 1e of the procedure. The run-out fixture replaces the straightedge and feeler gauges of the earlier projects as the flatness check: the robot turns the plate in front of the indicator. The drift-run stand needs no drawing because the sentinel captures of the run show whether it moved."
+    },
+    {
+      "id": "acceptance",
+      "builder": "acceptance",
+      "layout": "title_only",
+      "section": "Mechanical build",
+      "title": "Checks before the targets go to the robot cell",
+      "checklist": [
+        "Adapter PT-01 made to drawing; its flange interface confirmed against the chosen robot's flange drawing",
+        "Each spigot drops into the adapter, its dowel in the keyway, and the ball-lock pin passes; no play",
+        "Fabricator's inspection report received for every feature: size, land, bevel and position from the spigot datum, with uncertainties, entered in the as-built record",
+        "Every plate flat to 0.05 mm after mounting, checked with the run-out fixture; width and length recorded",
+        "Standoffs measured and grouped; the measured lengths recorded as the gaps",
+        "Every face the sensor sees matte, uniform, the same finish on all plates; posts of T4 not detected in the post check",
+        "Each target weighed with its spigot and the adapter, for the robot's tool load data",
+        "Screw torques recorded; witness lines marked across the adapter and the flange"
+      ],
+      "notes": "These are the checks of procedure sections 1f and 2 and of the mount check of step 4.8, gathered for the build. The post check itself runs on the first captures of series C (procedure section 10, step 1): if a post-only site shows detections above the false-alarm rate the posts must be remade thinner."
+    }
+  ]
+}
