@@ -34,12 +34,11 @@ ORIENTATION_MARK_CLEARANCE_MM = 4.0  # gap between the flange edge and the arrow
 # Standoffs (PT-03)
 # ---------------------------------------------------------------------------
 STANDOFF_STUD = "M5"  # male stud thread at both ends
-STANDOFF_STUD_LENGTH_MM = 8.0  # stud length at both ends (PT-03)
+STANDOFF_STUD_LENGTH_MM = 8.0  # stud length at the back-plate end (through-tapped 8 mm plate, flush with its back face)
 STANDOFF_BODY_DIAMETER_MM = 10.0  # body diameter; body length equals the gap
 
 # Tapped holes that receive a standoff stud or a bracket screw.
 M5_PITCH_MM = 0.8  # M5 coarse pitch
-# A 6 mm part cannot hold a blind hole 6 mm deep, so the blind M5 holes in 6 mm
-# parts are shorter (to be reconciled with PT-03; see the report to the shop).
-BLIND_TAP_THREAD_DEPTH_MM = 4.0  # full-thread depth of a blind M5 hole in a 6 mm part
-BLIND_TAP_DRILL_DEPTH_MM = 4.5  # drilled depth of that hole (leaves a 1.5 mm floor)
+# The stud at the FRONT end of a standoff is shorter than the 8 mm back-end stud: in a 6 mm
+# front plate (M5 through-tapped) it ends 6 - 5.5 = 0.5 mm below the front face.
+STANDOFF_FRONT_STUD_LENGTH_MM = 5.5  # stud length at the front-part end (back-plate end: STANDOFF_STUD_LENGTH_MM)

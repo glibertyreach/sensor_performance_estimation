@@ -58,11 +58,14 @@ FLANGE_SCREW_HEAD_D = 10.0  # M6 DIN 7984 head diameter
 # target side (front)
 BORE_D = 40.0  # central bore for the spigot of PT-02
 BORE_DEPTH = 25.0  # bore depth (chosen)
-SPIGOT_BODY_LEN = 24.0  # length of the body of the PT-02 spigot (part_02 asserts it equals its own constant)
+SPIGOT_BODY_LEN = 24.0  # length of the body of the PT-02 spigot (PT-02 takes its dowel protrusion from here)
 SPIGOT_BODY_TOL = "h6"  # tolerance of the PT-02 body
 BORE_CHAMFER = 1.0  # lead chamfer 1 x 45
 KEY_W = 6.0  # keyway width
-KEY_DEPTH = 4.0  # keyway depth below the bore wall, along the whole bore depth
+DOWEL_TIP_PROTRUSION = 4.0  # radial protrusion of the PT-02 dowel (PT-02 takes its dowel protrusion from here)
+KEY_RADIAL_CLEARANCE = 0.5  # radial clearance of the keyway bottom over the PT-02 dowel tip (chosen)
+KEYWAY_DEPTH_MM = DOWEL_TIP_PROTRUSION + KEY_RADIAL_CLEARANCE  # keyway depth below the bore wall, full bore depth: 4.5
+KEY_DEPTH = KEYWAY_DEPTH_MM  # short name used below
 CROSS_Z = 15.0  # cross hole axis depth below the front face
 CROSS_D = 8.0  # cross hole diameter on the +Xm side, for the 8 mm ball-lock pin
 CROSS_FAR_D = 9.0  # clearance continuation on the far (-Xm) side
@@ -427,8 +430,8 @@ def _notes() -> list[str]:
         f"length. Keyway bottom is {_fmt(KEY_ACROSS)} across the bore. The PT-02 spigot (Ø{_fmt(BORE_D)} "
         f"{SPIGOT_BODY_TOL} × {_fmt(SPIGOT_BODY_LEN)}) bottoms {_fmt(BORE_DEPTH - SPIGOT_BODY_LEN)} short of the bore "
         f"floor; its flange face seats on the front face.",
-        f"Keyway depth {_fmt(KEY_DEPTH)} equals the PT-02 dowel protrusion, so the dowel tip only just clears the "
-        f"keyway bottom. Chosen, confirm with the shop (suggest {_fmt(KEY_DEPTH + 0.5)}).",
+        f"Keyway depth {_fmt(KEYWAY_DEPTH_MM)}: the PT-02 dowel is {_fmt(DOWEL_TIP_PROTRUSION)} proud, which leaves "
+        f"{_fmt(KEY_RADIAL_CLEARANCE)} radial clearance at the keyway bottom. Chosen, confirm with the shop.",
         f"Cross hole Ø{_fmt(CROSS_D)} {TOL_CROSS} at {_fmt(CROSS_Z)} below the front face, from the +Xm side face through "
         f"the bore wall, square to the bore axis, on the plane y = 0; Ø{_fmt(CROSS_FAR_D)} clearance on the -Xm side. For "
         f"an {_fmt(CROSS_D)} mm ball-lock pin (chosen, confirm). Wall to the bolt holes {cross_hole_wall():.1f}.",

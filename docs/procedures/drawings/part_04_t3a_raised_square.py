@@ -37,7 +37,11 @@ GAP_LARGE_MM = PARAMS.gap_large_mm  # 60 mm set
 PLATE_W, PLATE_H = (c.round_up_mm(v) for v in TARGET_SET.derived["edge_plate_size_mm"])  # back plate, whole mm
 SQUARE_SIDE = SQUARE.diameter_mm  # side of the raised square (feature "diameter" of a square is its side)
 SQUARE_ROT = SQUARE.rotation_deg  # slant of the square, counterclockwise seen from the sensor
-SQUARE_T = c.FRONT_PLATE_THICKNESS_MM  # raised square thickness (6)
+RAISED_SQUARE_THICKNESS_MM = 10.0  # raised square thickness (10, not the 6 mm of a front plate: room for blind holes)
+SQUARE_T = RAISED_SQUARE_THICKNESS_MM
+HOLE_THREAD_DEPTH_MM = 6.0  # M5 thread depth of the blind standoff holes in the back of the square
+HOLE_DRILL_DEPTH_MM = 7.5  # drilled depth of those holes, measured to the tip of the drill point
+DRILL_POINT_DEG = 118.0  # included angle of a standard drill point
 BACK_T = c.BACK_PLATE_THICKNESS_MM  # back plate thickness (8)
 HIDDEN_POST_SQUARE_MM = 60.0  # standoff square (side), in the square's own rotated frame
 SHOWN_GAP_MM = GAP_SMALL_MM  # the section shows the 15 mm set; the 60 mm set differs only in standoff length
@@ -49,6 +53,23 @@ BACK_SIDE = SQUARE_SIDE - 2 * RUN  # side of the square's back face (148.2)
 STANDOFF_AXES = [(sx * HIDDEN_POST_SQUARE_MM / 2, sy * HIDDEN_POST_SQUARE_MM / 2)
                  for sx in (-1, 1) for sy in (-1, 1)]  # in the square's frame
 assert HIDDEN_POST_SQUARE_MM / 2 + BODY_D / 2 < BACK_SIDE / 2, "standoffs must sit inside the back face"
+DRILL_R = c.M5_TAP_DRILL_MM / 2  # tap drill radius
+POINT_LEN = DRILL_R / math.tan(math.radians(DRILL_POINT_DEG / 2))  # axial length of the drill point (1.26)
+FULL_DIA_DEPTH = HOLE_DRILL_DEPTH_MM - POINT_LEN  # depth to which the drill is at full diameter
+FLOOR_MIN = SQUARE_T - HOLE_DRILL_DEPTH_MM  # material left in front of the drill-point tip
+assert FLOOR_MIN >= 2.5 - 1e-9, "floor under the blind holes below 2.5 mm"
+assert FULL_DIA_DEPTH > HOLE_THREAD_DEPTH_MM, "thread would run into the drill point"
+assert sp.STANDOFF_FRONT_STUD_LENGTH_MM <= HOLE_THREAD_DEPTH_MM, "front stud longer than the thread"
+
+
+def blind_hole_notch(u0: float) -> list[tuple[float, float]]:
+    """Points of the blind hole at axis u0, from the left wall at the back face (z = 0 here) to the right wall:
+    M5 major diameter to the thread depth, tap drill to the point, cone, and back.  Heights are measured from
+    the back face, positive into the square."""
+    rm = c.M5_MAJOR_MM / 2
+    return [(u0 - rm, 0.0), (u0 - rm, HOLE_THREAD_DEPTH_MM), (u0 - DRILL_R, HOLE_THREAD_DEPTH_MM),
+            (u0 - DRILL_R, FULL_DIA_DEPTH), (u0, HOLE_DRILL_DEPTH_MM), (u0 + DRILL_R, FULL_DIA_DEPTH),
+            (u0 + DRILL_R, HOLE_THREAD_DEPTH_MM), (u0 + rm, HOLE_THREAD_DEPTH_MM), (u0 + rm, 0.0)]
 
 # ---------------------------------------------------------------------------
 # Sheet layout (paper mm)
@@ -56,10 +77,10 @@ assert HIDDEN_POST_SQUARE_MM / 2 + BODY_D / 2 < BACK_SIDE / 2, "standoffs must s
 PLAN_SCALE = 0.5  # plan at 1:2
 PLAN_CENTER = (98.0, 166.0)  # paper position of the plate center
 SEC_SCALE = 1.0  # section at 1:1
-SEC_ORIGIN = (306.0, 212.0)  # paper position of (u = 0, z = 0): front face of the back plate
+SEC_ORIGIN = (306.0, 204.0)  # paper position of (u = 0, z = 0): front face of the back plate
 SEC_HALF_WIDTH = 98.0  # section is cropped at u = +/- this (break lines)
 DET_SCALE = 4.0  # knife-edge detail at 4:1
-DET_ORIGIN = (352.0, 150.0)  # paper position of the front-face edge point of the detail
+DET_ORIGIN = (352.0, 160.0)  # paper position of the front-face edge point of the detail
 NOTES_X = 12.0  # left edge of the notes
 NOTES_TOP = 72.0  # top of the notes block
 NOTES_W = 224.0  # width of the notes block
@@ -129,7 +150,7 @@ def build(out_dir: str) -> list[str]:
     callout((post_edge[0] + BODY_D / 2, post_edge[1]),
             f"4 \u00d7 STANDOFF PT-03 ON A {c.fmt(HIDDEN_POST_SQUARE_MM)} SQUARE\n"
             f"(\u00b1{c.fmt(HIDDEN_POST_SQUARE_MM / 2)}, \u00b1{c.fmt(HIDDEN_POST_SQUARE_MM / 2)} IN THE SQUARE'S FRAME)\n"
-            f"M5 BLIND {c.fmt(sp.BLIND_TAP_THREAD_DEPTH_MM)} DEEP IN THE SQUARE (BACK),\n"
+            f"M5 BLIND {c.fmt(HOLE_THREAD_DEPTH_MM)} DEEP IN THE SQUARE (BACK),\n"
             f"M5 THRU IN THE BACK PLATE; POSITION \u00b1{c.fmt(c.POSITION_TOL_MM)}", 112.0)
     callout(sq(hb, -hb * 0.55), f"BACK FACE {c.fmt(round(BACK_SIDE, 2))} \u00d7 {c.fmt(round(BACK_SIDE, 2))} (HIDDEN):\n"
                                 f"4 EDGES BEVELED {c.fmt(c.BEVEL_DEG)}\u00b0 FROM THE BACK,\nLAND {c.LAND_TEXT}", 90.0)
@@ -146,8 +167,10 @@ def build(out_dir: str) -> list[str]:
     # raised square: front face at z = g + SQUARE_T, back face at z = g, bevel at both ends
     top = g + SQUARE_T
     front = [(-h, top), (h, top), (h, top - c.EDGE_LAND_MM), (hb, g)]
-    back = c.notched_edge(hb, -hb, g, hole_us, c.M5_MAJOR_MM, sp.BLIND_TAP_DRILL_DEPTH_MM, up=True)
-    sq_poly = front + back[1:-1] + [(-hb, g), (-h, top - c.EDGE_LAND_MM)]
+    back = [(hb, g)]
+    for u0 in sorted(hole_us, reverse=True):  # right to left along the back face
+        back += [(u, g + z) for (u, z) in blind_hole_notch(u0)[::-1]]
+    sq_poly = front + back[1:] + [(-hb, g), (-h, top - c.EDGE_LAND_MM)]
     c.region(sec, sq_poly)
     # standoffs
     for u0 in hole_us:
@@ -180,8 +203,12 @@ def build(out_dir: str) -> list[str]:
         f"center. Plate outline rounded up to whole mm.",
         c.NOTE_KNIFE_EDGE + f" Back face of the square {c.fmt(round(BACK_SIDE, 2))} square (computed).",
         c.NOTE_FINISH + " " + c.NOTE_FLATNESS + " Do not machine the front face or the land after blasting.",
-        c.NOTE_STANDOFF_ENDS + f" Hole position \u00b1{c.fmt(c.POSITION_TOL_MM)}; the back-plate holes rotate "
-        f"{c.fmt(SQUARE_ROT)}\u00b0 with the square.",
+        f"Standoffs PT-03, 15 mm set or 60 mm set; both sets delivered. Square: {sp.STANDOFF_STUD} blind holes, thread "
+        f"{c.fmt(HOLE_THREAD_DEPTH_MM)} deep, tap drill \u00d8{c.M5_TAP_DRILL_MM:g} drilled {c.fmt(HOLE_DRILL_DEPTH_MM)} deep to the tip of a "
+        f"{c.fmt(DRILL_POINT_DEG)}\u00b0 point (full diameter to {FULL_DIA_DEPTH:.2f}); floor under the tip {FLOOR_MIN:.1f} mm. The "
+        f"{c.fmt(sp.STANDOFF_FRONT_STUD_LENGTH_MM)} mm front stud seats {c.fmt(HOLE_THREAD_DEPTH_MM - sp.STANDOFF_FRONT_STUD_LENGTH_MM)} "
+        f"mm short of the thread bottom. Back plate: M5 through-tapped (rotated {c.fmt(SQUARE_ROT)}\u00b0 with the square) "
+        f"for the {c.fmt(sp.STANDOFF_STUD_LENGTH_MM)} mm studs, not proud of the back face. Hole position \u00b1{c.fmt(c.POSITION_TOL_MM)}.",
         c.NOTE_SPIGOT,
     ]
     bottom = sh.notes_block(NOTES_X, NOTES_TOP, NOTES_W, notes, size=c.NOTE_SIZE)

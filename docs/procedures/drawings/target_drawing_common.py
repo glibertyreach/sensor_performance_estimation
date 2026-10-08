@@ -57,6 +57,10 @@ assert EDGE_LAND_MM + EDGE_LAND_TOL_MM <= EDGE_LAND_MAX_MM + 1e-9, "land toleran
 M5_MAJOR_MM = sp.SPIGOT_SCREW_DIAMETER_MM  # M5 major diameter
 M5_MINOR_MM = thread_minor_diameter(M5_MAJOR_MM, sp.M5_PITCH_MM)  # M5 minor diameter (ISO 262)
 M5_TAP_DRILL_MM = 4.2  # tap drill for M5 x 0.8
+FRONT_STUD_RECESS_MM = FRONT_PLATE_THICKNESS_MM - sp.STANDOFF_FRONT_STUD_LENGTH_MM  # stud end below the front face (0.5)
+assert abs(FRONT_STUD_RECESS_MM - 0.5) < 1e-9, "front stud must end 0.5 mm below the front face of a 6 mm plate"
+
+EDGE_DETAIL_EXTRA_MM = 4.0  # material drawn beyond the end of the bevel in the 4:1 detail
 
 # Text blocks shared by the sheets
 MATERIAL_TEXT = "Aluminum tooling plate (MIC-6 or 6061-T6), finish-ground"
@@ -82,11 +86,11 @@ NOTE_SPIGOT = (
     f"from +x, centered on the spigot axis; engrave an arrow {sp.ORIENTATION_MARK_WIDTH_MM:g} wide and "
     f"{sp.ORIENTATION_MARK_DEPTH_MM:g} deep pointing {sp.SPIGOT_DOWEL_DIRECTION} (the spigot's dowel direction)."
 )
-NOTE_STANDOFF_ENDS = (
-    f"Standoffs PT-03, 15 mm set or 60 mm set; both sets delivered. Blind {sp.STANDOFF_STUD} holes in a 6 mm part: "
-    f"tap drill \u00d8{M5_TAP_DRILL_MM:g} \u00d7 {sp.BLIND_TAP_DRILL_DEPTH_MM:g} deep, thread {sp.BLIND_TAP_THREAD_DEPTH_MM:g} "
-    f"deep (6 mm is too thin for a 6 mm blind hole); the stud engages {sp.BLIND_TAP_THREAD_DEPTH_MM:g} mm there. "
-    f"Studs must not stand proud of the 8 mm plate's back face."
+NOTE_STANDOFF_FRONT_THROUGH = (
+    f"Standoffs PT-03, 15 mm set or 60 mm set; both sets delivered. Front plate: {sp.STANDOFF_STUD} through-tapped holes; "
+    f"the {sp.STANDOFF_FRONT_STUD_LENGTH_MM:g} mm front stud ends 0.5 below the front face. Nothing may protrude the front "
+    f"face; the plate is bead-blasted before assembly. Back plate: {sp.STANDOFF_STUD} through-tapped for the "
+    f"{sp.STANDOFF_STUD_LENGTH_MM:g} mm back studs, which must not stand proud of its back face."
 )
 
 
@@ -236,10 +240,10 @@ def back_plate_piece(u_left: float, u_right: float, hole_us: list[float], thickn
 
 def standoff_piece(u0: float, gap: float) -> list[tuple[float, float]]:
     """Section of one standoff on axis u0: body of the gap length, 8 mm stud into the back plate (through
-    hole), and a stud into the blind hole of the front part (engagement = the thread depth)."""
+    hole, flush with its back face) and the 5.5 mm front stud into the front part."""
     r_body, r_stud = sp.STANDOFF_BODY_DIAMETER_MM / 2, M5_MAJOR_MM / 2
-    low = sp.STANDOFF_STUD_LENGTH_MM  # stud in the back plate (through hole, flush with its back face)
-    up = sp.BLIND_TAP_THREAD_DEPTH_MM  # stud in the front part
+    low = sp.STANDOFF_STUD_LENGTH_MM  # stud in the back plate
+    up = sp.STANDOFF_FRONT_STUD_LENGTH_MM  # stud in the front part
     return [(u0 - r_stud, -low), (u0 + r_stud, -low), (u0 + r_stud, 0.0), (u0 + r_body, 0.0),
             (u0 + r_body, gap), (u0 + r_stud, gap), (u0 + r_stud, gap + up), (u0 - r_stud, gap + up),
             (u0 - r_stud, gap), (u0 - r_body, gap), (u0 - r_body, 0.0), (u0 - r_stud, 0.0)]
@@ -249,7 +253,7 @@ def standoff_piece(u0: float, gap: float) -> list[tuple[float, float]]:
 # The 4:1 knife-edge detail (used by PT-04, PT-05, PT-06 and PT-07)
 # ---------------------------------------------------------------------------
 def draw_edge_detail(sh: Sheet, origin: tuple[float, float], scale: float, thickness: float, material_side: int,
-                     title: str, span: float = 7.0, subtitle: str = "") -> dict[str, float]:
+                     title: str, subtitle: str = "") -> dict[str, float]:
     """Draw a section through one knife edge, perpendicular to the edge.
 
     ``origin`` is the paper position of the front-face edge point (u = 0, z = 0).  ``material_side`` is +1
@@ -262,6 +266,7 @@ def draw_edge_detail(sh: Sheet, origin: tuple[float, float], scale: float, thick
     """
     m = material_side
     run = bevel_run(thickness)
+    span = run + EDGE_DETAIL_EXTRA_MM  # material shown beyond the end of the bevel
     v = View(sh, origin, scale)
     poly = [(0.0, 0.0), (m * span, 0.0), (m * span, -thickness), (m * run, -thickness), (0.0, -EDGE_LAND_MM)]
     region(v, poly, crop_u=(m * span,))
@@ -271,7 +276,7 @@ def draw_edge_detail(sh: Sheet, origin: tuple[float, float], scale: float, thick
     sh.text(origin[0] - open_sgn * 2.0, origin[1] + 2.0, "FRONT FACE (SENSOR SIDE)", size=d.FONT_NOTE,
             ha="left" if open_sgn < 0 else "right")
     # thickness: vertical dimension on the opening side
-    off = 14.0 * open_sgn
+    off = 20.0 * open_sgn
     v.dim_v(0.0, 0.0, 0.0, -thickness, off, fmt(thickness), base_u=0.0)
     # horizontal run of the bevel, below the back face
     v.dim_h(0.0, m * run, -thickness, -thickness, -9.0, fmt(round(run, 2)), ext0=True, ext1=True)
@@ -284,7 +289,8 @@ def draw_edge_detail(sh: Sheet, origin: tuple[float, float], scale: float, thick
     c0 = (0.0, -EDGE_LAND_MM)
     v.line(c0, (0.0, -EDGE_LAND_MM - (thickness - EDGE_LAND_MM) * 0.75), "thin")  # plate normal
     r_paper = scale * (thickness - EDGE_LAND_MM) * 0.55
-    v.dim_angle(c0, lo, hi, r_paper, f"{BEVEL_DEG:g}°", text_dx=open_sgn * 9.0, text_dy=-10.0)
+    mid_x = r_paper * math.cos(math.radians((lo + hi) / 2))  # paper x of the arc midpoint relative to the arc center
+    v.dim_angle(c0, lo, hi, r_paper, f"{BEVEL_DEG:g}\u00b0", text_dx=open_sgn * 7.0 - mid_x, text_dy=-3.0)
     sh.text(origin[0], origin[1] - scale * thickness - 17.0, title, size=d.FONT_LABEL, ha="center", weight="bold")
     if subtitle:
         sh.text(origin[0], origin[1] - scale * thickness - 22.0, subtitle, size=d.FONT_NOTE, ha="center")

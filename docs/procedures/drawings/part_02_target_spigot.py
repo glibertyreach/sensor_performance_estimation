@@ -60,7 +60,7 @@ CROSS_D = 8.2  # cross hole, clearance for the 8 mm ball-lock pin
 CROSS_Z = adapter.CROSS_Z  # distance of the cross hole axis from the flange face, equals the PT-01 cross hole depth
 DOWEL_D = adapter.DOWEL_D  # radial dowel diameter
 DOWEL_HOLE_DEPTH = 10.0  # radial dowel hole depth below the body surface (chosen)
-DOWEL_PROTRUSION = 4.0  # dowel protrusion beyond the body surface, as given
+DOWEL_PROTRUSION = adapter.DOWEL_TIP_PROTRUSION  # dowel protrusion beyond the body surface (4, as given)
 DOWEL_PIN_LEN = DOWEL_HOLE_DEPTH + DOWEL_PROTRUSION  # pin length, 14 (ISO 2338 6 x 14)
 DOWEL_Z = 6.0  # distance of the dowel axis from the flange face (chosen: near the flange)
 FLANGE_D = 80.0  # mounting flange diameter
@@ -112,6 +112,8 @@ def consistency_checks() -> list[str]:
     if CROSS_D <= adapter.CROSS_D or CROSS_D >= adapter.CROSS_FAR_D:
         raise ValueError("cross hole should be between the 8 H7 and the 9 mm holes of PT-01")
     lines.append(f"dowel tip to the PT-01 keyway bottom: radial clearance {KEY_CLEARANCE:.1f}")
+    if KEY_CLEARANCE < 0.25:
+        raise ValueError("dowel tip too close to the PT-01 keyway bottom")
     gap = (CROSS_U - CROSS_D / 2) - 0.0  # cross hole to tip
     lines.append(f"cross hole edge to the tip {gap:.1f}; dowel hole edge to the cross hole edge (axial) "
                  f"{(DOWEL_U - DOWEL_D / 2) - (CROSS_U + CROSS_D / 2):.1f}")
@@ -385,7 +387,7 @@ def _notes() -> list[str]:
         f"cross hole depth), square to the axis; deburr. Ball-lock pin Ø8 passes through the Ø8 H7 and Ø9 holes of PT-01.",
         f"Dowel pin Ø{_fmt(DOWEL_D)} {TOL_PIN} × {_fmt(DOWEL_PIN_LEN)} pressed into a radial hole Ø{_fmt(DOWEL_D)} "
         f"{TOL_DOWEL_HOLE} × {_fmt(DOWEL_HOLE_DEPTH)}, {_fmt(DOWEL_Z)} from the flange face, {_fmt(DOWEL_PROTRUSION)} "
-        f"proud at +Ym. PT-01 keyway is {_fmt(adapter.KEY_DEPTH)} deep: radial clearance {KEY_CLEARANCE:.1f}; confirm.",
+        f"proud at +Ym. PT-01 keyway is {_fmt(adapter.KEY_DEPTH)} deep: radial clearance {KEY_CLEARANCE:.1f}.",
         f"Screws: 4 × M{_fmt(MOUNT_THREAD_D)} × {MOUNT_SCREW_LEN} DIN 7984. Length = flange {_fmt(FLANGE_T)} - counterbore "
         f"{_fmt(MOUNT_CBORE_DEPTH)} + engagement {_fmt(MOUNT_ENGAGEMENT)} = {_fmt(MOUNT_SCREW_LEN_CALC)}. Head "
         f"{_fmt(MOUNT_HEAD_H)} high sits {_fmt(MOUNT_CBORE_RECESS)} below the flange face; web under the head {_fmt(web)}.",

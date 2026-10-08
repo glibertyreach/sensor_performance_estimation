@@ -79,7 +79,7 @@ PLAN_SCALE = 0.5  # plan at 1:2
 PLAN_CENTER = (106.0, 193.0)  # paper position of the plate center
 SEC_SCALE = 1.0  # section at 1:1
 SEC_ORIGIN_X = 328.0  # paper x of the disk axis in the section
-SEC_ORIGIN_Y = 176.0  # paper y of z = 0 (front face of the plate)
+SEC_ORIGIN_Y = 180.0  # paper y of z = 0 (front face of the plate)
 SEC_HALF = 46.0  # section cropped at +/- this from the disk axis
 SHOWN_GAP_MM = GAP_SMALL_MM  # section shows the 15 mm set
 CALL_X = 198.0  # left end of the plan callout texts
@@ -92,7 +92,9 @@ DIM_TOP = 7.0
 DIM_LEFT = -8.0
 LABEL_DY = -9.0
 CUT_END_X = 6.0  # cutting-plane ends this far beyond the plate edge (model mm)
-ID_LABEL_DY = 1.6  # site id label above its circle (paper)
+ID_LABEL_DY = 1.8  # site id label above its circle (paper)
+CROSS_ARM_PAPER = d.CENTER_CROSS_EXT + 1.0  # reach of the center cross of a hole above its center (paper)
+LABEL_RIGHT = ("disk_02",)  # sites whose id label goes beside the circle (the spigot circle is above it)
 
 SITE_TITLE = f"SITES (target frame, origin at plate center); POSITION TOL ±{c.fmt(POSITION_TOL_MM)}"
 
@@ -125,12 +127,16 @@ def build_sheet1(out_dir: str) -> list[str]:
         plan.circle((f.x_mm, f.y_mm), f.diameter_mm / 2, "phantom")
     for f in DISKS + POSTS:
         plan.circle((f.x_mm, f.y_mm), POST_DIAMETER_MM / 2, "outline")  # post hole
-        plan.center_cross((f.x_mm, f.y_mm), max(POST_DIAMETER_MM, 0.0) / 2 + 1.5)
+        plan.center_cross((f.x_mm, f.y_mm), POST_DIAMETER_MM / 2)
     for f in DISKS + POSTS + BLANKS:
         r = (POST_DIAMETER_MM if f.kind == "post" else f.diameter_mm) / 2
-        pt = plan.P(f.x_mm, f.y_mm + r)
-        label = {"disk": "", "post": "", "blank": ""}[f.kind] + f.site_id
-        sh.text(pt[0], pt[1] + ID_LABEL_DY, label, size=d.FONT_MIN, ha="center")
+        if f.site_id in LABEL_RIGHT:  # label beside the circle instead of above it
+            pt = plan.P(f.x_mm + r, f.y_mm)
+            sh.text(pt[0] + ID_LABEL_DY, pt[1] - 1.2, f.site_id, size=d.FONT_MIN, ha="left")
+        else:
+            pt = plan.P(f.x_mm, f.y_mm + r)
+            sh.text(pt[0], pt[1] + max(CROSS_ARM_PAPER - r * PLAN_SCALE, 0.0) + ID_LABEL_DY, f.site_id,
+                    size=d.FONT_MIN, ha="center")
     c.plan_spigot_pattern(plan)
     plan.center_h(-hw - 5, hw + 5, 0.0)
     plan.center_v(-hh - 5, hh + 5, 0.0)
@@ -157,7 +163,7 @@ def build_sheet1(out_dir: str) -> list[str]:
             f"{', '.join(c.fmt(a) for a in sp.SPIGOT_HOLE_ANGLES_DEG)}° FROM +x; Ø{c.fmt(sp.SPIGOT_FLANGE_DIAMETER_MM)} FLANGE (PHANTOM)", 119.0)
     b = BLANKS[1]
     callout((b.x_mm + b.diameter_mm / 2, b.y_mm),
-            "BLANK SITE (PHANTOM CIRCLE): NO FEATURE,\nKEEP FREE OF MARKS (3 PLACES)", 102.0)
+            "BLANK SITE (PHANTOM CIRCLE): NO FEATURE,\nKEEP FREE OF MARKS (3 PLACES)", 92.0)
     sh.text(PLAN_CENTER[0], PLAN_CENTER[1] - hh * PLAN_SCALE + LABEL_DY,
             "FRONT VIEW (FROM THE SENSOR)   SCALE 1:2", size=d.FONT_LABEL, ha="center", weight="bold")
 
@@ -191,7 +197,8 @@ def build_sheet1(out_dir: str) -> list[str]:
     sec.dim_v(R, R - run, top, g, 8.0, c.fmt(t))
     sec.dim_v(hole_r, hole_r, 0.0, g, 18.0, c.fmt(g))
     sec.dim_v(u_r, u_r, 0.0, -PLATE_T, 8.0, c.fmt(PLATE_T))
-    sec.dim_v(hole_r, hole_r, -POST_HOLE_DEPTH_MM, 0.0, 18.0, c.fmt(POST_HOLE_DEPTH_MM))
+    sec.dim_v(-hole_r, -hole_r, -POST_HOLE_DEPTH_MM, 0.0, -18.0, c.fmt(POST_HOLE_DEPTH_MM))
+    sec.leader((-hole_r, g / 2), f"POST \u00d8{c.fmt(POST_DIAMETER_MM)} {POST_ROD_TOL}", -26.0, 4.0, terminator="dot")
     sh.text(SEC_ORIGIN_X, SEC_ORIGIN_Y - PLATE_T * SEC_SCALE - 11.0,
             "SECTION A-A   SCALE 1:1", size=d.FONT_LABEL, ha="center", weight="bold")
     sh.text(SEC_ORIGIN_X, SEC_ORIGIN_Y - PLATE_T * SEC_SCALE - 16.5,
