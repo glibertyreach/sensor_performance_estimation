@@ -46,7 +46,8 @@ CUTOUTS = sorted((f for f in T5.features if f.kind == "cutout"), key=lambda f: f
 BLANKS = sorted((f for f in T5.features if f.kind == "blank"), key=lambda f: f.site_id)
 assert len(CUTOUTS) == 3 and len(BLANKS) == 3, "T5 sites changed: revisit the drawing"
 LARGEST = CUTOUTS[-1]  # the section goes through this cutout
-SHOWN_GAP_MM = GAP_SMALL_MM  # the section shows the 15 mm set
+SHOWN_GAP_MM = GAP_SMALL_MM  # G of the section: the 15 mm set
+BODY_SHOWN_MM = c.standoff_body_length(SHOWN_GAP_MM, FRONT_T)  # standoff body length = space between the plates in the section (G - 6 = 9)
 
 # Edge bracket
 BRACKET_WIDTH_MM = 40.0  # bar width (x), against the left edge of the front plate
@@ -80,7 +81,8 @@ SCREW_HEAD_RECESS = SCREW_CBORE_DEPTH - SCREW_HEAD_H  # head top below the brack
 assert SCREW_TIP_BELOW_FRONT >= c.FRONT_STUD_RECESS_MM - 1e-9, "screw tip would protrude the front face"
 assert SCREW_HEAD_D < SCREW_CBORE_D < BRACKET_WIDTH_MM, "counterbore does not fit the bar"
 assert BRACKET_EXTENSION_WIDTH_MM > sp.SPIGOT_FLANGE_DIAMETER_MM, "flange does not fit the extension"
-assert BRACKET_THICKNESS_MM < GAP_SMALL_MM, "bracket must lie inside the small gap"
+assert BRACKET_THICKNESS_MM < BODY_SHOWN_MM, "bracket must lie between the plates at the small gap"
+BRACKET_CLEARANCE_MM = BODY_SHOWN_MM - BRACKET_THICKNESS_MM  # bracket back face to the back plate (1 mm)
 STANDOFF_Y_MM = PLATE_H / 2 - CORNER_STANDOFF_INSET_MM  # |y| of all standoff axes (87)
 STANDOFFS = [(x, sy * STANDOFF_Y_MM) for x in (PLATE_W / 2 - CORNER_STANDOFF_INSET_MM, LEFT_STANDOFF_X_MM) for sy in (-1, 1)]
 SCREW_POINTS = [(BAR_CX, k * BRACKET_SCREW_Y_MM) for k in (-1, 0, 1)]
@@ -121,7 +123,7 @@ BR_CX = (EXT_X0 + BAR_X1) / 2  # model x of the bracket plan center
 SIDE_ORIGIN = (328.0, 84.0)  # paper position of (x = BR_CX, front face) of the side view
 SIDE_SCALE = 1.0  # side view at 1:1
 TABLE_X, TABLE_TOP = 248.0, 256.0
-NOTES_X, NOTES_TOP, NOTES_W = 12.0, 80.0, 224.0
+NOTES_X, NOTES_TOP, NOTES_W = 12.0, 82.0, 224.0
 CALL_X = 352.0  # left end of the bracket callout texts
 LABEL_INSIDE = ("blank_02",)  # site ids placed inside their circle (the hidden bar edge crosses the space above)
 BOX_X, BOX_TOP, BOX_W = 346.0, 150.0, 62.0  # boxed note (hidden-standoff check) right of the detail
@@ -200,7 +202,7 @@ def build(out_dir: str) -> list[str]:
     sh.arrow(bt, (bt[0] - tx - 16.0, bt[1] - ty - 6.0))
 
     # ---------------- section A-A (offset, cropped) ----------------
-    g = SHOWN_GAP_MM
+    g = BODY_SHOWN_MM  # back face of the front plate above the back plate = standoff body length
     top = g + FRONT_T
     (a0, a1, ax), (b0, b1, bx) = SEC_SEGMENTS
     s1 = View(sh, (ax - a0, SEC_ORIGIN_Y), 1.0)
@@ -244,9 +246,10 @@ def build(out_dir: str) -> list[str]:
     s2.dim_v(b1, b1, -BACK_T, 0.0, 8.0, c.fmt(BACK_T), outside="down")
     s2.dim_v(b1, b1, g, top, 8.0, c.fmt(FRONT_T), outside="down")
     s2.dim_v(b1, b1, 0.0, g, 17.0, c.fmt(g))
+    s2.dim_v(b1, b1, 0.0, top, 26.0, c.fmt(SHOWN_GAP_MM), outside="down")  # G: front face of the front plate to the back plate
     sh.text((ax + bx + (b1 - b0)) / 2, SEC_ORIGIN_Y - BACK_T - 11.0, "SECTION A-A (OFFSET)   SCALE 1:1",
             size=d.FONT_LABEL, ha="center", weight="bold")
-    sh.text((ax + bx + (b1 - b0)) / 2, SEC_ORIGIN_Y - BACK_T - 16.5, f"{c.fmt(g)} mm set; cropped", size=d.FONT_NOTE, ha="center")
+    sh.text((ax + bx + (b1 - b0)) / 2, SEC_ORIGIN_Y - BACK_T - 16.5, f"G = {c.fmt(SHOWN_GAP_MM)} shown (body {c.fmt(g)}); cropped", size=d.FONT_NOTE, ha="center")
 
     # ---------------- 4:1 detail of the countersink ----------------
     c.draw_edge_detail(sh, DET_ORIGIN, DET_SCALE, FRONT_T, material_side=+1, title="DETAIL B   SCALE 4:1",
@@ -338,23 +341,26 @@ def build(out_dir: str) -> list[str]:
                   color=d.BLACK, size=d.FONT_MIN, weight="normal")
     notes = [
         f"PT-07.1 front plate {c.fmt(PLATE_W)} \u00d7 {c.fmt(PLATE_H)} \u00d7 {c.fmt(FRONT_T)}; PT-07.2 back plate {c.fmt(PLATE_W)} \u00d7 "
-        f"{c.fmt(PLATE_H)} \u00d7 {c.fmt(BACK_T)}, plain, REMOVABLE (open-background captures), no spigot; PT-07.3 edge bracket. "
-        f"Outlines rounded up to whole mm; sites from the target definition (table), position \u00b1{c.fmt(c.POSITION_TOL_MM)}.",
+        f"{c.fmt(PLATE_H)} \u00d7 {c.fmt(BACK_T)}, plain, REMOVABLE (open-background captures), no spigot; PT-07.3 bracket. "
+        f"Outlines rounded up to whole mm; sites per the table, position \u00b1{c.fmt(c.POSITION_TOL_MM)}.",
         f"Knife edges: countersunk FROM THE BACK at {c.fmt(c.BEVEL_DEG)}\u00b0 ({c.fmt(2 * c.BEVEL_DEG)}\u00b0 included), land {c.LAND_TEXT} mm "
         f"(max {c.fmt(c.EDGE_LAND_MAX_MM)}); record the measured land. Blank sites: no feature, keep free of marks.",
-        f"Fine glass-bead blast, uniform, every face the sensor sees (also the front face of the bracket extension); all plates and "
+        f"Fine glass-bead blast, uniform, every face the sensor sees (also the bracket extension's front face); all plates and "
         f"disks blasted in one batch, same medium and pressure. Flatness {c.fmt(c.FLATNESS_MM)} over each front face.",
-        f"Standoffs PT-03, 15 mm or 60 mm set, both delivered; four, at x = {c.fmt(PLATE_W / 2 - CORNER_STANDOFF_INSET_MM)} and "
-        f"{c.fmt(LEFT_STANDOFF_X_MM)}, y = \u00b1{c.fmt(STANDOFF_Y_MM)} ({c.fmt(CORNER_STANDOFF_INSET_MM)} from the right and top/bottom edges). "
-        f"Front plate: M5 through-tapped; the {c.fmt(sp.STANDOFF_STUD_FRONT_LENGTH_MM)} mm front stud ends 0.5 below the front face; nothing may "
-        f"protrude the front face; the plate is bead-blasted before assembly. Back plate: M5 through-tapped, 8 mm studs not proud of the back face.",
-        f"The bracket (8 mm) lies inside the {c.fmt(GAP_SMALL_MM)} mm gap against the back of the front plate, outer face flush with the "
-        f"left edge; nothing sits behind the cutouts. The robot holds T5 by the spigot on the extension. Screws M5 \u00d7 {c.fmt(SCREW_LEN)} "
-        f"DIN 7984 into M5 through-tapped holes: engagement {SCREW_ENGAGEMENT:g}, tip {SCREW_TIP_BELOW_FRONT:g} mm below the front face.",
+        f"Standoffs PT-03, both sets delivered; four, at x = {c.fmt(PLATE_W / 2 - CORNER_STANDOFF_INSET_MM)} and {c.fmt(LEFT_STANDOFF_X_MM)}, "
+        f"y = \u00b1{c.fmt(STANDOFF_Y_MM)}. G ({c.fmt(GAP_SMALL_MM)} or {c.fmt(GAP_LARGE_MM)}) is the depth step between the front faces of the front "
+        f"plate and the back plate; body = G \u2212 {c.fmt(FRONT_T)}: {c.fmt(c.standoff_body_length(GAP_SMALL_MM, FRONT_T))} or "
+        f"{c.fmt(c.standoff_body_length(GAP_LARGE_MM, FRONT_T))}. Front plate: M5 through-tapped; the {c.fmt(sp.STANDOFF_STUD_FRONT_LENGTH_MM)} mm front stud "
+        f"ends 0.5 below the front face; nothing may protrude the front face; plate bead-blasted before assembly. Back plate: M5 through-tapped, "
+        f"8 mm studs not proud of the back face.",
+        f"The bracket (8 mm) lies between the plates, against the back of the front plate ({c.fmt(BRACKET_CLEARANCE_MM)} mm clear of the back plate at "
+        f"G = {c.fmt(GAP_SMALL_MM)}), outer face flush with the left edge; nothing sits behind the cutouts. The robot holds T5 by the spigot on the "
+        f"extension. Screws M5 \u00d7 {c.fmt(SCREW_LEN)} DIN 7984, M5 through-tapped holes: engagement {SCREW_ENGAGEMENT:g}, tip "
+        f"{SCREW_TIP_BELOW_FRONT:g} mm below the front face.",
         f"Spigot PT-02 on the extension: 4 \u00d7 M5 through-tapped, \u00d8{c.fmt(sp.SPIGOT_PCD_MM)} PCD at "
         f"{', '.join(c.fmt(a) for a in sp.SPIGOT_HOLE_ANGLES_DEG)}\u00b0 from +x, centered at x = {SPIGOT_CENTER[0]:g}; arrow "
         f"{c.fmt(sp.ORIENTATION_MARK_WIDTH_MM)} \u00d7 {c.fmt(sp.ORIENTATION_MARK_DEPTH_MM)} deep, pointing {sp.SPIGOT_DOWEL_DIRECTION}, on the "
-        f"bar's back face at x = {c.fmt(BAR_CX)} (no room on the extension).",
+        f"bar's back face at x = {c.fmt(BAR_CX)}.",
     ]
     bottom = sh.notes_block(NOTES_X, NOTES_TOP, NOTES_W, notes, size=c.NOTE_SIZE)
     assert bottom > d.FRAME_BOTTOM, f"notes overflow the sheet (bottom {bottom:.1f})"
@@ -376,9 +382,10 @@ def print_checks() -> None:
           f"(M5 x {SCREW_LENGTHS[SCREW_LENGTHS.index(SCREW_LEN) + 1]} would protrude "
           f"{SCREW_LENGTHS[SCREW_LENGTHS.index(SCREW_LEN) + 1] - BRACKET_WEB - FRONT_T:g} mm)")
     for gp in (GAP_SMALL_MM, GAP_LARGE_MM):
-        print(f"PT-07 hidden check, gap {gp:g}: nearest standoff axis to a cutout edge {NEAREST_CUTOUT_EDGE_MM:.2f} mm vs "
-              f"{c.hidden_threshold_mm(gp):.2f} mm (margin {NEAREST_CUTOUT_EDGE_MM - c.hidden_threshold_mm(gp):.2f}); strict "
-              f"{c.hidden_threshold_strict_mm(gp, FRONT_T):.2f} (margin {NEAREST_CUTOUT_EDGE_MM - c.hidden_threshold_strict_mm(gp, FRONT_T):.2f})")
+        print(f"PT-07 hidden check, G {gp:g}: nearest standoff axis to a cutout edge {NEAREST_CUTOUT_EDGE_MM:.2f} mm vs G x tan30 + 5 = "
+              f"{c.hidden_threshold_mm(gp):.2f} mm (margin {NEAREST_CUTOUT_EDGE_MM - c.hidden_threshold_mm(gp):.2f})")
+    print(f"PT-07 standoff bodies: {c.standoff_label(GAP_SMALL_MM, GAP_LARGE_MM, FRONT_T)} ({c.body_length_source()}); "
+          f"bracket {BRACKET_THICKNESS_MM:g} mm leaves {BRACKET_CLEARANCE_MM:g} mm to the back plate at G = {GAP_SMALL_MM:g}")
     print(f"PT-07 bracket inner edge to the nearest cutout edge {BRACKET_TO_CUTOUT_MM:.2f} mm (nothing behind the cutouts); "
           f"left standoff body to the bracket {(LEFT_STANDOFF_X_MM - BODY_D / 2) - BAR_X1:.1f} mm")
     blank_margin = min(math.hypot(p[0] - b.x_mm, p[1] - b.y_mm) - b.diameter_mm / 2 - 0 for p in STANDOFFS + SCREW_POINTS for b in BLANKS)

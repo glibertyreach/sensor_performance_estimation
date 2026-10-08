@@ -112,7 +112,7 @@ NOTE_SPIGOT = (
     f"{sp.ORIENTATION_MARK_DEPTH_MM:g} deep pointing {sp.SPIGOT_DOWEL_DIRECTION} (the spigot's dowel direction)."
 )
 NOTE_STANDOFF_FRONT_THROUGH = (
-    f"Standoffs PT-03, 15 mm set or 60 mm set; both sets delivered. Front plate: {sp.STANDOFF_STUD} through-tapped holes; "
+    f"Front plate: {sp.STANDOFF_STUD} through-tapped holes; "
     f"the {sp.STANDOFF_STUD_FRONT_LENGTH_MM:g} mm front stud ends 0.5 below the front face. Nothing may protrude the front "
     f"face; the plate is bead-blasted before assembly. Back plate: {sp.STANDOFF_STUD} through-tapped for the "
     f"{sp.STANDOFF_STUD_BACK_LENGTH_MM:g} mm back studs, which must not stand proud of its back face."

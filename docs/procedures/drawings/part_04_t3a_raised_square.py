@@ -86,7 +86,7 @@ SEC_HALF_WIDTH = 98.0  # section is cropped at u = +/- this (break lines)
 DET_SCALE = 4.0  # knife-edge detail at 4:1
 DET_ORIGIN = (352.0, 160.0)  # paper position of the front-face edge point of the detail
 NOTES_X = 12.0  # left edge of the notes
-NOTES_TOP = 72.0  # top of the notes block
+NOTES_TOP = 78.0  # top of the notes block
 NOTES_W = 224.0  # width of the notes block
 CALL_X = 190.0  # left end of the plan callout texts
 CUT_EXT_U = 104.0  # half length of the cutting-plane line, in the square's frame
@@ -205,13 +205,14 @@ def build(out_dir: str) -> list[str]:
         f"{c.fmt(SQUARE_SIDE)} \u00d7 {c.fmt(SQUARE_SIDE)} \u00d7 {c.fmt(SQUARE_T)}, slanted {c.fmt(SQUARE_ROT)}\u00b0 about the plate "
         f"center. Plate outline rounded up to whole mm.",
         c.NOTE_KNIFE_EDGE + f" Back face of the square {c.fmt(round(BACK_SIDE, 2))} square (computed).",
-        c.NOTE_FINISH + " " + c.NOTE_FLATNESS + " Do not machine the front face or the land after blasting.",
-        c.gap_convention_note(SQUARE_T, GAP_SMALL_MM, GAP_LARGE_MM) + f" Standoffs PT-03, both sets delivered. Square: {sp.STANDOFF_STUD} blind holes, thread "
-        f"{c.fmt(HOLE_THREAD_DEPTH_MM)} deep, tap drill \u00d8{c.M5_TAP_DRILL_MM:g} drilled {c.fmt(HOLE_DRILL_DEPTH_MM)} deep to the tip of a "
-        f"{c.fmt(DRILL_POINT_DEG)}\u00b0 point (full diameter to {FULL_DIA_DEPTH:.2f}); floor under the tip {FLOOR_MIN:.1f} mm. The "
-        f"{c.fmt(sp.STANDOFF_STUD_FRONT_LENGTH_MM)} mm front stud seats {c.fmt(HOLE_THREAD_DEPTH_MM - sp.STANDOFF_STUD_FRONT_LENGTH_MM)} "
-        f"mm short of the thread bottom. Back plate: M5 through-tapped (rotated {c.fmt(SQUARE_ROT)}\u00b0 with the square) "
-        f"for the {c.fmt(sp.STANDOFF_STUD_BACK_LENGTH_MM)} mm studs, not proud of the back face. Hole position \u00b1{c.fmt(c.POSITION_TOL_MM)}.",
+        c.NOTE_FINISH + " " + c.NOTE_FLATNESS,
+        c.gap_convention_note(SQUARE_T, GAP_SMALL_MM, GAP_LARGE_MM) + " Standoffs PT-03, both sets delivered.",
+        f"Square: {sp.STANDOFF_STUD} blind holes, thread {c.fmt(HOLE_THREAD_DEPTH_MM)} deep, tap drill \u00d8{c.M5_TAP_DRILL_MM:g} drilled "
+        f"{c.fmt(HOLE_DRILL_DEPTH_MM)} deep to the tip of a {c.fmt(DRILL_POINT_DEG)}\u00b0 point (full diameter to {FULL_DIA_DEPTH:.2f}), floor "
+        f"under the tip {FLOOR_MIN:.1f} mm; the {c.fmt(sp.STANDOFF_STUD_FRONT_LENGTH_MM)} mm front stud ends "
+        f"{c.fmt(HOLE_THREAD_DEPTH_MM - sp.STANDOFF_STUD_FRONT_LENGTH_MM)} mm short of the thread bottom. Back plate: M5 through-tapped (rotated "
+        f"{c.fmt(SQUARE_ROT)}\u00b0 with the square), {c.fmt(sp.STANDOFF_STUD_BACK_LENGTH_MM)} mm studs not proud of the back face; thread edge "
+        f"clears the flange rim by {FLANGE_CLEARANCE_MM:.2f} mm. Hole position \u00b1{c.fmt(c.POSITION_TOL_MM)}.",
         c.NOTE_SPIGOT,
     ]
     bottom = sh.notes_block(NOTES_X, NOTES_TOP, NOTES_W, notes, size=c.NOTE_SIZE)

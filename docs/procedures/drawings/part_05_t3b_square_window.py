@@ -42,7 +42,8 @@ FRONT_T = c.FRONT_PLATE_THICKNESS_MM  # front plate thickness (6)
 BACK_T = c.BACK_PLATE_THICKNESS_MM  # back plate thickness (8)
 CORNER_STANDOFF_INSET_MM = 15.0  # standoff axis distance from each plate edge
 BODY_D = sp.STANDOFF_BODY_DIAMETER_MM  # standoff body diameter
-SHOWN_GAP_MM = GAP_SMALL_MM  # the section shows the 15 mm set
+SHOWN_GAP_MM = GAP_SMALL_MM  # G of the section: the 15 mm set
+BODY_SHOWN_MM = c.standoff_body_length(SHOWN_GAP_MM, FRONT_T)  # standoff body length in the section (G - 6 = 9)
 
 # Derived dimensions (computed, never typed)
 RUN = c.bevel_run(FRONT_T)  # horizontal run of the back countersink (5.9)
@@ -75,7 +76,7 @@ SEC_ORIGIN = (372.0, 212.0)  # paper position of (u = 0, z = 0): front face of t
 DET_SCALE = 4.0  # knife-edge detail at 4:1
 DET_ORIGIN = (346.0, 150.0)  # paper position of the front-face edge point of the detail
 NOTES_X = 12.0
-NOTES_TOP = 80.0
+NOTES_TOP = 81.0
 NOTES_W = 224.0
 CALL_X = 190.0  # left end of the plan callout texts
 CUT_END_U = PLATE_W / 2 + 8.0  # the cutting-plane line starts this far out (target frame)
@@ -139,7 +140,7 @@ def build(out_dir: str) -> list[str]:
 
     # ---------------- section A-A (left half) ----------------
     sec = View(sh, SEC_ORIGIN, SEC_SCALE)
-    g = SHOWN_GAP_MM
+    g = BODY_SHOWN_MM  # back face of the front plate above the back plate = standoff body length
     u_l, u_r = SEC_U_LEFT, SEC_U_RIGHT
     u_axis = -AXIS
     c.region(sec, c.back_plate_piece(u_l, u_r, [u_axis]), crop_u=(u_r,))
@@ -160,12 +161,13 @@ def build(out_dir: str) -> list[str]:
     sec.dim_v(u_l, u_l, 0.0, -BACK_T, -8.0, c.fmt(BACK_T))
     sec.dim_v(u_l, u_l, g, top, -8.0, c.fmt(FRONT_T))
     sec.dim_v(u_axis + BODY_D / 2, u_axis + BODY_D / 2, 0.0, g, 10.0, c.fmt(g))
-    sh.text(SEC_ORIGIN[0] + u_axis + 22.0, SEC_ORIGIN[1] + g / 2 + 0.8, "STANDOFF PT-03", size=d.FONT_NOTE)
-    sh.text(SEC_ORIGIN[0] + u_axis + 22.0, SEC_ORIGIN[1] + g / 2 - 3.6, f"G = {c.fmt(g)} (60 SET: 60)", size=d.FONT_NOTE)
+    sec.dim_v(u_l, u_l, 0.0, top, -18.0, c.fmt(SHOWN_GAP_MM), base_u=u_l)  # G: front face of the front plate to the back plate
+    sh.text(SEC_ORIGIN[0] + u_axis + 22.0, SEC_ORIGIN[1] + g / 2 + 0.8, f"STANDOFF PT-03, BODY {c.fmt(g)} (G = {c.fmt(SHOWN_GAP_MM)});", size=d.FONT_NOTE)
+    sh.text(SEC_ORIGIN[0] + u_axis + 22.0, SEC_ORIGIN[1] + g / 2 - 3.6, f"{c.fmt(c.standoff_body_length(GAP_LARGE_MM, FRONT_T))} FOR G = {c.fmt(GAP_LARGE_MM)}", size=d.FONT_NOTE)
     sh.text(SEC_ORIGIN[0] + (u_l + u_r) / 2, SEC_ORIGIN[1] - BACK_T * SEC_SCALE - 12.0,
             "SECTION A-A (OFFSET)   SCALE 1:1", size=d.FONT_LABEL, ha="center", weight="bold")
     sh.text(SEC_ORIGIN[0] + (u_l + u_r) / 2, SEC_ORIGIN[1] - BACK_T * SEC_SCALE - 17.5,
-            "left half; right half the same. 15 mm set shown", size=d.FONT_NOTE, ha="center")
+            f"left half; right half the same. G = {c.fmt(SHOWN_GAP_MM)} shown", size=d.FONT_NOTE, ha="center")
 
     # ---------------- 4:1 detail ----------------
     c.draw_edge_detail(sh, DET_ORIGIN, DET_SCALE, FRONT_T, material_side=+1,
@@ -178,13 +180,12 @@ def build(out_dir: str) -> list[str]:
         f"{c.fmt(PLATE_W)} \u00d7 {c.fmt(PLATE_H)} \u00d7 {c.fmt(BACK_T)}. Outlines rounded up to whole mm.",
         c.NOTE_KNIFE_EDGE + f" Opening in the back face {c.fmt(round(BACK_OPENING, 2))} square (computed: side + 2 \u00d7 (thickness \u2212 land)).",
         c.NOTE_FINISH + " " + c.NOTE_FLATNESS + " Includes the front face of the back plate.",
-        c.NOTE_STANDOFF_FRONT_THROUGH,
-        f"Standoffs hidden: nearest standoff axis {NEAREST_STANDOFF_MM:.1f} mm from the window; limit at the "
-        f"{c.fmt(GAP_LARGE_MM)} mm gap = {c.fmt(GAP_LARGE_MM)} \u00d7 tan {c.fmt(c.HIDE_RAY_ANGLE_DEG)}\u00b0 + "
-        f"{c.fmt(c.HIDE_MARGIN_MM)} = {c.hidden_threshold_mm(GAP_LARGE_MM):.1f} mm (margin {margins[GAP_LARGE_MM]:.1f} mm). OK.",
+        c.gap_convention_note(FRONT_T, GAP_SMALL_MM, GAP_LARGE_MM) + " Standoffs PT-03, both sets delivered. " + c.NOTE_STANDOFF_FRONT_THROUGH,
+        f"Standoffs hidden: nearest axis {NEAREST_STANDOFF_MM:.1f} mm from the window; limit {c.fmt(GAP_LARGE_MM)} \u00d7 tan "
+        f"{c.fmt(c.HIDE_RAY_ANGLE_DEG)}\u00b0 + {c.fmt(c.HIDE_MARGIN_MM)} = {c.hidden_threshold_mm(GAP_LARGE_MM):.1f} mm at G = {c.fmt(GAP_LARGE_MM)} "
+        f"(margin {margins[GAP_LARGE_MM]:.1f} mm). OK.",
         c.NOTE_SPIGOT,
-        f"Section A-A is on y = 0 through the window and crosses its edges at {c.fmt(WINDOW_ROT)}\u00b0 (edge positions "
-        f"\u00d7 {1 / SECTION_COS:.4f}); Detail B is the true profile.",
+        f"Section A-A is on y = 0 and crosses the window edges at {c.fmt(WINDOW_ROT)}\u00b0 (\u00d7 {1 / SECTION_COS:.4f}); Detail B is true.",
     ]
     bottom = sh.notes_block(NOTES_X, NOTES_TOP, NOTES_W, notes, size=c.NOTE_SIZE)
     assert bottom > d.FRAME_BOTTOM, f"notes overflow the sheet (bottom {bottom:.1f})"
@@ -203,9 +204,9 @@ def print_checks() -> None:
     print(f"PT-05 plates {PLATE_W:g} x {PLATE_H:g}; window {WINDOW_SIDE:g} slant {WINDOW_ROT:g} deg; standoff axes at +/-{AXIS:g}")
     print(f"PT-05 countersink run {RUN:.3f} mm; back-face opening side {BACK_OPENING:.3f} mm")
     for g in (GAP_SMALL_MM, GAP_LARGE_MM):
-        print(f"PT-05 hidden check, gap {g:g}: nearest standoff axis to the window {NEAREST_STANDOFF_MM:.2f} mm vs "
-              f"{c.hidden_threshold_mm(g):.2f} mm (margin {NEAREST_STANDOFF_MM - c.hidden_threshold_mm(g):.2f}); strict "
-              f"{c.hidden_threshold_strict_mm(g, FRONT_T):.2f} (margin {NEAREST_STANDOFF_MM - c.hidden_threshold_strict_mm(g, FRONT_T):.2f})")
+        print(f"PT-05 hidden check, G {g:g}: nearest standoff axis to the window {NEAREST_STANDOFF_MM:.2f} mm vs G x tan30 + 5 = "
+              f"{c.hidden_threshold_mm(g):.2f} mm (margin {NEAREST_STANDOFF_MM - c.hidden_threshold_mm(g):.2f})")
+    print(f"PT-05 standoff bodies: {c.standoff_label(GAP_SMALL_MM, GAP_LARGE_MM, FRONT_T)} ({c.body_length_source()})")
 
 
 if __name__ == "__main__":

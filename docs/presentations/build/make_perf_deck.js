@@ -210,9 +210,8 @@ const PRODUCT = {
 
 const FLOW = {
 	numberD: BADGE_D,
-	headPt: 18,
+	headPt: 16, // 18 in the registration generator; the head now shares a line with the badge, and "Series C and D" wraps to two lines in the room beside it
 	textPt: BODY_MIN_PT,
-	headH: 0.35,
 };
 
 // Fixtures, board_build and runout share one composition: a white card with the wide figure and its caption at the
@@ -372,7 +371,12 @@ const CHECKS = {
 	flagPt: BODY_PT,
 	textPt: BODY_MIN_PT, // four cards in a 2 x 2 grid, each with a head, a flag line and up to four lines of text: 14 pt fits
 	cardPad: GAP_TIGHT, // padding inside each card (tighter than CARD_PAD so the text fits)
-	captionH: 0.3,
+	perRow: { 4: [2, 2], 5: [3, 2] }, // cards per row, by card count (the grid was fixed at two columns in the registration generator)
+};
+// Icon and fill color (a THEME color key) of the cards of a checks slide, by slide id; a slide not listed gets warning triangles on accent4 (signal red, for things that go wrong).
+const CHECKS_ICONS = {
+	warmup: { icons: ["sliders", "clock", "move", "camera"], fill: "accent2" }, // configuration, warm-up, settle and vibration, intrinsics
+	series_ab: { icons: ["gauge", "ruler", "bullseye", "edit"], fill: "accent2" }, // A noise, B edges, sentinels, optional
 };
 
 // Three columns of icon + head + bullets over one boxed key message (robot_program, prep).
@@ -926,9 +930,11 @@ async function buildDeck(contentJson, outputPptx) {
 			const { x, y } = pos(i);
 			card(slide, `Step ${st.n} card`, x, y, cardW, cardH);
 			numberBadge(slide, `Step ${st.n} badge`, st.n, x + CARD_PAD, y + CARD_PAD, f.numberD, C.accent1);
-			const hy = y + CARD_PAD + f.numberD + GAP_TIGHT / 2;
-			text(slide, `Step ${st.n} head`, st.head, x + CARD_PAD, hy, cardW - 2 * CARD_PAD, f.headH, { fontSize: f.headPt, bold: true, color: C.text2 });
-			const ty = hy + f.headH;
+			// Changed from the registration generator: the head sits beside the number badge, not under it, which gives the text
+			// one and a half more lines (the first row's texts run to five lines at 14 pt in a card a quarter of the width)
+			const hx = x + CARD_PAD + f.numberD + GAP_TIGHT;
+			text(slide, `Step ${st.n} head`, st.head, hx, y + CARD_PAD, x + cardW - CARD_PAD - hx, f.numberD, { fontSize: f.headPt, bold: true, color: C.text2, valign: "middle" });
+			const ty = y + CARD_PAD + f.numberD + GAP_TIGHT / 2;
 			text(slide, `Step ${st.n} text`, st.text, x + CARD_PAD, ty, cardW - 2 * CARD_PAD, y + cardH - CARD_PAD - ty, { fontSize: f.textPt });
 			// Chevron to the next card in the same row (none after the last step, which ends row 2 short)
 			if (i % perRow !== perRow - 1 && i < s.steps.length - 1) {
@@ -1273,20 +1279,41 @@ async function buildDeck(contentJson, outputPptx) {
 		text(slide, "Pose-log example line", s.example, ex, ey, CONTENT_X + CONTENT_W - GAP_TIGHT - ex, m.exampleBoxH, { fontFace: MONO_FONT, fontSize: MONO_PT, color: C.text1, valign: "middle" });
 	};
 
+	/**
+	 * Cards in a grid with a head, a flag line and text each. Changed from the registration generator, which had a fixed
+	 * 2 x 2 grid: the cards per row come from CHECKS.perRow by card count (five cards: three, then two), the card
+	 * heights follow their text (each row as tall as its tallest card needs, the spare height shared equally),
+	 * the caption height follows its length, and the icon and its color come from CHECKS_ICONS by slide id.
+	 */
 	builders.checks = (slide, s) => {
 		title(slide, s.title);
 		const k = CHECKS;
-		const cols = 2;
-		const rows = Math.ceil(s.cards.length / cols);
-		const cardW = (CONTENT_W - (cols - 1) * GAP) / cols;
-		const captionY = CONTENT_BOTTOM - k.captionH;
+		const perRow = k.perRow[s.cards.length] || [Math.ceil(s.cards.length / 2), Math.floor(s.cards.length / 2)];
+		const icons = CHECKS_ICONS[s.id] || { icons: [], fill: "accent4" };
+		const captionH = captionHeightFor(s.caption, CONTENT_W);
+		const captionY = CONTENT_BOTTOM - captionH;
 		const gridH = captionY - GAP - CONTENT_TOP;
-		const cardH = (gridH - (rows - 1) * GAP) / rows;
+		// Positions: row r holds perRow[r] cards of equal width
+		const slots = [];
+		let idx = 0;
+		perRow.forEach((n, r) => {
+			const cardW = (CONTENT_W - (n - 1) * GAP) / n;
+			for (let c = 0; c < n && idx < s.cards.length; c++, idx++) slots.push({ row: r, x: CONTENT_X + c * (cardW + GAP), cardW });
+		});
+		// Row heights: the text each row's tallest card needs (head, flag, text), plus the padding, plus an equal share of what is left
+		const textW = (slot) => slot.cardW - 2 * k.cardPad - k.iconD - GAP_TIGHT;
+		const needH = s.cards.map((c, i) => Math.max(k.iconD, (k.headPt * BODY_LINE_FACTOR) / 72 * countLines(c.head, textW(slots[i]), k.headPt, true) + (k.flagPt * BODY_LINE_FACTOR) / 72 * countLines(c.flag, textW(slots[i]), k.flagPt, true) + textHeight(c.text, textW(slots[i]), k.textPt) + PARA_SPACE_PT / 72) + 2 * k.cardPad);
+		const rowNeed = perRow.map((_, r) => Math.max(...needH.filter((_, i) => slots[i].row === r)));
+		const extra = (gridH - (perRow.length - 1) * GAP - rowNeed.reduce((a, b) => a + b, 0)) / perRow.length;
+		if (extra < 0) console.warn(`WARNING: slide "${s.id}": the cards need ${(-extra * perRow.length).toFixed(2)} in more than the grid has`);
+		const rowH = rowNeed.map((n) => n + Math.max(0, extra));
+		const rowY = rowH.map((_, r) => CONTENT_TOP + rowH.slice(0, r).reduce((a, b) => a + b, 0) + r * GAP);
 		s.cards.forEach((c, i) => {
-			const x = CONTENT_X + (i % cols) * (cardW + GAP);
-			const y = CONTENT_TOP + Math.floor(i / cols) * (cardH + GAP);
+			const { row, x, cardW } = slots[i];
+			const y = rowY[row];
+			const cardH = rowH[row];
 			card(slide, `Check ${i + 1} card`, x, y, cardW, cardH, "white");
-			iconBadge(slide, `Check ${i + 1} icon`, "warning", x + k.cardPad, y + k.cardPad, k.iconD, C.accent4);
+			iconBadge(slide, `Check ${i + 1} icon`, icons.icons[i] || "warning", x + k.cardPad, y + k.cardPad, k.iconD, C[icons.fill]);
 			const tx = x + k.cardPad + k.iconD + GAP_TIGHT;
 			const tw = x + cardW - k.cardPad - tx;
 			text(
@@ -1304,7 +1331,7 @@ async function buildDeck(contentJson, outputPptx) {
 				{ valign: "top" }
 			);
 		});
-		text(slide, "Checks caption", s.caption, CONTENT_X, captionY, CONTENT_W, k.captionH, { fontSize: CAPTION_PT, color: C.accent5, valign: "bottom" });
+		text(slide, "Checks caption", s.caption, CONTENT_X, captionY, CONTENT_W, captionH, { fontSize: CAPTION_PT, color: C.accent5, valign: "bottom" });
 	};
 
 	/**
@@ -1352,7 +1379,6 @@ async function buildDeck(contentJson, outputPptx) {
 		title(slide, s.title);
 		const sp = SPOILERS;
 		const colW = (CONTENT_W - (sp.columns - 1) * GAP) / sp.columns;
-		const rowH = (CONTENT_H - (sp.rowsFirstColumn - 1) * sp.rowGap) / sp.rowsFirstColumn;
 		const left = s.items.slice(0, sp.rowsFirstColumn);
 		const right = s.items.slice(sp.rowsFirstColumn);
 		[left, right].forEach((items, ci) => {
@@ -1363,7 +1389,7 @@ async function buildDeck(contentJson, outputPptx) {
 				pt: sp.textPt,
 				badgeD: sp.iconD,
 				gap: sp.rowGap,
-				minRowH: rowH,
+				fillH: CONTENT_H, // both columns fill the content height (changed from the registration generator, where the shorter column ended early)
 				cardKind: "tint",
 				cardPad: sp.cardPad,
 				badge: (i, item) => ({ kind: "icon", icon: item.icon, fill: C.accent4 }),

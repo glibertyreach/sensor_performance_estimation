@@ -8,7 +8,7 @@ landscape) with its views at one stated scale, a notes block and a title block.
 |---------|------|-----|----------|-------|------|
 | PT-01 | Target adapter (120 x 120 x 30 plate; ISO 9409-1-50-4-M6 flange side; Ø40 H7 bore, keyway, cross hole) | 1 | Aluminum 6061-T6 | 1:1 | `PT-01_target_adapter.png` |
 | PT-02 | Target spigot (Ø40 h6 body, Ø80 flange, dowel, cross hole; detail M, mating pattern on each target back plate) | 4 | 303 or 17-4 PH stainless | 1:1 | `PT-02_target_spigot.png` |
-| PT-03 | Standoff set (Ø10 body; M5 x 8 back stud, M5 x 5.5 front stud, front end marked by a groove; L = 15 and L = 60) | 28 (14 + 14) | Aluminum 6061-T6 | 2:1 | `PT-03_standoff_set.png` |
+| PT-03 | Standoff set (Ø10 body; bodies 5, 9, 50 and 54 = G - front thickness; M5 x 8 back stud, M5 x 5.5 front stud) | 32 (10 + 6 + 10 + 6) | Aluminum 6061-T6 | 2:1 | `PT-03_standoff_set.png` |
 | PT-04 | T3a raised square (300 x 300 x 8 back plate with the spigot pattern; 160 x 160 x 10 square, slanted 5 deg, knife edges beveled from the back; four PT-03 standoffs on a 60 mm square) | 1 plate + 1 square | Aluminum tooling plate (MIC-6 or 6061-T6) | 1:2, 1:1, 4:1 | `PT-04_T3a_raised_square.png` |
 | PT-05 | T3b square window (300 x 300 x 6 front plate with the 160 mm window, slanted 5 deg, countersunk from the back; 300 x 300 x 8 plain back plate with the spigot pattern; four standoffs at the corners) | 1 front + 1 back plate | Aluminum tooling plate | 1:2, 1:1, 4:1 | `PT-05_T3b_square_window.png` |
 | PT-06 | T4 disk plate, two sheets (sheet 1: 336 x 198 x 8 back plate with the post holes and the site table; sheet 2: disks with posts, 6 assemblies, and the 2 post-only posts) | 1 plate; 6 disks + 8 posts | Plate aluminum tooling plate; disks 6061-T6; posts stainless drill rod 2 h6 | 1:2, 1:1; 2:1, 4:1 | `PT-06_T4_disk_plate_sheet1.png`, `PT-06_T4_disk_plate_sheet2.png` |
@@ -36,7 +36,7 @@ outside its cell). The exit status is 1 if any sheet has a layout problem or a g
 | `drafting.py` | Shared drafting helpers (copied from stage 1; extended with title-block cell checks and `View.circle_except`) |
 | `part_01_target_adapter.py` | PT-01: plan, section A-A, turned section B-B; `geometry_checks()` |
 | `part_02_target_spigot.py` | PT-02: end view, aligned section A-A, detail M; `consistency_checks()` against PT-01 |
-| `part_03_standoffs.py` | PT-03: end view and elevations of both lengths |
+| `part_03_standoffs.py` | PT-03: end view, elevations of the longest and shortest body, table of the four bodies (computed from G and the front thickness) |
 | `spigot_pattern.py` | Mounting constants shared by the plate drawings (spigot hole pattern, flange diameter, dowel direction, orientation mark, standoff studs); PT-02 and PT-03 compare their own constants with it |
 | `target_drawing_common.py` | Shared by PT-04 to PT-07: the specification rules (45 degree back bevel, 0.1 mm land, plate thicknesses, finish), target loading, rounding rule, the 4:1 knife-edge detail, standoff joint sections, hidden-standoff check; `check_against_part_scripts()` cross-checks PT-02 and PT-03 |
 | `part_04_t3a_raised_square.py` | PT-04: plan, section A-A through two standoffs (plane parallel to the square's edges), 4:1 knife-edge detail |
