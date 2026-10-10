@@ -1,6 +1,6 @@
 {
   "document": "VSX3000_characterization_specification.docx",
-  "built": "2026-10-08T21:47:18",
+  "built": "2026-10-10T15:53:45",
   "source_of_truth": "https://claude.ai/code/artifact/20fd839b-0e95-4210-9e8f-959da07ce6c2",
   "elements": [
     {
@@ -47,62 +47,10 @@
       "title": "2. Parameters",
       "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
       "asserts": {
-        "noise_station_count": 9,
-        "shape_station_count": 5,
-        "reduced_station_count": 3,
-        "zstep_rung_count": 6,
-        "registration_poses": 30,
-        "z_range_mm": "400–1600",
-        "feature_diameters_mm": "7.0, 19.7, 55.8",
-        "station_ladder_mm": "400, 476, 566, 673, 800, 951, 1131, 1345, 1600",
-        "feature_count": 3,
-        "gap_small_mm": 15,
-        "gap_large_mm": 60,
-        "detection_zero_trials": 300,
-        "registration_residual_accept_mm": "0.15"
+        "z_range_mm": "400–1600"
       },
       "refs": [
-        "Section 10",
-        "Section 11.2",
-        "Section 12",
-        "Section 13",
-        "Section 3.1",
-        "Section 3.2",
-        "Step 4.4",
-        "Step 4.5",
-        "Step 4.8"
-      ]
-    },
-    {
-      "id": "Table 2",
-      "kind": "table",
-      "section": "§2",
-      "caption": "Name",
-      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
-      "asserts": {
-        "noise_station_count": 9,
-        "shape_station_count": 5,
-        "reduced_station_count": 3,
-        "zstep_rung_count": 6,
-        "registration_poses": 30,
-        "feature_diameters_mm": "7.0, 19.7, 55.8",
-        "station_ladder_mm": "400, 476, 566, 673, 800, 951, 1131, 1345, 1600",
-        "feature_count": 3,
-        "gap_small_mm": 15,
-        "gap_large_mm": 60,
-        "detection_zero_trials": 300,
-        "registration_residual_accept_mm": "0.15"
-      },
-      "refs": [
-        "Section 10",
-        "Section 11.2",
-        "Section 12",
-        "Section 13",
-        "Section 3.1",
-        "Section 3.2",
-        "Step 4.4",
-        "Step 4.5",
-        "Step 4.8"
+        "Step 4.5"
       ]
     },
     {
@@ -124,7 +72,7 @@
       "refs": []
     },
     {
-      "id": "Table 3",
+      "id": "Table 2",
       "kind": "table",
       "section": "§3.1",
       "caption": "Item",
@@ -151,7 +99,7 @@
       ]
     },
     {
-      "id": "Table 4",
+      "id": "Table 3",
       "kind": "table",
       "section": "§3.2",
       "caption": "ID",
@@ -192,7 +140,6 @@
       "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
       "asserts": {},
       "refs": [
-        "Section 2",
         "Section 4",
         "Section 9"
       ]
@@ -212,7 +159,6 @@
         "Section 1",
         "Section 10",
         "Section 15",
-        "Section 2",
         "Section 9",
         "Step 4.7",
         "Step 4.8"
@@ -237,7 +183,6 @@
       },
       "refs": [
         "Section 10",
-        "Section 2",
         "Section 9",
         "Step 4.1",
         "Step 4.2",
@@ -305,12 +250,11 @@
         "total_frames": "42,920"
       },
       "refs": [
-        "Section 2",
         "Section 4"
       ]
     },
     {
-      "id": "Table 5",
+      "id": "Table 4",
       "kind": "table",
       "section": "§9",
       "caption": "Series",
@@ -420,7 +364,7 @@
       ]
     },
     {
-      "id": "Table 6",
+      "id": "Table 5",
       "kind": "table",
       "section": "§15",
       "caption": "Source",
@@ -438,6 +382,71 @@
         "Section 5",
         "Step 4.4",
         "Step 4.7"
+      ]
+    },
+    {
+      "id": "Appendix A. Parameters",
+      "kind": "section",
+      "title": "Appendix A. Parameters",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {
+        "noise_station_count": 9,
+        "shape_station_count": 5,
+        "reduced_station_count": 3,
+        "zstep_rung_count": 6,
+        "registration_poses": 30,
+        "z_range_mm": "400–1600",
+        "feature_diameters_mm": "7.0, 19.7, 55.8",
+        "station_ladder_mm": "400, 476, 566, 673, 800, 951, 1131, 1345, 1600",
+        "feature_count": 3,
+        "gap_small_mm": 15,
+        "gap_large_mm": 60,
+        "detection_zero_trials": 300,
+        "registration_residual_accept_mm": "0.15"
+      },
+      "refs": [
+        "Section 10",
+        "Section 11.2",
+        "Section 12",
+        "Section 13",
+        "Section 2",
+        "Section 3.1",
+        "Section 3.2",
+        "Step 4.4",
+        "Step 4.5",
+        "Step 4.8"
+      ]
+    },
+    {
+      "id": "Table 6",
+      "kind": "table",
+      "section": "Appendix A. Parameters",
+      "caption": "Name",
+      "source": "Claude Docs 20fd839b-0e95-4210-9e8f-959da07ce6c2 (live document; edited through the connector)",
+      "asserts": {
+        "noise_station_count": 9,
+        "shape_station_count": 5,
+        "reduced_station_count": 3,
+        "zstep_rung_count": 6,
+        "registration_poses": 30,
+        "feature_diameters_mm": "7.0, 19.7, 55.8",
+        "station_ladder_mm": "400, 476, 566, 673, 800, 951, 1131, 1345, 1600",
+        "feature_count": 3,
+        "gap_small_mm": 15,
+        "gap_large_mm": 60,
+        "detection_zero_trials": 300,
+        "registration_residual_accept_mm": "0.15"
+      },
+      "refs": [
+        "Section 10",
+        "Section 11.2",
+        "Section 12",
+        "Section 13",
+        "Section 3.1",
+        "Section 3.2",
+        "Step 4.4",
+        "Step 4.5",
+        "Step 4.8"
       ]
     }
   ],
